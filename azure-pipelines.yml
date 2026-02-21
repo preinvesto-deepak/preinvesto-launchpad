@@ -1,0 +1,59 @@
+trigger:
+  branches:
+    include:
+      - main
+      - master
+
+pr:
+  branches:
+    include:
+      - main
+      - master
+
+pool:
+  vmImage: "ubuntu-latest"
+
+variables:
+  nodeVersion: "18.x"
+  # change this if your build output is build/ (CRA) or out/ (Next export)
+  buildOutputDir: "dist"
+  artifactName: "web-build"
+
+steps:
+  - checkout: self
+    clean: true
+
+  - task: NodeTool@0
+    displayName: "Use Node.js $(nodeVersion)"
+    inputs:
+      versionSpec: "$(nodeVersion)"
+
+  - script: |
+      node --version
+      npm --version
+    displayName: "Show Node/NPM versions"
+
+  - script: |
+      npm ci
+    displayName: "Install dependencies (npm ci)"
+
+  - script: |
+      npm run build
+    displayName: "Build (npm run build)"
+
+  # Zip the build output into a single file (web-build.zip)
+  - task: ArchiveFiles@2
+    displayName: "Zip build output"
+    inputs:
+      rootFolderOrFile: "$(Build.SourcesDirectory)/$(buildOutputDir)"
+      includeRootFolder: false
+      archiveType: "zip"
+      archiveFile: "$(Build.ArtifactStagingDirectory)/$(artifactName).zip"
+      replaceExistingArchive: true
+
+  # Publish the zip as a pipeline artifact
+  - task: PublishPipelineArtifact@1
+    displayName: "Publish zip artifact"
+    inputs:
+      targetPath: "$(Build.ArtifactStagingDirectory)/$(artifactName).zip"
+      artifact: "$(artifactName)"
