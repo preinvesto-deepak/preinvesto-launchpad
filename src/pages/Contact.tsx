@@ -3,14 +3,16 @@ import Layout from "@/components/layout/Layout";
 import SEO, { localBusinessSchema, breadcrumbSchema } from "@/components/SEO";
 import { motion } from "framer-motion";
 import { BRAND } from "@/data/content";
-import { MapPin, Phone, Mail, MessageCircle, Send, ExternalLink } from "lucide-react";
+import { MapPin, Phone, Mail, MessageCircle, Send, ExternalLink, Loader2 } from "lucide-react";
+import { submitContactForm } from "@/lib/contactApi";
 
 const Contact = () => {
   const [form, setForm] = useState({ name: "", email: "", phone: "", service: "", message: "" });
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
@@ -23,10 +25,23 @@ const Contact = () => {
       return;
     }
 
-    // Placeholder submission
-    setSubmitted(true);
-    setForm({ name: "", email: "", phone: "", service: "", message: "" });
-    setTimeout(() => setSubmitted(false), 5000);
+    setLoading(true);
+    try {
+      await submitContactForm({
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        service: form.service,
+        message: form.message,
+      });
+      setSubmitted(true);
+      setForm({ name: "", email: "", phone: "", service: "", message: "" });
+      setTimeout(() => setSubmitted(false), 5000);
+    } catch (err: any) {
+      setError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -63,7 +78,7 @@ const Contact = () => {
 
               {submitted && (
                 <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6 text-green-800 text-sm">
-                  Thank you! We'll get back to you within 24 hours.
+                  Thank you! Your message has been sent. We'll get back to you within 24 hours.
                 </div>
               )}
               {error && (
@@ -102,8 +117,8 @@ const Contact = () => {
                   <label htmlFor="message" className="block text-sm font-medium text-foreground mb-1.5">Message *</label>
                   <textarea id="message" required maxLength={1000} rows={5} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} className="w-full px-4 py-3 rounded-lg border border-input bg-background text-foreground text-sm focus:ring-2 focus:ring-accent/30 focus:border-accent outline-none transition resize-none" placeholder="Tell us about your project requirements..." />
                 </div>
-                <button type="submit" className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-accent text-accent-foreground font-semibold rounded-lg hover:opacity-90 transition-opacity">
-                  <Send className="w-4 h-4" /> Send Message
+                <button type="submit" disabled={loading} className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-accent text-accent-foreground font-semibold rounded-lg hover:opacity-90 transition-opacity disabled:opacity-60">
+                  {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</> : <><Send className="w-4 h-4" /> Send Message</>}
                 </button>
               </form>
             </motion.div>
@@ -145,7 +160,6 @@ const Contact = () => {
                 </div>
               </div>
 
-              {/* WhatsApp CTA */}
               <a
                 href={BRAND.whatsappLink}
                 target="_blank"
@@ -155,7 +169,6 @@ const Contact = () => {
                 <MessageCircle className="w-5 h-5" /> Chat on WhatsApp
               </a>
 
-              {/* Google Maps Embed */}
               <div className="rounded-xl overflow-hidden border border-border">
                 <iframe
                   title="Preinvesto Interiors Location on Google Maps"
