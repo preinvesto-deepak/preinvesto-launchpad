@@ -5,7 +5,7 @@ import { BRAND } from "@/data/content";
 import { submitContactForm } from "@/lib/contactApi";
 
 const ContactTeaser = () => {
-  const [form, setForm] = useState({ name: "", phone: "", message: "" });
+  const [form, setForm] = useState({ name: "", email: "", phone: "", message: "" });
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -18,11 +18,12 @@ const ContactTeaser = () => {
     try {
       await submitContactForm({
         name: form.name,
+        email: form.email,
         phone: form.phone,
         message: form.message,
       });
       setSubmitted(true);
-      setForm({ name: "", phone: "", message: "" });
+      setForm({ name: "", email: "", phone: "", message: "" });
       setTimeout(() => setSubmitted(false), 3000);
     } catch (err: any) {
       setError(err.message || "Something went wrong. Please try again.");
@@ -79,6 +80,19 @@ const ContactTeaser = () => {
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 className="w-full px-4 py-3 rounded-lg border border-input bg-background text-foreground text-sm focus:ring-2 focus:ring-accent/30 focus:border-accent outline-none transition"
                 placeholder="Your name"
+              />
+            </div>
+            <div>
+              <label htmlFor="teaser-email" className="block text-sm font-medium text-foreground mb-1.5">Email</label>
+              <input
+                id="teaser-email"
+                type="email"
+                required
+                maxLength={255}
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                className="w-full px-4 py-3 rounded-lg border border-input bg-background text-foreground text-sm focus:ring-2 focus:ring-accent/30 focus:border-accent outline-none transition"
+                placeholder="you@email.com"
               />
             </div>
             <div>
