@@ -1,18 +1,34 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Send, MessageCircle } from "lucide-react";
+import { Send, MessageCircle, Loader2 } from "lucide-react";
 import { BRAND } from "@/data/content";
+import { submitContactForm } from "@/lib/contactApi";
 
 const ContactTeaser = () => {
   const [form, setForm] = useState({ name: "", phone: "", message: "" });
   const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Placeholder - would connect to backend
-    setSubmitted(true);
-    setTimeout(() => setSubmitted(false), 3000);
-    setForm({ name: "", phone: "", message: "" });
+    setError("");
+    setLoading(true);
+
+    try {
+      await submitContactForm({
+        name: form.name,
+        phone: form.phone,
+        message: form.message,
+      });
+      setSubmitted(true);
+      setForm({ name: "", phone: "", message: "" });
+      setTimeout(() => setSubmitted(false), 3000);
+    } catch (err: any) {
+      setError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -47,6 +63,11 @@ const ContactTeaser = () => {
           </div>
 
           <form onSubmit={handleSubmit} className="bg-card rounded-xl p-8 shadow-sm border border-border space-y-5">
+            {error && (
+              <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3 text-destructive text-sm">
+                {error}
+              </div>
+            )}
             <div>
               <label htmlFor="teaser-name" className="block text-sm font-medium text-foreground mb-1.5">Name</label>
               <input
@@ -88,9 +109,10 @@ const ContactTeaser = () => {
             </div>
             <button
               type="submit"
-              className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-accent text-accent-foreground font-semibold rounded-lg hover:opacity-90 transition-opacity"
+              disabled={loading}
+              className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-accent text-accent-foreground font-semibold rounded-lg hover:opacity-90 transition-opacity disabled:opacity-60"
             >
-              {submitted ? "Message Sent!" : <><Send className="w-4 h-4" /> Send Message</>}
+              {submitted ? "Message Sent!" : loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</> : <><Send className="w-4 h-4" /> Send Message</>}
             </button>
           </form>
         </div>
