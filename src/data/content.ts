@@ -13,6 +13,7 @@ export const BRAND = {
   name: "Preinvesto Interiors",
   shortName: "Preinvesto",
   phone: "+91 9030982932",
+  phone2: "+91 8985897705",
   email: "info@preinvesto.com",
   url: "https://preinvesto.com",
   whatsappLink:

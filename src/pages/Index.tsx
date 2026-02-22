@@ -3,6 +3,7 @@ import SEO, { localBusinessSchema } from "@/components/SEO";
 import Hero from "@/components/home/Hero";
 import JourneySteps from "@/components/home/JourneySteps";
 import ServicesPreview from "@/components/home/ServicesPreview";
+import VideoShowcase from "@/components/home/VideoShowcase";
 import PortfolioPreview from "@/components/home/PortfolioPreview";
 import Testimonials from "@/components/home/Testimonials";
 import TrustSection from "@/components/home/TrustSection";
@@ -19,6 +20,7 @@ const Index = () => (
     <Hero />
     <JourneySteps />
     <ServicesPreview />
+    <VideoShowcase />
     <PortfolioPreview />
     <Testimonials />
     <TrustSection />

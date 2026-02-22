@@ -83,9 +83,14 @@ const Footer = () => (
             </div>
             <div className="flex gap-3 items-center">
               <Phone className="w-4 h-4 text-accent flex-shrink-0" />
-              <a href={`tel:${BRAND.phone}`} className="text-sm text-primary-foreground/70 hover:text-accent transition-colors">
-                {BRAND.phone}
-              </a>
+              <div className="flex flex-col gap-1">
+                <a href={`tel:${BRAND.phone}`} className="text-sm text-primary-foreground/70 hover:text-accent transition-colors">
+                  {BRAND.phone}
+                </a>
+                <a href={`tel:${BRAND.phone2}`} className="text-sm text-primary-foreground/70 hover:text-accent transition-colors">
+                  {BRAND.phone2}
+                </a>
+              </div>
             </div>
             <div className="flex gap-3 items-center">
               <Mail className="w-4 h-4 text-accent flex-shrink-0" />
