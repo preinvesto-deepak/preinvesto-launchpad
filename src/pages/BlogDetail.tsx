@@ -46,13 +46,13 @@ const BlogDetail = () => {
         ]}
       />
 
-      <section className="pt-32 pb-12 bg-primary text-primary-foreground">
+      <section className="pt-28 pb-8 bg-primary text-primary-foreground">
         <div className="container max-w-3xl">
-          <Link to="/blog" className="inline-flex items-center gap-1 text-accent text-sm mb-6 hover:underline">
+          <Link to="/blog" className="inline-flex items-center gap-1 text-accent text-sm mb-3 hover:underline">
             <ArrowLeft className="w-4 h-4" /> Back to Blog
           </Link>
-          <span className="text-xs text-accent font-medium tracking-wider uppercase block mb-2">{post.category}</span>
-          <h1 className="font-display text-3xl sm:text-4xl font-bold mb-4">{post.title}</h1>
+          <span className="text-xs text-accent font-medium tracking-wider uppercase block mb-1">{post.category}</span>
+          <h1 className="font-display text-2xl sm:text-3xl font-bold leading-tight mb-3">{post.title}</h1>
           <div className="flex items-center gap-4 text-sm text-primary-foreground/60">
             <span className="flex items-center gap-1"><CalendarDays className="w-4 h-4" /> {post.date}</span>
             <span className="flex items-center gap-1"><Clock className="w-4 h-4" /> {post.readTime}</span>

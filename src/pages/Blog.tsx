@@ -29,10 +29,10 @@ const Blog = () => {
         ])}
       />
 
-      <section className="relative pt-32 pb-20 bg-primary text-primary-foreground">
+      <section className="relative pt-28 pb-10 bg-primary text-primary-foreground">
         <div className="container">
-          <p className="text-accent font-medium tracking-widest uppercase text-sm mb-3">Blog</p>
-          <h1 className="font-display text-4xl sm:text-5xl font-bold">Insights & Inspiration</h1>
+          <p className="text-accent font-medium tracking-widest uppercase text-sm mb-1">Blog</p>
+          <h1 className="font-display text-2xl sm:text-3xl font-bold leading-tight">Insights & Inspiration</h1>
         </div>
       </section>
 

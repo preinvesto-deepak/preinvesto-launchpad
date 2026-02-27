@@ -56,17 +56,17 @@ const ServiceDetail = () => {
       />
 
       {/* Hero */}
-      <section className="relative pt-32 pb-20">
+      <section className="relative pt-28 pb-10">
         <div className="absolute inset-0">
           <img src={service.image} alt={service.title} className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-hero-overlay/70" />
         </div>
         <div className="container relative z-10">
-          <Link to="/services" className="text-accent text-sm mb-4 inline-block hover:underline">← All Services</Link>
-          <h1 className="font-display text-4xl sm:text-5xl font-bold text-primary-foreground mb-4">
+          <Link to="/services" className="text-accent text-sm mb-2 inline-block hover:underline">← All Services</Link>
+          <h1 className="font-display text-2xl sm:text-3xl font-bold text-primary-foreground leading-tight mb-2">
             {service.title}
           </h1>
-          <p className="text-primary-foreground/80 text-lg max-w-2xl">{service.description}</p>
+          <p className="text-primary-foreground/80 text-base max-w-2xl">{service.description}</p>
         </div>
       </section>
 

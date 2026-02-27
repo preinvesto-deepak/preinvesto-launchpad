@@ -28,13 +28,13 @@ const Services = () => (
       ]}
     />
 
-    <section className="relative pt-32 pb-20 bg-primary text-primary-foreground">
+    <section className="relative pt-28 pb-10 bg-primary text-primary-foreground">
       <div className="container">
-        <p className="text-accent font-medium tracking-widest uppercase text-sm mb-3">Our Services</p>
-        <h1 className="font-display text-4xl sm:text-5xl font-bold mb-4">
+        <p className="text-accent font-medium tracking-widest uppercase text-sm mb-1">Our Services</p>
+        <h1 className="font-display text-2xl sm:text-3xl font-bold leading-tight mb-2">
           Complete Home Solutions in Hyderabad
         </h1>
-        <p className="text-primary-foreground/70 text-lg max-w-2xl">
+        <p className="text-primary-foreground/70 text-base max-w-2xl">
           From finding the perfect property to designing stunning interiors, we handle every step of your home journey.
         </p>
       </div>
