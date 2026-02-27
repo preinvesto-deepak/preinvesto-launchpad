@@ -11,8 +11,8 @@ import ScrollToTop from "./components/ScrollToTop";
 const About = lazy(() => import("./pages/About"));
 const Services = lazy(() => import("./pages/Services"));
 const ServiceDetail = lazy(() => import("./pages/ServiceDetail"));
-const Portfolio = lazy(() => import("./pages/Portfolio"));
-const PortfolioDetail = lazy(() => import("./pages/PortfolioDetail"));
+const PortfolioListing = lazy(() => import("./pages/PortfolioListing"));
+const PortfolioProject = lazy(() => import("./pages/PortfolioProject"));
 const Blog = lazy(() => import("./pages/Blog"));
 const BlogDetail = lazy(() => import("./pages/BlogDetail"));
 const Gallery = lazy(() => import("./pages/Gallery"));
@@ -39,8 +39,8 @@ const App = () => (
             <Route path="/about" element={<About />} />
             <Route path="/services" element={<Services />} />
             <Route path="/services/:slug" element={<ServiceDetail />} />
-            <Route path="/portfolio" element={<Portfolio />} />
-            <Route path="/portfolio/:slug" element={<PortfolioDetail />} />
+            <Route path="/portfolio" element={<PortfolioListing />} />
+            <Route path="/portfolio/:category/:projectSlug" element={<PortfolioProject />} />
             <Route path="/blog" element={<Blog />} />
             <Route path="/blog/:slug" element={<BlogDetail />} />
             <Route path="/gallery" element={<Gallery />} />
