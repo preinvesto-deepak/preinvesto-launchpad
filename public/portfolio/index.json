@@ -4,5 +4,174 @@
     "construction",
     "commercial"
   ],
-  "projects": []
+  "projects": [
+    {
+      "category": "interiors",
+      "slug": "contemporary-bathroom",
+      "displayName": "Contemporary Bathroom",
+      "coverImage": "/portfolio/interiors/contemporary-bathroom/featured.jpg",
+      "featuredImage": "/portfolio/interiors/contemporary-bathroom/featured.jpg",
+      "summaryVideo": null,
+      "galleryImages": [
+        "/portfolio/interiors/contemporary-bathroom/image1.jpg",
+        "/portfolio/interiors/contemporary-bathroom/image2.jpg",
+        "/portfolio/interiors/contemporary-bathroom/image3.jpg",
+        "/portfolio/interiors/contemporary-bathroom/image4.jpg"
+      ]
+    },
+    {
+      "category": "interiors",
+      "slug": "luxury-kitchen",
+      "displayName": "Luxury Kitchen",
+      "coverImage": "/portfolio/interiors/luxury-kitchen/featured.jpg",
+      "featuredImage": "/portfolio/interiors/luxury-kitchen/featured.jpg",
+      "summaryVideo": null,
+      "galleryImages": [
+        "/portfolio/interiors/luxury-kitchen/image1.jpg",
+        "/portfolio/interiors/luxury-kitchen/image2.jpg",
+        "/portfolio/interiors/luxury-kitchen/image3.jpg",
+        "/portfolio/interiors/luxury-kitchen/image4.jpg"
+      ]
+    },
+    {
+      "category": "interiors",
+      "slug": "minimal-bedroom",
+      "displayName": "Minimal Bedroom",
+      "coverImage": "/portfolio/interiors/minimal-bedroom/featured.jpg",
+      "featuredImage": "/portfolio/interiors/minimal-bedroom/featured.jpg",
+      "summaryVideo": null,
+      "galleryImages": [
+        "/portfolio/interiors/minimal-bedroom/image1.jpg",
+        "/portfolio/interiors/minimal-bedroom/image2.jpg",
+        "/portfolio/interiors/minimal-bedroom/image3.jpg",
+        "/portfolio/interiors/minimal-bedroom/image4.jpg"
+      ]
+    },
+    {
+      "category": "interiors",
+      "slug": "modern-living-room",
+      "displayName": "Modern Living Room",
+      "coverImage": "/portfolio/interiors/modern-living-room/featured.jpg",
+      "featuredImage": "/portfolio/interiors/modern-living-room/featured.jpg",
+      "summaryVideo": null,
+      "galleryImages": [
+        "/portfolio/interiors/modern-living-room/image1.jpg",
+        "/portfolio/interiors/modern-living-room/image2.jpg",
+        "/portfolio/interiors/modern-living-room/image3.jpg",
+        "/portfolio/interiors/modern-living-room/image4.jpg"
+      ]
+    },
+    {
+      "category": "construction",
+      "slug": "apartment-complex",
+      "displayName": "Apartment Complex",
+      "coverImage": "/portfolio/construction/apartment-complex/featured.jpg",
+      "featuredImage": "/portfolio/construction/apartment-complex/featured.jpg",
+      "summaryVideo": null,
+      "galleryImages": [
+        "/portfolio/construction/apartment-complex/image1.jpg",
+        "/portfolio/construction/apartment-complex/image2.jpg",
+        "/portfolio/construction/apartment-complex/image3.jpg",
+        "/portfolio/construction/apartment-complex/image4.jpg"
+      ]
+    },
+    {
+      "category": "construction",
+      "slug": "farmhouse-build",
+      "displayName": "Farmhouse Build",
+      "coverImage": "/portfolio/construction/farmhouse-build/featured.jpg",
+      "featuredImage": "/portfolio/construction/farmhouse-build/featured.jpg",
+      "summaryVideo": null,
+      "galleryImages": [
+        "/portfolio/construction/farmhouse-build/image1.jpg",
+        "/portfolio/construction/farmhouse-build/image2.jpg",
+        "/portfolio/construction/farmhouse-build/image3.jpg",
+        "/portfolio/construction/farmhouse-build/image4.jpg"
+      ]
+    },
+    {
+      "category": "construction",
+      "slug": "residential-tower",
+      "displayName": "Residential Tower",
+      "coverImage": "/portfolio/construction/residential-tower/featured.jpg",
+      "featuredImage": "/portfolio/construction/residential-tower/featured.jpg",
+      "summaryVideo": null,
+      "galleryImages": [
+        "/portfolio/construction/residential-tower/image1.jpg",
+        "/portfolio/construction/residential-tower/image2.jpg",
+        "/portfolio/construction/residential-tower/image3.jpg",
+        "/portfolio/construction/residential-tower/image4.jpg"
+      ]
+    },
+    {
+      "category": "construction",
+      "slug": "villa-construction",
+      "displayName": "Villa Construction",
+      "coverImage": "/portfolio/construction/villa-construction/featured.jpg",
+      "featuredImage": "/portfolio/construction/villa-construction/featured.jpg",
+      "summaryVideo": null,
+      "galleryImages": [
+        "/portfolio/construction/villa-construction/image1.jpg",
+        "/portfolio/construction/villa-construction/image2.jpg",
+        "/portfolio/construction/villa-construction/image3.jpg",
+        "/portfolio/construction/villa-construction/image4.jpg"
+      ]
+    },
+    {
+      "category": "commercial",
+      "slug": "coworking-space",
+      "displayName": "Coworking Space",
+      "coverImage": "/portfolio/commercial/coworking-space/featured.jpg",
+      "featuredImage": "/portfolio/commercial/coworking-space/featured.jpg",
+      "summaryVideo": null,
+      "galleryImages": [
+        "/portfolio/commercial/coworking-space/image1.jpg",
+        "/portfolio/commercial/coworking-space/image2.jpg",
+        "/portfolio/commercial/coworking-space/image3.jpg",
+        "/portfolio/commercial/coworking-space/image4.jpg"
+      ]
+    },
+    {
+      "category": "commercial",
+      "slug": "office-fitout",
+      "displayName": "Office Fitout",
+      "coverImage": "/portfolio/commercial/office-fitout/featured.jpg",
+      "featuredImage": "/portfolio/commercial/office-fitout/featured.jpg",
+      "summaryVideo": null,
+      "galleryImages": [
+        "/portfolio/commercial/office-fitout/image1.jpg",
+        "/portfolio/commercial/office-fitout/image2.jpg",
+        "/portfolio/commercial/office-fitout/image3.jpg",
+        "/portfolio/commercial/office-fitout/image4.jpg"
+      ]
+    },
+    {
+      "category": "commercial",
+      "slug": "restaurant-interior",
+      "displayName": "Restaurant Interior",
+      "coverImage": "/portfolio/commercial/restaurant-interior/featured.jpg",
+      "featuredImage": "/portfolio/commercial/restaurant-interior/featured.jpg",
+      "summaryVideo": null,
+      "galleryImages": [
+        "/portfolio/commercial/restaurant-interior/image1.jpg",
+        "/portfolio/commercial/restaurant-interior/image2.jpg",
+        "/portfolio/commercial/restaurant-interior/image3.jpg",
+        "/portfolio/commercial/restaurant-interior/image4.jpg"
+      ]
+    },
+    {
+      "category": "commercial",
+      "slug": "retail-showroom",
+      "displayName": "Retail Showroom",
+      "coverImage": "/portfolio/commercial/retail-showroom/featured.jpg",
+      "featuredImage": "/portfolio/commercial/retail-showroom/featured.jpg",
+      "summaryVideo": null,
+      "galleryImages": [
+        "/portfolio/commercial/retail-showroom/image1.jpg",
+        "/portfolio/commercial/retail-showroom/image2.jpg",
+        "/portfolio/commercial/retail-showroom/image3.jpg",
+        "/portfolio/commercial/retail-showroom/image4.jpg"
+      ]
+    }
+  ]
 }
