@@ -37,40 +37,41 @@ const PortfolioListing = () => {
           <p className="text-accent font-medium tracking-widest uppercase text-sm mb-1">
             Portfolio
           </p>
-          <h1 className="font-display text-2xl sm:text-3xl font-bold leading-tight">
-            Our Projects
-          </h1>
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <h1 className="font-display text-2xl sm:text-3xl font-bold leading-tight">
+              Our Projects
+            </h1>
+            <div className="flex flex-wrap gap-2 justify-start md:justify-end">
+              <button
+                onClick={() => setActive("all")}
+                className={`px-5 py-2 rounded-full text-sm font-medium transition-colors ${
+                  active === "all"
+                    ? "bg-accent text-accent-foreground"
+                    : "bg-primary-foreground/10 text-primary-foreground/80 hover:bg-primary-foreground/20"
+                }`}
+              >
+                All
+              </button>
+              {categories.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setActive(cat)}
+                  className={`px-5 py-2 rounded-full text-sm font-medium transition-colors ${
+                    active === cat
+                      ? "bg-accent text-accent-foreground"
+                      : "bg-primary-foreground/10 text-primary-foreground/80 hover:bg-primary-foreground/20"
+                  }`}
+                >
+                  {toLabel(cat)}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
 
       <section className="py-20 bg-background">
         <div className="container">
-          {/* Category tabs */}
-          <div className="flex flex-wrap gap-3 mb-12">
-            <button
-              onClick={() => setActive("all")}
-              className={`px-5 py-2 rounded-full text-sm font-medium transition-colors ${
-                active === "all"
-                  ? "bg-accent text-accent-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-border"
-              }`}
-            >
-              All
-            </button>
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setActive(cat)}
-                className={`px-5 py-2 rounded-full text-sm font-medium transition-colors ${
-                  active === cat
-                    ? "bg-accent text-accent-foreground"
-                    : "bg-muted text-muted-foreground hover:bg-border"
-                }`}
-              >
-                {toLabel(cat)}
-              </button>
-            ))}
-          </div>
 
           {isLoading && (
             <div className="flex justify-center py-20">
