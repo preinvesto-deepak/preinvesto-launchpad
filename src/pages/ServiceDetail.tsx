@@ -56,19 +56,46 @@ const ServiceDetail = () => {
       />
 
       {/* Hero */}
-      <section className="relative pt-28 pb-10">
-        <div className="absolute inset-0">
-          <img src={service.image} alt={service.title} className="w-full h-full object-cover" />
-          <div className="absolute inset-0 bg-hero-overlay/70" />
-        </div>
-        <div className="container relative z-10">
-          <Link to="/services" className="text-accent text-sm mb-2 inline-block hover:underline">← All Services</Link>
-          <h1 className="font-display text-2xl sm:text-3xl font-bold text-primary-foreground leading-tight mb-2">
-            {service.title}
-          </h1>
-          <p className="text-primary-foreground/80 text-base max-w-2xl">{service.description}</p>
-        </div>
-      </section>
+      {isPropertySearch ? (
+        <section className="relative pt-20 pb-4 bg-primary text-primary-foreground">
+          <div className="container">
+            <Link to="/services" className="text-accent text-sm mb-1 inline-block hover:underline">← All Services</Link>
+            <h1 className="font-display text-lg sm:text-xl font-bold leading-tight">
+              {service.title}
+            </h1>
+          </div>
+        </section>
+      ) : (
+        <section className="relative pt-28 pb-10">
+          <div className="absolute inset-0">
+            <img src={service.image} alt={service.title} className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-hero-overlay/70" />
+          </div>
+          <div className="container relative z-10">
+            <Link to="/services" className="text-accent text-sm mb-2 inline-block hover:underline">← All Services</Link>
+            <h1 className="font-display text-2xl sm:text-3xl font-bold text-primary-foreground leading-tight mb-2">
+              {service.title}
+            </h1>
+            <p className="text-primary-foreground/80 text-base max-w-2xl">{service.description}</p>
+          </div>
+        </section>
+      )}
+
+      {/* PowerBI embed for property search — TOP position */}
+      {isPropertySearch && (
+        <section className="bg-background">
+          <div className="w-full">
+            <iframe
+              title="Preinvesto Property Search Dashboard"
+              src={POWERBI_URL}
+              className="w-full border-0"
+              style={{ height: "clamp(600px, 85vh, 950px)" }}
+              allowFullScreen
+              loading="lazy"
+            />
+          </div>
+        </section>
+      )}
 
       {/* Features */}
       <section className="py-20 bg-background">
@@ -93,25 +120,6 @@ const ServiceDetail = () => {
           </div>
         </div>
       </section>
-
-      {/* PowerBI embed for property search */}
-      {isPropertySearch && (
-        <section className="py-20 bg-section-alt">
-          <div className="container">
-            <h2 className="font-display text-3xl font-bold text-foreground mb-4">Explore Affordable Options</h2>
-            <p className="text-muted-foreground mb-8">Browse through our curated property listings with detailed analytics and pricing insights.</p>
-            <div className="relative w-full rounded-xl overflow-hidden border border-border bg-card" style={{ paddingBottom: "56.25%" }}>
-              <iframe
-                title="Preinvesto Property Search Dashboard"
-                src={POWERBI_URL}
-                className="absolute inset-0 w-full h-full"
-                allowFullScreen
-                loading="lazy"
-              />
-            </div>
-          </div>
-        </section>
-      )}
 
       {/* FAQs */}
       <section className="py-20 bg-section-alt">
