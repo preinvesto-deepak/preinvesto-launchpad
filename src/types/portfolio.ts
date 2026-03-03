@@ -2,6 +2,7 @@ export interface PortfolioProject {
   category: string;
   slug: string;
   displayName: string;
+  priority?: number;
   coverImage: string | null;
   featuredImage: string | null;
   summaryVideo: string | null;
