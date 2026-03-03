@@ -119,10 +119,10 @@ const PortfolioProject = () => {
       {/* Featured media + text */}
       <section className="py-16 bg-background">
         <div className="container">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
             {/* Media */}
             <div
-              className="rounded-xl overflow-hidden bg-black/90 flex items-center justify-center"
+              className="rounded-xl overflow-hidden bg-black/90 flex items-center justify-center max-h-[60vh] lg:max-h-[480px]"
               style={{ aspectRatio: project.summaryVideo ? (isPortrait ? '9/16' : '16/9') : '16/9' }}
             >
               {project.summaryVideo ? (
