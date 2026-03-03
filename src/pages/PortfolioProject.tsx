@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import Layout from "@/components/layout/Layout";
 import SEO, { breadcrumbSchema } from "@/components/SEO";
@@ -17,6 +17,12 @@ const PortfolioProject = () => {
   }>();
   const { data, isLoading } = usePortfolioIndex();
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
+  const [isPortrait, setIsPortrait] = useState(false);
+
+  const handleVideoMetadata = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const v = e.currentTarget;
+    setIsPortrait(v.videoHeight > v.videoWidth);
+  }, []);
 
   const project = data?.projects.find(
     (p) => p.category === category && p.slug === projectSlug
@@ -115,20 +121,28 @@ const PortfolioProject = () => {
         <div className="container">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start">
             {/* Media */}
-            <div className="rounded-xl overflow-hidden bg-muted">
+            <div
+              className="rounded-xl overflow-hidden bg-black/90 flex items-center justify-center"
+              style={{ aspectRatio: project.summaryVideo ? (isPortrait ? '9/16' : '16/9') : '16/9' }}
+            >
               {project.summaryVideo ? (
                 <video
                   src={project.summaryVideo}
                   poster={videoPoster}
                   controls
+                  autoPlay
+                  muted
+                  playsInline
+                  loop
                   preload="metadata"
-                  className="w-full aspect-video object-cover"
+                  onLoadedMetadata={handleVideoMetadata}
+                  className="w-full h-full object-contain"
                 />
               ) : featuredMedia ? (
                 <img
                   src={featuredMedia}
                   alt={project.displayName}
-                  className="w-full aspect-video object-cover"
+                  className="w-full h-full object-contain"
                 />
               ) : null}
             </div>
