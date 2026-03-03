@@ -36,7 +36,8 @@
     {
       "category": "interiors",
       "slug": "minimal-bedroom",
-      "displayName": "Minimal Bedroom",
+      "displayName": "Aparna Sarovar Zenith",
+      "priority": 1,
       "coverImage": "/portfolio/interiors/minimal-bedroom/featured.jpg",
       "featuredImage": "/portfolio/interiors/minimal-bedroom/featured.jpg",
       "summaryVideo": "/portfolio/interiors/minimal-bedroom/summary.mp4",

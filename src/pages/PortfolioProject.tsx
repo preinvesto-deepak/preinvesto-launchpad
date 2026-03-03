@@ -24,6 +24,11 @@ const PortfolioProject = () => {
     setIsPortrait(v.videoHeight > v.videoWidth);
   }, []);
 
+  const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
+    setIsPortrait(img.naturalHeight > img.naturalWidth);
+  }, []);
+
   const project = data?.projects.find(
     (p) => p.category === category && p.slug === projectSlug
   );
@@ -119,11 +124,15 @@ const PortfolioProject = () => {
       {/* Featured media + text */}
       <section className="py-16 bg-background">
         <div className="container">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+          <div className={`grid grid-cols-1 gap-8 items-start ${isPortrait ? 'lg:grid-cols-[2fr_3fr]' : 'lg:grid-cols-2'}`}>
             {/* Media */}
             <div
-              className="rounded-xl overflow-hidden bg-black/90 flex items-center justify-center max-h-[60vh] lg:max-h-[480px]"
-              style={{ aspectRatio: project.summaryVideo ? (isPortrait ? '9/16' : '16/9') : '16/9' }}
+              className={`rounded-xl overflow-hidden bg-black/90 flex items-center justify-center ${
+                isPortrait
+                  ? 'max-h-[50vh] lg:max-h-[400px]'
+                  : 'max-h-[60vh] lg:max-h-[480px]'
+              }`}
+              style={{ aspectRatio: isPortrait ? '9/16' : '16/9' }}
             >
               {project.summaryVideo ? (
                 <video
@@ -136,13 +145,14 @@ const PortfolioProject = () => {
                   loop
                   preload="metadata"
                   onLoadedMetadata={handleVideoMetadata}
-                  className="w-full h-full object-contain"
+                  className="w-full h-full object-contain object-center"
                 />
               ) : featuredMedia ? (
                 <img
                   src={featuredMedia}
                   alt={project.displayName}
-                  className="w-full h-full object-contain"
+                  className="w-full h-full object-contain object-center"
+                  onLoad={handleImageLoad}
                 />
               ) : null}
             </div>
