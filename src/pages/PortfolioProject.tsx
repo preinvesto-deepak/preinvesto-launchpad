@@ -1,9 +1,9 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import Layout from "@/components/layout/Layout";
 import SEO, { breadcrumbSchema } from "@/components/SEO";
 import { usePortfolioIndex } from "@/hooks/usePortfolioIndex";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, MapPin } from "lucide-react";
 import { motion } from "framer-motion";
 
 function toLabel(cat: string) {
@@ -84,7 +84,7 @@ const PortfolioProject = () => {
     <Layout>
       <SEO
         title={`${project.displayName} – Preinvesto Interiors`}
-        description={`${project.displayName} – a ${toLabel(project.category)} project by Preinvesto Interiors in Hyderabad.`}
+        description={`${project.displayName}${project.location ? `, ${project.location}` : ''} – a ${toLabel(project.category)} project by Preinvesto Interiors in Hyderabad.`}
         canonical={`https://preinvesto.com/portfolio/${category}/${projectSlug}`}
         jsonLd={breadcrumbSchema([
           { name: "Home", url: "https://preinvesto.com" },
@@ -118,16 +118,43 @@ const PortfolioProject = () => {
           <h1 className="font-display text-2xl sm:text-3xl font-bold leading-tight">
             {project.displayName}
           </h1>
+          {project.location && (
+            <div className="flex items-center gap-1.5 mt-2 text-primary-foreground/70 text-sm">
+              <MapPin className="w-4 h-4 text-accent" />
+              <span>{project.location}</span>
+            </div>
+          )}
         </div>
       </section>
 
-      {/* Featured media + text */}
+      {/* Featured media (RIGHT) + text (LEFT, vertically centered) */}
       <section className="py-16 bg-background">
         <div className="container">
-          <div className={`grid grid-cols-1 gap-8 items-start ${isPortrait ? 'lg:grid-cols-[2fr_3fr]' : 'lg:grid-cols-2'}`}>
-            {/* Media */}
+          <div className={`grid grid-cols-1 gap-8 items-center ${isPortrait ? 'lg:grid-cols-[3fr_2fr]' : 'lg:grid-cols-2'}`}>
+            {/* Text — left on desktop */}
+            <div className="flex flex-col justify-center lg:order-1 order-2">
+              <span className="text-accent text-xs font-medium tracking-wider uppercase mb-2">
+                {toLabel(project.category)}
+              </span>
+              <h2 className="font-display text-xl sm:text-2xl font-bold text-foreground mb-4">
+                About This Project
+              </h2>
+              <p className="text-muted-foreground leading-relaxed mb-4">
+                This {toLabel(project.category).toLowerCase()} project
+                showcases our dedication to quality craftsmanship and thoughtful
+                design. Every detail was carefully planned and executed to
+                deliver a space that is both beautiful and functional.
+              </p>
+              <p className="text-muted-foreground leading-relaxed">
+                Our team worked closely with the client to ensure the final
+                result reflects their vision while meeting the highest standards
+                of construction and finish quality.
+              </p>
+            </div>
+
+            {/* Media — right on desktop */}
             <div
-              className={`rounded-xl overflow-hidden bg-black/90 flex items-center justify-center ${
+              className={`rounded-xl overflow-hidden bg-black/90 flex items-center justify-center lg:order-2 order-1 ${
                 isPortrait
                   ? 'max-h-[50vh] lg:max-h-[400px]'
                   : 'max-h-[60vh] lg:max-h-[480px]'
@@ -155,27 +182,6 @@ const PortfolioProject = () => {
                   onLoad={handleImageLoad}
                 />
               ) : null}
-            </div>
-
-            {/* Text */}
-            <div className="flex flex-col justify-center">
-              <span className="text-accent text-xs font-medium tracking-wider uppercase mb-2">
-                {toLabel(project.category)}
-              </span>
-              <h2 className="font-display text-xl sm:text-2xl font-bold text-foreground mb-4">
-                About This Project
-              </h2>
-              <p className="text-muted-foreground leading-relaxed mb-4">
-                This {toLabel(project.category).toLowerCase()} project
-                showcases our dedication to quality craftsmanship and thoughtful
-                design. Every detail was carefully planned and executed to
-                deliver a space that is both beautiful and functional.
-              </p>
-              <p className="text-muted-foreground leading-relaxed">
-                Our team worked closely with the client to ensure the final
-                result reflects their vision while meeting the highest standards
-                of construction and finish quality.
-              </p>
             </div>
           </div>
         </div>
