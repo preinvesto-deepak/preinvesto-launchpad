@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
@@ -40,6 +40,11 @@ const App = () => (
             <Route path="/services" element={<Services />} />
             <Route path="/services/:slug" element={<ServiceDetail />} />
             <Route path="/portfolio" element={<PortfolioListing />} />
+            {/* Redirect old slug to new slug */}
+            <Route
+              path="/portfolio/interiors/minimal-bedroom"
+              element={<Navigate to="/portfolio/interiors/aparna-sarovar-zenith" replace />}
+            />
             <Route path="/portfolio/:category/:projectSlug" element={<PortfolioProject />} />
             <Route path="/blog" element={<Blog />} />
             <Route path="/blog/:slug" element={<BlogDetail />} />

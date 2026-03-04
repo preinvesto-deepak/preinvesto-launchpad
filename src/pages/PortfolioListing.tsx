@@ -113,6 +113,9 @@ const PortfolioListing = () => {
                     <h3 className="text-primary-foreground font-display text-lg font-semibold mt-1">
                       {item.displayName}
                     </h3>
+                    {item.location && (
+                      <p className="text-primary-foreground/60 text-xs mt-0.5">{item.location}</p>
+                    )}
                   </div>
                 </Link>
               </motion.div>
