@@ -153,13 +153,14 @@ const PortfolioProject = () => {
             </div>
 
             {/* Media — right on desktop */}
-            <div
-              className={`rounded-xl overflow-hidden bg-black/90 flex items-center justify-center lg:order-2 order-1 ${
-                isPortrait
-                  ? 'max-h-[50vh] lg:max-h-[400px]'
-                  : 'max-h-[60vh] lg:max-h-[480px]'
-              }`}
-              style={{ aspectRatio: isPortrait ? '9/16' : '16/9' }}
+            <div className="lg:order-2 order-1 flex lg:justify-end justify-center">
+              <div
+                className={`rounded-xl overflow-hidden bg-black/90 flex items-center justify-center w-full ${
+                  isPortrait
+                    ? 'max-h-[50vh] lg:max-h-[400px] lg:max-w-[85%]'
+                    : 'max-h-[60vh] lg:max-h-[480px]'
+                }`}
+                style={{ aspectRatio: isPortrait ? '9/16' : '16/9' }}
             >
               {project.summaryVideo ? (
                 <video
@@ -182,6 +183,7 @@ const PortfolioProject = () => {
                   onLoad={handleImageLoad}
                 />
               ) : null}
+              </div>
             </div>
           </div>
         </div>
@@ -194,7 +196,7 @@ const PortfolioProject = () => {
             <h2 className="font-display text-xl sm:text-2xl font-bold text-foreground mb-8">
               Project Gallery
             </h2>
-            <div className="columns-1 sm:columns-2 lg:columns-3 gap-4 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {allImages.map((src, i) => (
                 <motion.div
                   key={src}
@@ -202,7 +204,7 @@ const PortfolioProject = () => {
                   whileInView={{ opacity: 1 }}
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.05 }}
-                  className="break-inside-avoid"
+                  className=""
                 >
                   <button
                     onClick={() => openLightbox(i)}
