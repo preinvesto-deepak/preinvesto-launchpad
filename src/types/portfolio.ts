@@ -7,6 +7,7 @@ export interface PortfolioProject {
   coverImage: string | null;
   featuredImage: string | null;
   summaryVideo: string | null;
+  summaryImage: string | null;
   galleryImages: string[];
 }
 

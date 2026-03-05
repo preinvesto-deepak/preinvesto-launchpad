@@ -14,6 +14,7 @@
       "coverImage": "/portfolio/interiors/aparna-sarovar-zenith/featured.jpg",
       "featuredImage": "/portfolio/interiors/aparna-sarovar-zenith/featured.jpg",
       "summaryVideo": "/portfolio/interiors/aparna-sarovar-zenith/summary.mp4",
+      "summaryImage": null,
       "galleryImages": [
         "/portfolio/interiors/aparna-sarovar-zenith/image1.jpg",
         "/portfolio/interiors/aparna-sarovar-zenith/image2.jpg",
@@ -22,6 +23,26 @@
         "/portfolio/interiors/aparna-sarovar-zenith/image5.jpg",
         "/portfolio/interiors/aparna-sarovar-zenith/image6.jpg",
         "/portfolio/interiors/aparna-sarovar-zenith/image7.jpg"
+      ]
+    },
+    {
+      "category": "interiors",
+      "slug": "urban-orchids",
+      "displayName": "Urban Orchids",
+      "location": "Bahadurpally",
+      "priority": 2,
+      "coverImage": "/portfolio/interiors/urban-orchids/featured.jpg",
+      "featuredImage": "/portfolio/interiors/urban-orchids/featured.jpg",
+      "summaryVideo": null,
+      "summaryImage": "/portfolio/interiors/urban-orchids/summary.jpg",
+      "galleryImages": [
+        "/portfolio/interiors/urban-orchids/image1.jpg",
+        "/portfolio/interiors/urban-orchids/image2.jpg",
+        "/portfolio/interiors/urban-orchids/image3.jpg",
+        "/portfolio/interiors/urban-orchids/image4.jpg",
+        "/portfolio/interiors/urban-orchids/image5.jpg",
+        "/portfolio/interiors/urban-orchids/image6.jpg",
+        "/portfolio/interiors/urban-orchids/image7.jpg"
       ]
     }
   ]
