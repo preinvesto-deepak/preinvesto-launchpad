@@ -63,10 +63,13 @@ const PortfolioProject = () => {
 
   const featuredMedia =
     project.summaryVideo ||
+    project.summaryImage ||
     project.featuredImage ||
     project.galleryImages[0] ||
     null;
   const videoPoster = project.featuredImage || project.galleryImages[0] || undefined;
+  const hasSummaryVideo = !!project.summaryVideo;
+  const summaryImageSrc = project.summaryImage || project.featuredImage || project.galleryImages[0] || null;
   const allImages = project.galleryImages;
 
   const openLightbox = (idx: number) => setLightboxIdx(idx);
