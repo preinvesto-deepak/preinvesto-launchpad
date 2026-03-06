@@ -47,10 +47,34 @@
     },
     {
       "category": "construction",
+      "slug": "vishal-projects",
+      "displayName": "Vishal Projects",
+      "location": "Tukkuguda",
+      "priority": 1,
+      "coverImage": "/portfolio/construction/vishal-projects/featured.jpg",
+      "featuredImage": "/portfolio/construction/vishal-projects/featured.jpg",
+      "summaryVideo": "/portfolio/construction/vishal-projects/summary.mp4",
+      "summaryImage": "/portfolio/construction/vishal-projects/summary.jpg",
+      "galleryImages": []
+    },
+    {
+      "category": "construction",
+      "slug": "vasudeva-bloomfield-ecstasy",
+      "displayName": "Vasudeva Bloomfield Ecstasy",
+      "location": "Tellapur",
+      "priority": 2,
+      "coverImage": "/portfolio/construction/vasudeva-bloomfield-ecstasy/featured.jpg",
+      "featuredImage": "/portfolio/construction/vasudeva-bloomfield-ecstasy/featured.jpg",
+      "summaryVideo": "/portfolio/construction/vasudeva-bloomfield-ecstasy/summary.mp4",
+      "summaryImage": "/portfolio/construction/vasudeva-bloomfield-ecstasy/summary.jpg",
+      "galleryImages": []
+    },
+    {
+      "category": "construction",
       "slug": "urban-orchids",
       "displayName": "Urban Orchids",
       "location": "Bahadurpally",
-      "priority": 1,
+      "priority": 3,
       "coverImage": "/portfolio/construction/urban-orchids/featured.jpg",
       "featuredImage": "/portfolio/construction/urban-orchids/featured.jpg",
       "summaryVideo": "/portfolio/construction/urban-orchids/summary.mp4",
@@ -63,6 +87,90 @@
         "/portfolio/construction/urban-orchids/image5.jpg",
         "/portfolio/construction/urban-orchids/image6.jpg"
       ]
+    },
+    {
+      "category": "construction",
+      "slug": "urban-blooms",
+      "displayName": "Urban Blooms",
+      "location": "Bahadurpally",
+      "priority": 4,
+      "coverImage": "/portfolio/construction/urban-blooms/featured.jpg",
+      "featuredImage": "/portfolio/construction/urban-blooms/featured.jpg",
+      "summaryVideo": "/portfolio/construction/urban-blooms/summary.mp4",
+      "summaryImage": "/portfolio/construction/urban-blooms/summary.jpg",
+      "galleryImages": []
+    },
+    {
+      "category": "construction",
+      "slug": "green-tech-o2-community",
+      "displayName": "Green Tech O2 Community",
+      "location": "Rameswarabanda",
+      "priority": 5,
+      "coverImage": "/portfolio/construction/green-tech-o2-community/featured.jpg",
+      "featuredImage": "/portfolio/construction/green-tech-o2-community/featured.jpg",
+      "summaryVideo": "/portfolio/construction/green-tech-o2-community/summary.mp4",
+      "summaryImage": "/portfolio/construction/green-tech-o2-community/summary.jpg",
+      "galleryImages": []
+    },
+    {
+      "category": "construction",
+      "slug": "suprabatha-villas",
+      "displayName": "Suprabatha Villas",
+      "location": "Kardanur",
+      "priority": 6,
+      "coverImage": "/portfolio/construction/suprabatha-villas/featured.jpg",
+      "featuredImage": "/portfolio/construction/suprabatha-villas/featured.jpg",
+      "summaryVideo": "/portfolio/construction/suprabatha-villas/summary.mp4",
+      "summaryImage": "/portfolio/construction/suprabatha-villas/summary.jpg",
+      "galleryImages": []
+    },
+    {
+      "category": "commercial",
+      "slug": "1980s-military-hotel-nalagandla",
+      "displayName": "1980's Military Hotel",
+      "location": "Nalagandla",
+      "priority": 1,
+      "coverImage": "/portfolio/commercial/1980s-military-hotel-nalagandla/featured.jpg",
+      "featuredImage": "/portfolio/commercial/1980s-military-hotel-nalagandla/featured.jpg",
+      "summaryVideo": "/portfolio/commercial/1980s-military-hotel-nalagandla/summary.mp4",
+      "summaryImage": "/portfolio/commercial/1980s-military-hotel-nalagandla/summary.jpg",
+      "galleryImages": []
+    },
+    {
+      "category": "commercial",
+      "slug": "1980s-military-hotel-manikonda",
+      "displayName": "1980's Military Hotel",
+      "location": "Manikonda",
+      "priority": 2,
+      "coverImage": "/portfolio/commercial/1980s-military-hotel-manikonda/featured.jpg",
+      "featuredImage": "/portfolio/commercial/1980s-military-hotel-manikonda/featured.jpg",
+      "summaryVideo": "/portfolio/commercial/1980s-military-hotel-manikonda/summary.mp4",
+      "summaryImage": "/portfolio/commercial/1980s-military-hotel-manikonda/summary.jpg",
+      "galleryImages": []
+    },
+    {
+      "category": "commercial",
+      "slug": "honer-homes-aquantis-lobby",
+      "displayName": "Honer Homes Aquantis Lobby",
+      "location": "Tellapur",
+      "priority": 3,
+      "coverImage": "/portfolio/commercial/honer-homes-aquantis-lobby/featured.jpg",
+      "featuredImage": "/portfolio/commercial/honer-homes-aquantis-lobby/featured.jpg",
+      "summaryVideo": "/portfolio/commercial/honer-homes-aquantis-lobby/summary.mp4",
+      "summaryImage": "/portfolio/commercial/honer-homes-aquantis-lobby/summary.jpg",
+      "galleryImages": []
+    },
+    {
+      "category": "commercial",
+      "slug": "prestige-sky-tech",
+      "displayName": "Prestige Sky Tech",
+      "location": "Nanakramguda",
+      "priority": 4,
+      "coverImage": "/portfolio/commercial/prestige-sky-tech/featured.jpg",
+      "featuredImage": "/portfolio/commercial/prestige-sky-tech/featured.jpg",
+      "summaryVideo": "/portfolio/commercial/prestige-sky-tech/summary.mp4",
+      "summaryImage": "/portfolio/commercial/prestige-sky-tech/summary.jpg",
+      "galleryImages": []
     }
   ]
 }
