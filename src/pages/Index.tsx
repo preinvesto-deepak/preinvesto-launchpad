@@ -18,10 +18,10 @@ const Index = () => (
       jsonLd={localBusinessSchema}
     />
     <Hero />
-    <JourneySteps />
     <ServicesPreview />
     <VideoShowcase />
     <PortfolioPreview />
+    <JourneySteps />
     <Testimonials />
     <TrustSection />
     <ContactTeaser />

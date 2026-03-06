@@ -18,6 +18,8 @@ const PortfolioProject = () => {
   const { data, isLoading } = usePortfolioIndex();
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
   const [isPortrait, setIsPortrait] = useState(false);
+  const [videoError, setVideoError] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   const handleVideoMetadata = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
     const v = e.currentTarget;
@@ -61,16 +63,11 @@ const PortfolioProject = () => {
     );
   }
 
-  const featuredMedia =
-    project.summaryVideo ||
-    project.summaryImage ||
-    project.featuredImage ||
-    project.galleryImages[0] ||
-    null;
   const videoPoster = project.featuredImage || project.galleryImages[0] || undefined;
-  const hasSummaryVideo = !!project.summaryVideo;
-  const summaryImageSrc = project.summaryImage || project.featuredImage || project.galleryImages[0] || null;
   const allImages = project.galleryImages;
+  const showVideo = !!project.summaryVideo && !videoError;
+  const fallbackImage = project.summaryImage || project.featuredImage || project.galleryImages[0] || null;
+  const hasAnyMedia = showVideo || (fallbackImage && !imageError);
 
   const openLightbox = (idx: number) => setLightboxIdx(idx);
   const closeLightbox = () => setLightboxIdx(null);
@@ -165,9 +162,9 @@ const PortfolioProject = () => {
                 }`}
                 style={{ aspectRatio: isPortrait ? '9/16' : '16/9' }}
             >
-              {project.summaryVideo ? (
+              {showVideo ? (
                 <video
-                  src={project.summaryVideo}
+                  src={project.summaryVideo!}
                   poster={videoPoster}
                   controls
                   autoPlay
@@ -176,16 +173,22 @@ const PortfolioProject = () => {
                   loop
                   preload="metadata"
                   onLoadedMetadata={handleVideoMetadata}
+                  onError={() => setVideoError(true)}
                   className="w-full h-full object-contain object-center"
                 />
-              ) : featuredMedia ? (
+              ) : fallbackImage && !imageError ? (
                 <img
-                  src={featuredMedia}
+                  src={fallbackImage}
                   alt={project.displayName}
                   className="w-full h-full object-contain object-center"
                   onLoad={handleImageLoad}
+                  onError={() => setImageError(true)}
                 />
-              ) : null}
+              ) : (
+                <div className="flex flex-col items-center justify-center text-muted-foreground py-12">
+                  <p className="text-sm">Media will be updated soon</p>
+                </div>
+              )}
               </div>
             </div>
           </div>
@@ -193,7 +196,7 @@ const PortfolioProject = () => {
       </section>
 
       {/* Gallery */}
-      {allImages.length > 0 && (
+      {allImages.length > 0 ? (
         <section className="pb-20 bg-background">
           <div className="container">
             <h2 className="font-display text-xl sm:text-2xl font-bold text-foreground mb-8">
@@ -224,6 +227,15 @@ const PortfolioProject = () => {
                 </motion.div>
               ))}
             </div>
+          </div>
+        </section>
+      ) : (
+        <section className="pb-20 bg-background">
+          <div className="container">
+            <h2 className="font-display text-xl sm:text-2xl font-bold text-foreground mb-8">
+              Project Gallery
+            </h2>
+            <p className="text-muted-foreground text-center py-12">Images will be updated soon</p>
           </div>
         </section>
       )}
