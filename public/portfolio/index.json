@@ -44,6 +44,25 @@
         "/portfolio/interiors/urban-orchids/image6.jpg",
         "/portfolio/interiors/urban-orchids/image7.jpg"
       ]
+    },
+    {
+      "category": "construction",
+      "slug": "urban-orchids",
+      "displayName": "Urban Orchids",
+      "location": "Bahadurpally",
+      "priority": 1,
+      "coverImage": "/portfolio/construction/urban-orchids/featured.jpg",
+      "featuredImage": "/portfolio/construction/urban-orchids/featured.jpg",
+      "summaryVideo": null,
+      "summaryImage": null,
+      "galleryImages": [
+        "/portfolio/construction/urban-orchids/image1.jpg",
+        "/portfolio/construction/urban-orchids/image2.jpg",
+        "/portfolio/construction/urban-orchids/image3.jpg",
+        "/portfolio/construction/urban-orchids/image4.jpg",
+        "/portfolio/construction/urban-orchids/image5.jpg",
+        "/portfolio/construction/urban-orchids/image6.jpg"
+      ]
     }
   ]
 }

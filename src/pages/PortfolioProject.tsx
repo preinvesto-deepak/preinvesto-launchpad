@@ -158,7 +158,7 @@ const PortfolioProject = () => {
             {/* Media — right on desktop */}
             <div className="lg:order-2 order-1 flex lg:justify-end justify-center">
               <div
-                className={`rounded-xl overflow-hidden bg-black/90 flex items-center justify-center w-full ${
+                className={`rounded-xl overflow-hidden bg-transparent flex items-center justify-center w-full ${
                   isPortrait
                     ? 'max-h-[50vh] lg:max-h-[400px] lg:max-w-[85%]'
                     : 'max-h-[60vh] lg:max-h-[480px]'
