@@ -5,7 +5,9 @@ export function usePortfolioIndex() {
   return useQuery<PortfolioIndex>({
     queryKey: ["portfolio-index"],
     queryFn: async () => {
-      const res = await fetch("/portfolio/index.json");
+      const res = await fetch(`/portfolio/index.json?t=${Date.now()}`, {
+        cache: "no-store",
+      });
       if (!res.ok) throw new Error("Failed to load portfolio index");
       const data: PortfolioIndex = await res.json();
       // Sort by priority (lower first), then by displayName
@@ -17,6 +19,9 @@ export function usePortfolioIndex() {
       });
       return data;
     },
-    staleTime: 1000 * 60 * 10,
+    staleTime: 0,
+    gcTime: 1000 * 60 * 2,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   });
 }
