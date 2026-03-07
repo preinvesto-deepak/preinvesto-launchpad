@@ -55,12 +55,17 @@
       "priority": 101,
       "coverImage": "/portfolio/construction/vishal-projects/featured.jpg",
       "featuredImage": "/portfolio/construction/vishal-projects/featured.jpg",
-      "summaryVideo": "/portfolio/construction/vishal-projects/summary.mp4",
-      "summaryImage": "/portfolio/construction/vishal-projects/summary.jpg",
+      "summaryVideo": null,
+      "summaryImage": null,
       "galleryImages": [
         "/portfolio/construction/vishal-projects/image1.jpg",
         "/portfolio/construction/vishal-projects/image2.jpg",
-        "/portfolio/construction/vishal-projects/image3.jpg"
+        "/portfolio/construction/vishal-projects/image3.jpg",
+        "/portfolio/construction/vishal-projects/image4.jpg",
+        "/portfolio/construction/vishal-projects/image5.jpg",
+        "/portfolio/construction/vishal-projects/image6.jpg",
+        "/portfolio/construction/vishal-projects/image7.jpg",
+        "/portfolio/construction/vishal-projects/image8.jpg"
       ]
     },
     {
@@ -71,12 +76,17 @@
       "priority": 102,
       "coverImage": "/portfolio/construction/vasudeva-bloomfield-ecstasy/featured.jpg",
       "featuredImage": "/portfolio/construction/vasudeva-bloomfield-ecstasy/featured.jpg",
-      "summaryVideo": "/portfolio/construction/vasudeva-bloomfield-ecstasy/summary.mp4",
-      "summaryImage": "/portfolio/construction/vasudeva-bloomfield-ecstasy/summary.jpg",
+      "summaryVideo": null,
+      "summaryImage": null,
       "galleryImages": [
         "/portfolio/construction/vasudeva-bloomfield-ecstasy/image1.jpg",
         "/portfolio/construction/vasudeva-bloomfield-ecstasy/image2.jpg",
-        "/portfolio/construction/vasudeva-bloomfield-ecstasy/image3.jpg"
+        "/portfolio/construction/vasudeva-bloomfield-ecstasy/image3.jpg",
+        "/portfolio/construction/vasudeva-bloomfield-ecstasy/image4.jpg",
+        "/portfolio/construction/vasudeva-bloomfield-ecstasy/image5.jpg",
+        "/portfolio/construction/vasudeva-bloomfield-ecstasy/image6.jpg",
+        "/portfolio/construction/vasudeva-bloomfield-ecstasy/image7.jpg",
+        "/portfolio/construction/vasudeva-bloomfield-ecstasy/image8.jpg"
       ]
     },
     {
@@ -106,15 +116,17 @@
       "priority": 104,
       "coverImage": "/portfolio/construction/urban-blooms/featured.jpg",
       "featuredImage": "/portfolio/construction/urban-blooms/featured.jpg",
-      "summaryVideo": "/portfolio/construction/urban-blooms/summary.mp4",
-      "summaryImage": "/portfolio/construction/urban-blooms/summary.jpg",
+      "summaryVideo": null,
+      "summaryImage": null,
       "galleryImages": [
         "/portfolio/construction/urban-blooms/image1.jpg",
         "/portfolio/construction/urban-blooms/image2.jpg",
         "/portfolio/construction/urban-blooms/image3.jpg",
         "/portfolio/construction/urban-blooms/image4.jpg",
         "/portfolio/construction/urban-blooms/image5.jpg",
-        "/portfolio/construction/urban-blooms/image6.jpg"
+        "/portfolio/construction/urban-blooms/image6.jpg",
+        "/portfolio/construction/urban-blooms/image7.jpg",
+        "/portfolio/construction/urban-blooms/image8.jpg"
       ]
     },
     {
@@ -125,14 +137,17 @@
       "priority": 105,
       "coverImage": "/portfolio/construction/green-tech-o2-community/featured.jpg",
       "featuredImage": "/portfolio/construction/green-tech-o2-community/featured.jpg",
-      "summaryVideo": "/portfolio/construction/green-tech-o2-community/summary.mp4",
-      "summaryImage": "/portfolio/construction/green-tech-o2-community/summary.jpg",
+      "summaryVideo": null,
+      "summaryImage": null,
       "galleryImages": [
         "/portfolio/construction/green-tech-o2-community/image1.jpg",
         "/portfolio/construction/green-tech-o2-community/image2.jpg",
         "/portfolio/construction/green-tech-o2-community/image3.jpg",
         "/portfolio/construction/green-tech-o2-community/image4.jpg",
-        "/portfolio/construction/green-tech-o2-community/image5.jpg"
+        "/portfolio/construction/green-tech-o2-community/image5.jpg",
+        "/portfolio/construction/green-tech-o2-community/image6.jpg",
+        "/portfolio/construction/green-tech-o2-community/image7.jpg",
+        "/portfolio/construction/green-tech-o2-community/image8.jpg"
       ]
     },
     {
@@ -143,13 +158,17 @@
       "priority": 106,
       "coverImage": "/portfolio/construction/suprabatha-villas/featured.jpg",
       "featuredImage": "/portfolio/construction/suprabatha-villas/featured.jpg",
-      "summaryVideo": "/portfolio/construction/suprabatha-villas/summary.mp4",
-      "summaryImage": "/portfolio/construction/suprabatha-villas/summary.jpg",
+      "summaryVideo": null,
+      "summaryImage": null,
       "galleryImages": [
         "/portfolio/construction/suprabatha-villas/image1.jpg",
         "/portfolio/construction/suprabatha-villas/image2.jpg",
         "/portfolio/construction/suprabatha-villas/image3.jpg",
-        "/portfolio/construction/suprabatha-villas/image4.jpg"
+        "/portfolio/construction/suprabatha-villas/image4.jpg",
+        "/portfolio/construction/suprabatha-villas/image5.jpg",
+        "/portfolio/construction/suprabatha-villas/image6.jpg",
+        "/portfolio/construction/suprabatha-villas/image7.jpg",
+        "/portfolio/construction/suprabatha-villas/image8.jpg"
       ]
     },
     {
@@ -160,14 +179,17 @@
       "priority": 201,
       "coverImage": "/portfolio/commercial/1980s-military-hotel-nalagandla/featured.jpg",
       "featuredImage": "/portfolio/commercial/1980s-military-hotel-nalagandla/featured.jpg",
-      "summaryVideo": "/portfolio/commercial/1980s-military-hotel-nalagandla/summary.mp4",
-      "summaryImage": "/portfolio/commercial/1980s-military-hotel-nalagandla/summary.jpg",
+      "summaryVideo": null,
+      "summaryImage": null,
       "galleryImages": [
         "/portfolio/commercial/1980s-military-hotel-nalagandla/image1.jpg",
         "/portfolio/commercial/1980s-military-hotel-nalagandla/image2.jpg",
         "/portfolio/commercial/1980s-military-hotel-nalagandla/image3.jpg",
         "/portfolio/commercial/1980s-military-hotel-nalagandla/image4.jpg",
-        "/portfolio/commercial/1980s-military-hotel-nalagandla/image5.jpg"
+        "/portfolio/commercial/1980s-military-hotel-nalagandla/image5.jpg",
+        "/portfolio/commercial/1980s-military-hotel-nalagandla/image6.jpg",
+        "/portfolio/commercial/1980s-military-hotel-nalagandla/image7.jpg",
+        "/portfolio/commercial/1980s-military-hotel-nalagandla/image8.jpg"
       ]
     },
     {
@@ -178,14 +200,17 @@
       "priority": 202,
       "coverImage": "/portfolio/commercial/1980s-military-hotel-manikonda/featured.jpg",
       "featuredImage": "/portfolio/commercial/1980s-military-hotel-manikonda/featured.jpg",
-      "summaryVideo": "/portfolio/commercial/1980s-military-hotel-manikonda/summary.mp4",
-      "summaryImage": "/portfolio/commercial/1980s-military-hotel-manikonda/summary.jpg",
+      "summaryVideo": null,
+      "summaryImage": null,
       "galleryImages": [
         "/portfolio/commercial/1980s-military-hotel-manikonda/image1.jpg",
         "/portfolio/commercial/1980s-military-hotel-manikonda/image2.jpg",
         "/portfolio/commercial/1980s-military-hotel-manikonda/image3.jpg",
         "/portfolio/commercial/1980s-military-hotel-manikonda/image4.jpg",
-        "/portfolio/commercial/1980s-military-hotel-manikonda/image5.jpg"
+        "/portfolio/commercial/1980s-military-hotel-manikonda/image5.jpg",
+        "/portfolio/commercial/1980s-military-hotel-manikonda/image6.jpg",
+        "/portfolio/commercial/1980s-military-hotel-manikonda/image7.jpg",
+        "/portfolio/commercial/1980s-military-hotel-manikonda/image8.jpg"
       ]
     },
     {
@@ -196,14 +221,17 @@
       "priority": 203,
       "coverImage": "/portfolio/commercial/honer-homes-aquantis-lobby/featured.jpg",
       "featuredImage": "/portfolio/commercial/honer-homes-aquantis-lobby/featured.jpg",
-      "summaryVideo": "/portfolio/commercial/honer-homes-aquantis-lobby/summary.mp4",
-      "summaryImage": "/portfolio/commercial/honer-homes-aquantis-lobby/summary.jpg",
+      "summaryVideo": null,
+      "summaryImage": null,
       "galleryImages": [
         "/portfolio/commercial/honer-homes-aquantis-lobby/image1.jpg",
         "/portfolio/commercial/honer-homes-aquantis-lobby/image2.jpg",
         "/portfolio/commercial/honer-homes-aquantis-lobby/image3.jpg",
         "/portfolio/commercial/honer-homes-aquantis-lobby/image4.jpg",
-        "/portfolio/commercial/honer-homes-aquantis-lobby/image5.jpg"
+        "/portfolio/commercial/honer-homes-aquantis-lobby/image5.jpg",
+        "/portfolio/commercial/honer-homes-aquantis-lobby/image6.jpg",
+        "/portfolio/commercial/honer-homes-aquantis-lobby/image7.jpg",
+        "/portfolio/commercial/honer-homes-aquantis-lobby/image8.jpg"
       ]
     },
     {
@@ -214,14 +242,17 @@
       "priority": 204,
       "coverImage": "/portfolio/commercial/prestige-sky-tech/featured.jpg",
       "featuredImage": "/portfolio/commercial/prestige-sky-tech/featured.jpg",
-      "summaryVideo": "/portfolio/commercial/prestige-sky-tech/summary.mp4",
-      "summaryImage": "/portfolio/commercial/prestige-sky-tech/summary.jpg",
+      "summaryVideo": null,
+      "summaryImage": null,
       "galleryImages": [
         "/portfolio/commercial/prestige-sky-tech/image1.jpg",
         "/portfolio/commercial/prestige-sky-tech/image2.jpg",
         "/portfolio/commercial/prestige-sky-tech/image3.jpg",
         "/portfolio/commercial/prestige-sky-tech/image4.jpg",
-        "/portfolio/commercial/prestige-sky-tech/image5.jpg"
+        "/portfolio/commercial/prestige-sky-tech/image5.jpg",
+        "/portfolio/commercial/prestige-sky-tech/image6.jpg",
+        "/portfolio/commercial/prestige-sky-tech/image7.jpg",
+        "/portfolio/commercial/prestige-sky-tech/image8.jpg"
       ]
     }
   ]
