@@ -206,11 +206,11 @@ const PortfolioProject = () => {
               {allImages.map((src, i) => (
                 <motion.div
                   key={src}
+                  data-gallery-item
                   initial={{ opacity: 0 }}
                   whileInView={{ opacity: 1 }}
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.05 }}
-                  className=""
                 >
                   <button
                     onClick={() => openLightbox(i)}
