@@ -206,11 +206,11 @@ const PortfolioProject = () => {
               {allImages.map((src, i) => (
                 <motion.div
                   key={src}
+                  data-gallery-item
                   initial={{ opacity: 0 }}
                   whileInView={{ opacity: 1 }}
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.05 }}
-                  className=""
                 >
                   <button
                     onClick={() => openLightbox(i)}
@@ -222,6 +222,12 @@ const PortfolioProject = () => {
                       alt={`${project.displayName} – Image ${i + 1}`}
                       className="w-full object-cover group-hover:scale-105 transition-transform duration-500"
                       loading="lazy"
+                      onError={(e) => {
+                        const el = e.currentTarget;
+                        el.style.display = "none";
+                        const parent = el.closest("[data-gallery-item]");
+                        if (parent) (parent as HTMLElement).style.display = "none";
+                      }}
                     />
                   </button>
                 </motion.div>

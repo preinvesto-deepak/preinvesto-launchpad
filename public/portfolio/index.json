@@ -14,7 +14,7 @@
       "coverImage": "/portfolio/interiors/aparna-sarovar-zenith/featured.jpg",
       "featuredImage": "/portfolio/interiors/aparna-sarovar-zenith/featured.jpg",
       "summaryVideo": "/portfolio/interiors/aparna-sarovar-zenith/summary.mp4",
-      "summaryImage": null,
+      "summaryImage": "/portfolio/interiors/aparna-sarovar-zenith/summary.jpg",
       "galleryImages": [
         "/portfolio/interiors/aparna-sarovar-zenith/image1.jpg",
         "/portfolio/interiors/aparna-sarovar-zenith/image2.jpg",
@@ -22,7 +22,8 @@
         "/portfolio/interiors/aparna-sarovar-zenith/image4.jpg",
         "/portfolio/interiors/aparna-sarovar-zenith/image5.jpg",
         "/portfolio/interiors/aparna-sarovar-zenith/image6.jpg",
-        "/portfolio/interiors/aparna-sarovar-zenith/image7.jpg"
+        "/portfolio/interiors/aparna-sarovar-zenith/image7.jpg",
+        "/portfolio/interiors/aparna-sarovar-zenith/image8.png"
       ]
     },
     {
@@ -33,7 +34,7 @@
       "priority": 2,
       "coverImage": "/portfolio/interiors/urban-orchids/featured.jpg",
       "featuredImage": "/portfolio/interiors/urban-orchids/featured.jpg",
-      "summaryVideo": null,
+      "summaryVideo": "/portfolio/interiors/urban-orchids/summary.mp4",
       "summaryImage": "/portfolio/interiors/urban-orchids/summary.jpg",
       "galleryImages": [
         "/portfolio/interiors/urban-orchids/image1.jpg",
@@ -42,7 +43,8 @@
         "/portfolio/interiors/urban-orchids/image4.jpg",
         "/portfolio/interiors/urban-orchids/image5.jpg",
         "/portfolio/interiors/urban-orchids/image6.jpg",
-        "/portfolio/interiors/urban-orchids/image7.jpg"
+        "/portfolio/interiors/urban-orchids/image7.jpg",
+        "/portfolio/interiors/urban-orchids/image8.jpg"
       ]
     },
     {
@@ -50,35 +52,43 @@
       "slug": "vishal-projects",
       "displayName": "Vishal Projects",
       "location": "Tukkuguda",
-      "priority": 1,
+      "priority": 101,
       "coverImage": "/portfolio/construction/vishal-projects/featured.jpg",
       "featuredImage": "/portfolio/construction/vishal-projects/featured.jpg",
       "summaryVideo": "/portfolio/construction/vishal-projects/summary.mp4",
       "summaryImage": "/portfolio/construction/vishal-projects/summary.jpg",
-      "galleryImages": []
+      "galleryImages": [
+        "/portfolio/construction/vishal-projects/image1.jpg",
+        "/portfolio/construction/vishal-projects/image2.jpg",
+        "/portfolio/construction/vishal-projects/image3.jpg"
+      ]
     },
     {
       "category": "construction",
       "slug": "vasudeva-bloomfield-ecstasy",
       "displayName": "Vasudeva Bloomfield Ecstasy",
       "location": "Tellapur",
-      "priority": 2,
+      "priority": 102,
       "coverImage": "/portfolio/construction/vasudeva-bloomfield-ecstasy/featured.jpg",
       "featuredImage": "/portfolio/construction/vasudeva-bloomfield-ecstasy/featured.jpg",
       "summaryVideo": "/portfolio/construction/vasudeva-bloomfield-ecstasy/summary.mp4",
       "summaryImage": "/portfolio/construction/vasudeva-bloomfield-ecstasy/summary.jpg",
-      "galleryImages": []
+      "galleryImages": [
+        "/portfolio/construction/vasudeva-bloomfield-ecstasy/image1.jpg",
+        "/portfolio/construction/vasudeva-bloomfield-ecstasy/image2.jpg",
+        "/portfolio/construction/vasudeva-bloomfield-ecstasy/image3.jpg"
+      ]
     },
     {
       "category": "construction",
       "slug": "urban-orchids",
       "displayName": "Urban Orchids",
       "location": "Bahadurpally",
-      "priority": 3,
+      "priority": 103,
       "coverImage": "/portfolio/construction/urban-orchids/featured.jpg",
       "featuredImage": "/portfolio/construction/urban-orchids/featured.jpg",
       "summaryVideo": "/portfolio/construction/urban-orchids/summary.mp4",
-      "summaryImage": null,
+      "summaryImage": "/portfolio/construction/urban-orchids/summary.jpg",
       "galleryImages": [
         "/portfolio/construction/urban-orchids/image1.jpg",
         "/portfolio/construction/urban-orchids/image2.jpg",
@@ -93,84 +103,126 @@
       "slug": "urban-blooms",
       "displayName": "Urban Blooms",
       "location": "Bahadurpally",
-      "priority": 4,
+      "priority": 104,
       "coverImage": "/portfolio/construction/urban-blooms/featured.jpg",
       "featuredImage": "/portfolio/construction/urban-blooms/featured.jpg",
       "summaryVideo": "/portfolio/construction/urban-blooms/summary.mp4",
       "summaryImage": "/portfolio/construction/urban-blooms/summary.jpg",
-      "galleryImages": []
+      "galleryImages": [
+        "/portfolio/construction/urban-blooms/image1.jpg",
+        "/portfolio/construction/urban-blooms/image2.jpg",
+        "/portfolio/construction/urban-blooms/image3.jpg",
+        "/portfolio/construction/urban-blooms/image4.jpg",
+        "/portfolio/construction/urban-blooms/image5.jpg",
+        "/portfolio/construction/urban-blooms/image6.jpg"
+      ]
     },
     {
       "category": "construction",
       "slug": "green-tech-o2-community",
       "displayName": "Green Tech O2 Community",
       "location": "Rameswarabanda",
-      "priority": 5,
+      "priority": 105,
       "coverImage": "/portfolio/construction/green-tech-o2-community/featured.jpg",
       "featuredImage": "/portfolio/construction/green-tech-o2-community/featured.jpg",
       "summaryVideo": "/portfolio/construction/green-tech-o2-community/summary.mp4",
       "summaryImage": "/portfolio/construction/green-tech-o2-community/summary.jpg",
-      "galleryImages": []
+      "galleryImages": [
+        "/portfolio/construction/green-tech-o2-community/image1.jpg",
+        "/portfolio/construction/green-tech-o2-community/image2.jpg",
+        "/portfolio/construction/green-tech-o2-community/image3.jpg",
+        "/portfolio/construction/green-tech-o2-community/image4.jpg",
+        "/portfolio/construction/green-tech-o2-community/image5.jpg"
+      ]
     },
     {
       "category": "construction",
       "slug": "suprabatha-villas",
       "displayName": "Suprabatha Villas",
       "location": "Kardanur",
-      "priority": 6,
+      "priority": 106,
       "coverImage": "/portfolio/construction/suprabatha-villas/featured.jpg",
       "featuredImage": "/portfolio/construction/suprabatha-villas/featured.jpg",
       "summaryVideo": "/portfolio/construction/suprabatha-villas/summary.mp4",
       "summaryImage": "/portfolio/construction/suprabatha-villas/summary.jpg",
-      "galleryImages": []
+      "galleryImages": [
+        "/portfolio/construction/suprabatha-villas/image1.jpg",
+        "/portfolio/construction/suprabatha-villas/image2.jpg",
+        "/portfolio/construction/suprabatha-villas/image3.jpg",
+        "/portfolio/construction/suprabatha-villas/image4.jpg"
+      ]
     },
     {
       "category": "commercial",
       "slug": "1980s-military-hotel-nalagandla",
       "displayName": "1980's Military Hotel",
       "location": "Nalagandla",
-      "priority": 1,
+      "priority": 201,
       "coverImage": "/portfolio/commercial/1980s-military-hotel-nalagandla/featured.jpg",
       "featuredImage": "/portfolio/commercial/1980s-military-hotel-nalagandla/featured.jpg",
       "summaryVideo": "/portfolio/commercial/1980s-military-hotel-nalagandla/summary.mp4",
       "summaryImage": "/portfolio/commercial/1980s-military-hotel-nalagandla/summary.jpg",
-      "galleryImages": []
+      "galleryImages": [
+        "/portfolio/commercial/1980s-military-hotel-nalagandla/image1.jpg",
+        "/portfolio/commercial/1980s-military-hotel-nalagandla/image2.jpg",
+        "/portfolio/commercial/1980s-military-hotel-nalagandla/image3.jpg",
+        "/portfolio/commercial/1980s-military-hotel-nalagandla/image4.jpg",
+        "/portfolio/commercial/1980s-military-hotel-nalagandla/image5.jpg"
+      ]
     },
     {
       "category": "commercial",
       "slug": "1980s-military-hotel-manikonda",
       "displayName": "1980's Military Hotel",
       "location": "Manikonda",
-      "priority": 2,
+      "priority": 202,
       "coverImage": "/portfolio/commercial/1980s-military-hotel-manikonda/featured.jpg",
       "featuredImage": "/portfolio/commercial/1980s-military-hotel-manikonda/featured.jpg",
       "summaryVideo": "/portfolio/commercial/1980s-military-hotel-manikonda/summary.mp4",
       "summaryImage": "/portfolio/commercial/1980s-military-hotel-manikonda/summary.jpg",
-      "galleryImages": []
+      "galleryImages": [
+        "/portfolio/commercial/1980s-military-hotel-manikonda/image1.jpg",
+        "/portfolio/commercial/1980s-military-hotel-manikonda/image2.jpg",
+        "/portfolio/commercial/1980s-military-hotel-manikonda/image3.jpg",
+        "/portfolio/commercial/1980s-military-hotel-manikonda/image4.jpg",
+        "/portfolio/commercial/1980s-military-hotel-manikonda/image5.jpg"
+      ]
     },
     {
       "category": "commercial",
       "slug": "honer-homes-aquantis-lobby",
       "displayName": "Honer Homes Aquantis Lobby",
       "location": "Tellapur",
-      "priority": 3,
+      "priority": 203,
       "coverImage": "/portfolio/commercial/honer-homes-aquantis-lobby/featured.jpg",
       "featuredImage": "/portfolio/commercial/honer-homes-aquantis-lobby/featured.jpg",
       "summaryVideo": "/portfolio/commercial/honer-homes-aquantis-lobby/summary.mp4",
       "summaryImage": "/portfolio/commercial/honer-homes-aquantis-lobby/summary.jpg",
-      "galleryImages": []
+      "galleryImages": [
+        "/portfolio/commercial/honer-homes-aquantis-lobby/image1.jpg",
+        "/portfolio/commercial/honer-homes-aquantis-lobby/image2.jpg",
+        "/portfolio/commercial/honer-homes-aquantis-lobby/image3.jpg",
+        "/portfolio/commercial/honer-homes-aquantis-lobby/image4.jpg",
+        "/portfolio/commercial/honer-homes-aquantis-lobby/image5.jpg"
+      ]
     },
     {
       "category": "commercial",
       "slug": "prestige-sky-tech",
       "displayName": "Prestige Sky Tech",
       "location": "Nanakramguda",
-      "priority": 4,
+      "priority": 204,
       "coverImage": "/portfolio/commercial/prestige-sky-tech/featured.jpg",
       "featuredImage": "/portfolio/commercial/prestige-sky-tech/featured.jpg",
       "summaryVideo": "/portfolio/commercial/prestige-sky-tech/summary.mp4",
       "summaryImage": "/portfolio/commercial/prestige-sky-tech/summary.jpg",
-      "galleryImages": []
+      "galleryImages": [
+        "/portfolio/commercial/prestige-sky-tech/image1.jpg",
+        "/portfolio/commercial/prestige-sky-tech/image2.jpg",
+        "/portfolio/commercial/prestige-sky-tech/image3.jpg",
+        "/portfolio/commercial/prestige-sky-tech/image4.jpg",
+        "/portfolio/commercial/prestige-sky-tech/image5.jpg"
+      ]
     }
   ]
 }
