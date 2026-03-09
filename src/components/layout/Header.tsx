@@ -74,7 +74,7 @@ const Header = () => {
                       to={child.path}
                       className="block px-5 py-2.5 text-sm text-foreground hover:text-accent hover:bg-muted transition-colors"
                     >
-                      {child.label}
+                      {child.label.toUpperCase()}
                     </Link>
                   ))}
                 </motion.div>
