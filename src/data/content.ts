@@ -17,7 +17,7 @@ export const BRAND = {
   email: "info@preinvesto.com",
   url: "https://preinvesto.com",
   whatsappLink:
-    "https://wa.me/919030982932?text=Hi%20Preinvesto%20Interiors%2C%20I%E2%80%99m%20interested%20in%20your%20services.%20Please%20share%20a%20quotation.",
+    "https://wa.me/919030982932?text=Hi%2C%20I'm%20interested%20to%20know%20more%20about%20it%20%3A%20https%3A%2F%2Fpreinvesto.com%2F",
   mapsLink: "https://maps.app.goo.gl/J1WbV1puYZsgPWMWA",
   address: "Hyderabad, Telangana, India",
   social: {
@@ -56,7 +56,7 @@ export const NAV_ITEMS = [
   { label: "Portfolio", path: "/portfolio" },
   { label: "Blogs", path: "/blog" },
   { label: "Gallery", path: "/gallery" },
-  { label: "Contact Us", path: "/contact" },
+  
 ];
 
 export const JOURNEY_STEPS = [

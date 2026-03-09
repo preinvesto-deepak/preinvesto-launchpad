@@ -36,7 +36,7 @@ const Header = () => {
             Preinvesto
           </span>
           <span className={`hidden sm:inline text-xs font-sans font-medium tracking-widest uppercase transition-colors ${isScrolled ? "text-accent" : "text-accent"}`}>
-            Interiors
+            INTERIORS
           </span>
         </Link>
 
@@ -57,7 +57,7 @@ const Header = () => {
                     : "text-primary-foreground/90 hover:text-primary-foreground"
                 } ${location.pathname === item.path ? "!text-accent" : ""}`}
               >
-                {item.label}
+                {item.label.toUpperCase()}
                 {item.children && <ChevronDown className="w-3 h-3" />}
               </Link>
 
@@ -74,7 +74,7 @@ const Header = () => {
                       to={child.path}
                       className="block px-5 py-2.5 text-sm text-foreground hover:text-accent hover:bg-muted transition-colors"
                     >
-                      {child.label}
+                      {child.label.toUpperCase()}
                     </Link>
                   ))}
                 </motion.div>
@@ -97,7 +97,7 @@ const Header = () => {
             to="/contact"
             className="hidden md:inline-flex items-center px-5 py-2.5 bg-accent text-accent-foreground text-sm font-semibold rounded-lg hover:opacity-90 transition-opacity"
           >
-            Get Quote
+            GET IN TOUCH WITH US
           </Link>
           <button
             onClick={() => setIsMobileOpen(!isMobileOpen)}
@@ -126,7 +126,7 @@ const Header = () => {
                       to={item.path}
                       className={`block py-3 text-base font-medium text-foreground hover:text-accent transition-colors ${location.pathname === item.path ? "text-accent" : ""}`}
                     >
-                      {item.label}
+                      {item.label.toUpperCase()}
                     </Link>
                     {item.children && (
                       <button
@@ -146,7 +146,7 @@ const Header = () => {
                           to={child.path}
                           className="block py-2 text-sm text-muted-foreground hover:text-accent transition-colors"
                         >
-                          {child.label}
+                          {child.label.toUpperCase()}
                         </Link>
                       ))}
                     </div>
@@ -157,7 +157,7 @@ const Header = () => {
                 to="/contact"
                 className="block w-full text-center py-3 mt-3 bg-accent text-accent-foreground font-semibold rounded-lg"
               >
-                Get Quote
+                GET IN TOUCH WITH US
               </Link>
             </nav>
           </motion.div>
