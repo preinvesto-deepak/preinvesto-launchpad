@@ -97,7 +97,7 @@ const Header = () => {
             to="/contact"
             className="hidden md:inline-flex items-center px-5 py-2.5 bg-accent text-accent-foreground text-sm font-semibold rounded-lg hover:opacity-90 transition-opacity"
           >
-            Get Quote
+            GET IN TOUCH WITH US
           </Link>
           <button
             onClick={() => setIsMobileOpen(!isMobileOpen)}
