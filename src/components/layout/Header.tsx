@@ -146,7 +146,7 @@ const Header = () => {
                           to={child.path}
                           className="block py-2 text-sm text-muted-foreground hover:text-accent transition-colors"
                         >
-                          {child.label}
+                          {child.label.toUpperCase()}
                         </Link>
                       ))}
                     </div>
