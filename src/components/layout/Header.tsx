@@ -36,7 +36,7 @@ const Header = () => {
             Preinvesto
           </span>
           <span className={`hidden sm:inline text-xs font-sans font-medium tracking-widest uppercase transition-colors ${isScrolled ? "text-accent" : "text-accent"}`}>
-            Interiors
+            INTERIORS
           </span>
         </Link>
 
