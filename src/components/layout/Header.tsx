@@ -126,7 +126,7 @@ const Header = () => {
                       to={item.path}
                       className={`block py-3 text-base font-medium text-foreground hover:text-accent transition-colors ${location.pathname === item.path ? "text-accent" : ""}`}
                     >
-                      {item.label}
+                      {item.label.toUpperCase()}
                     </Link>
                     {item.children && (
                       <button
