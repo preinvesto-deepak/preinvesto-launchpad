@@ -57,7 +57,7 @@ const Header = () => {
                     : "text-primary-foreground/90 hover:text-primary-foreground"
                 } ${location.pathname === item.path ? "!text-accent" : ""}`}
               >
-                {item.label}
+                {item.label.toUpperCase()}
                 {item.children && <ChevronDown className="w-3 h-3" />}
               </Link>
 
