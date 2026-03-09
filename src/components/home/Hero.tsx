@@ -48,16 +48,10 @@ const Hero = () => (
           className="flex flex-wrap gap-4"
         >
           <Link
-            to="/services"
+            to="/portfolio"
             className="inline-flex items-center px-7 py-3.5 bg-accent text-accent-foreground font-semibold rounded-lg hover:opacity-90 transition-opacity"
           >
-            Explore Services
-          </Link>
-          <Link
-            to="/contact"
-            className="inline-flex items-center px-7 py-3.5 border border-primary-foreground/30 text-primary-foreground font-semibold rounded-lg hover:bg-primary-foreground/10 transition-colors"
-          >
-            Get a Quote
+            SEE OUR PORTFOLIO
           </Link>
         </motion.div>
       </div>

@@ -157,7 +157,7 @@ const Header = () => {
                 to="/contact"
                 className="block w-full text-center py-3 mt-3 bg-accent text-accent-foreground font-semibold rounded-lg"
               >
-                Get Quote
+                GET IN TOUCH WITH US
               </Link>
             </nav>
           </motion.div>

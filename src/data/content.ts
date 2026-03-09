@@ -56,7 +56,7 @@ export const NAV_ITEMS = [
   { label: "Portfolio", path: "/portfolio" },
   { label: "Blogs", path: "/blog" },
   { label: "Gallery", path: "/gallery" },
-  { label: "Contact Us", path: "/contact" },
+  
 ];
 
 export const JOURNEY_STEPS = [
