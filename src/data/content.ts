@@ -51,6 +51,7 @@ export const NAV_ITEMS = [
       { label: "Affordable Property Search", path: "/services/property-search" },
       { label: "Property Construction", path: "/services/construction" },
       { label: "Interior Design", path: "/services/interior-design" },
+      { label: "Properties", path: "/properties" },
     ],
   },
   { label: "Portfolio", path: "/portfolio" },
