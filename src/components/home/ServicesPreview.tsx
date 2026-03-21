@@ -29,7 +29,7 @@ const ServicesPreview = () => (
               <div className="aspect-[4/3] overflow-hidden">
                 <img
                   src={service.image}
-                  alt={`${service.title} – Preinvesto Interiors Hyderabad`}
+                  alt={`${service.title} - Preinvesto Interiors Hyderabad`}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   loading="lazy"
                 />

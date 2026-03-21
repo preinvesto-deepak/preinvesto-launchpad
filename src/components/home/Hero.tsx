@@ -4,7 +4,6 @@ import { IMAGES } from "@/data/content";
 
 const Hero = () => (
   <section className="relative h-screen min-h-[600px] max-h-[900px] flex items-center overflow-hidden">
-    {/* Background Image */}
     <div className="absolute inset-0">
       <img
         src={IMAGES.hero}
@@ -39,7 +38,7 @@ const Hero = () => (
           transition={{ delay: 0.45 }}
           className="text-primary-foreground/80 text-lg sm:text-xl leading-relaxed mb-8 max-w-lg"
         >
-          Affordable property search, construction, and interiors—handled end-to-end.
+          Affordable property search, construction, and interiors — handled end-to-end.
         </motion.p>
         <motion.div
           initial={{ opacity: 0, y: 30 }}
@@ -57,7 +56,6 @@ const Hero = () => (
       </div>
     </div>
 
-    {/* Featured project tag */}
     <Link
       to="/portfolio"
       className="absolute bottom-8 right-8 hidden md:flex items-center gap-3 bg-card/90 backdrop-blur-sm rounded-lg px-5 py-3 shadow-lg hover:shadow-xl transition-shadow"
@@ -65,7 +63,7 @@ const Hero = () => (
       <img src={IMAGES.portfolioLiving} alt="Featured project" className="w-16 h-12 rounded object-cover" />
       <div>
         <p className="text-xs text-muted-foreground">Featured Project</p>
-        <p className="text-sm font-semibold text-foreground">Modern Villa Interiors →</p>
+        <p className="text-sm font-semibold text-foreground">Modern Villa Interiors</p>
       </div>
     </Link>
   </section>

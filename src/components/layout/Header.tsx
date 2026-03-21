@@ -5,42 +5,57 @@ import { NAV_ITEMS, BRAND } from "@/data/content";
 import { motion, AnimatePresence } from "framer-motion";
 
 const Header = () => {
+  const location = useLocation();
+  const isHomepage = location.pathname === "/";
+
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
-  const location = useLocation();
+
+  useEffect(() => {
+    setIsScrolled(false);
+    setIsMobileOpen(false);
+    setOpenDropdown(null);
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
 
   useEffect(() => {
     const onScroll = () => setIsScrolled(window.scrollY > 20);
-    window.addEventListener("scroll", onScroll);
+    window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  useEffect(() => {
-    setIsMobileOpen(false);
-    setOpenDropdown(null);
-  }, [location]);
+  const isTransparent = isHomepage && !isScrolled;
 
   return (
     <header
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        isScrolled
-          ? "bg-card/95 backdrop-blur-md shadow-sm border-b border-border"
-          : "bg-transparent"
-      }`}
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 50,
+        transition: "background-color 0.3s ease, box-shadow 0.3s ease",
+        backgroundColor: isTransparent ? "transparent" : "rgba(255,255,255,0.97)",
+        boxShadow: isTransparent ? "none" : "0 1px 3px rgba(0,0,0,0.1)",
+        borderBottom: isTransparent ? "none" : "1px solid rgba(0,0,0,0.08)",
+        backdropFilter: isTransparent ? "none" : "blur(12px)",
+      }}
     >
       <div className="container flex items-center justify-between h-16 md:h-20">
-        {/* Logo */}
+
         <Link to="/" className="flex items-center gap-2" aria-label="Preinvesto Home">
-          <span className={`font-display text-xl md:text-2xl font-bold tracking-tight transition-colors ${isScrolled ? "text-foreground" : "text-primary-foreground"}`}>
+          <span
+            style={{ transition: "color 0.3s ease", color: isTransparent ? "#ffffff" : "inherit" }}
+            className="font-display text-xl md:text-2xl font-bold tracking-tight"
+          >
             Preinvesto
           </span>
-          <span className={`hidden sm:inline text-xs font-sans font-medium tracking-widest uppercase transition-colors ${isScrolled ? "text-accent" : "text-accent"}`}>
+          <span className="hidden sm:inline text-xs font-sans font-medium tracking-widest uppercase text-accent">
             INTERIORS
           </span>
         </Link>
 
-        {/* Desktop Nav */}
         <nav className="hidden lg:flex items-center gap-1" aria-label="Main navigation">
           {NAV_ITEMS.map((item) => (
             <div
@@ -51,11 +66,13 @@ const Header = () => {
             >
               <Link
                 to={item.path}
-                className={`px-4 py-2 text-sm font-medium tracking-wide transition-colors flex items-center gap-1 ${
-                  isScrolled
-                    ? "text-foreground hover:text-accent"
-                    : "text-primary-foreground/90 hover:text-primary-foreground"
-                } ${location.pathname === item.path ? "!text-accent" : ""}`}
+                style={{
+                  color: isTransparent
+                    ? location.pathname === item.path ? "var(--accent)" : "rgba(255,255,255,0.92)"
+                    : location.pathname === item.path ? "var(--accent)" : "inherit",
+                  transition: "color 0.3s ease",
+                }}
+                className="px-4 py-2 text-sm font-medium tracking-wide flex items-center gap-1 hover:opacity-80"
               >
                 {item.label.toUpperCase()}
                 {item.children && <ChevronDown className="w-3 h-3" />}
@@ -66,7 +83,7 @@ const Header = () => {
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 8 }}
-                  className="absolute top-full left-0 mt-0 bg-card rounded-lg shadow-lg border border-border py-2 min-w-[240px]"
+                  className="absolute top-full left-0 mt-0 bg-card rounded-lg shadow-lg border border-border py-2 min-w-[200px] z-50"
                 >
                   {item.children.map((child) => (
                     <Link
@@ -74,7 +91,7 @@ const Header = () => {
                       to={child.path}
                       className="block px-5 py-2.5 text-sm text-foreground hover:text-accent hover:bg-muted transition-colors"
                     >
-                      {child.label.toUpperCase()}
+                      {child.label}
                     </Link>
                   ))}
                 </motion.div>
@@ -83,11 +100,11 @@ const Header = () => {
           ))}
         </nav>
 
-        {/* CTA + Mobile Toggle */}
         <div className="flex items-center gap-3">
           <a
             href={`tel:${BRAND.phone}`}
-            className={`hidden md:flex items-center gap-1.5 text-sm font-medium transition-colors ${isScrolled ? "text-foreground" : "text-primary-foreground/90"}`}
+            style={{ color: isTransparent ? "rgba(255,255,255,0.92)" : "inherit", transition: "color 0.3s ease" }}
+            className="hidden md:flex items-center gap-1.5 text-sm font-medium"
             aria-label="Call Preinvesto"
           >
             <Phone className="w-4 h-4" />
@@ -101,7 +118,8 @@ const Header = () => {
           </Link>
           <button
             onClick={() => setIsMobileOpen(!isMobileOpen)}
-            className={`lg:hidden p-2 transition-colors ${isScrolled ? "text-foreground" : "text-primary-foreground"}`}
+            style={{ color: isTransparent ? "#ffffff" : "inherit" }}
+            className="lg:hidden p-2"
             aria-label="Toggle menu"
           >
             {isMobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
@@ -109,7 +127,6 @@ const Header = () => {
         </div>
       </div>
 
-      {/* Mobile Menu */}
       <AnimatePresence>
         {isMobileOpen && (
           <motion.div
@@ -124,7 +141,9 @@ const Header = () => {
                   <div className="flex items-center justify-between">
                     <Link
                       to={item.path}
-                      className={`block py-3 text-base font-medium text-foreground hover:text-accent transition-colors ${location.pathname === item.path ? "text-accent" : ""}`}
+                      className={`block py-3 text-base font-medium text-foreground hover:text-accent transition-colors ${
+                        location.pathname === item.path ? "text-accent" : ""
+                      }`}
                     >
                       {item.label.toUpperCase()}
                     </Link>
@@ -146,7 +165,7 @@ const Header = () => {
                           to={child.path}
                           className="block py-2 text-sm text-muted-foreground hover:text-accent transition-colors"
                         >
-                          {child.label.toUpperCase()}
+                          {child.label}
                         </Link>
                       ))}
                     </div>

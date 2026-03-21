@@ -18,6 +18,8 @@ const BlogDetail = lazy(() => import("./pages/BlogDetail"));
 const Gallery = lazy(() => import("./pages/Gallery"));
 const Contact = lazy(() => import("./pages/Contact"));
 const Properties = lazy(() => import("./pages/Properties"));
+const InteriorDesign = lazy(() => import("./pages/Index_InteriorDesign"));
+const Construction = lazy(() => import("./pages/Index_Construction"));
 const PropertyAdd = lazy(() => import("./pages/PropertyAdd"));
 const PropertyDetail = lazy(() => import("./pages/PropertyDetail"));
 
@@ -42,6 +44,7 @@ const App = () => (
             <Route path="/about" element={<About />} />
             <Route path="/services" element={<Services />} />
             <Route path="/services/:slug" element={<ServiceDetail />} />
+            <Route path="/services/property-search" element={<Navigate to="/properties" replace />} />
             <Route path="/portfolio" element={<PortfolioListing />} />
             {/* Redirect old slug to new slug */}
             <Route
@@ -54,6 +57,8 @@ const App = () => (
             <Route path="/gallery" element={<Gallery />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/properties" element={<Properties />} />
+            <Route path="/interior-design" element={<InteriorDesign />} />
+            <Route path="/construction-home" element={<Construction />} />
             <Route path="/properties/add" element={<PropertyAdd />} />
             <Route path="/properties/:id" element={<PropertyDetail />} />
             <Route path="*" element={<NotFound />} />

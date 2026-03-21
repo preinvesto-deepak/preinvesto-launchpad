@@ -42,22 +42,29 @@ export const IMAGES = {
 };
 
 export const NAV_ITEMS = [
-  { label: "Home", path: "/" },
+  {
+    label: "Properties",
+    path: "/properties",
+    children: [
+      { label: "All Properties", path: "/properties" },
+      { label: "Buy Property", path: "/properties?listing=sale" },
+      { label: "Rent Property", path: "/properties?listing=rent" },
+      { label: "Add Property", path: "/properties/add" },
+    ],
+  },
   { label: "About Us", path: "/about" },
   {
     label: "Services",
     path: "/services",
     children: [
-      { label: "Affordable Property Search", path: "/services/property-search" },
-      { label: "Property Construction", path: "/services/construction" },
-      { label: "Interior Design", path: "/services/interior-design" },
-      { label: "Properties", path: "/properties" },
+      { label: "Property Search", path: "/properties" },
+      { label: "Property Construction", path: "/construction-home" },
+      { label: "Interior Design", path: "/interior-design" },
     ],
   },
   { label: "Portfolio", path: "/portfolio" },
   { label: "Blogs", path: "/blog" },
   { label: "Gallery", path: "/gallery" },
-  
 ];
 
 export const JOURNEY_STEPS = [
@@ -93,7 +100,7 @@ export const JOURNEY_STEPS = [
 
 export const SERVICES = [
   {
-    title: "Affordable Property Search",
+    title: "Property Search",
     slug: "property-search",
     description: "We help you discover the perfect property at a price that fits your budget. Our network of verified listings and expert agents ensures you find your dream home without the stress.",
     image: propertySearchImg,

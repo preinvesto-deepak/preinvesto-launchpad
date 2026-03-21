@@ -1,45 +1,76 @@
-import { useState, useEffect, useCallback } from "react";
-import SEED_PROPERTIES, { type Property } from "@/data/propertiesSeed";
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
+import type { Property } from '@/data/propertiesSeed';
 
-const STORAGE_KEY = "preinvesto_properties";
-
-function loadProperties(): Property[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const parsed: Property[] = JSON.parse(stored);
-      // Merge: keep user-added, update seeds
-      const userAdded = parsed.filter((p) => !p.id.startsWith("seed-"));
-      const seedIds = new Set(SEED_PROPERTIES.map((s) => s.id));
-      const existingSeeds = parsed.filter((p) => seedIds.has(p.id));
-      // Use seeds from data, but keep stored seeds if they exist
-      const mergedSeeds = SEED_PROPERTIES.map(
-        (s) => existingSeeds.find((e) => e.id === s.id) || s
-      );
-      return [...userAdded, ...mergedSeeds];
-    }
-  } catch {
-    // ignore
-  }
-  return [...SEED_PROPERTIES];
+function mapRow(row: any): Property {
+  return {
+    id: row.id,
+    listingType: row.listing_type,
+    propertyType: row.property_type,
+    listedBy: row.listed_by,
+    title: row.title,
+    description: row.description,
+    price: row.price,
+    rentPerMonth: row.rent_per_month,
+    securityDeposit: row.security_deposit,
+    maintenanceCharges: row.maintenance_charges,
+    negotiable: row.negotiable,
+    city: row.city,
+    locality: row.locality,
+    projectName: row.project_name,
+    fullAddress: row.full_address,
+    landmark: row.landmark,
+    pincode: row.pincode,
+    lat: row.lat,
+    lng: row.lng,
+    builtUpArea: row.built_up_area,
+    carpetArea: row.carpet_area,
+    bedrooms: row.bedrooms,
+    bathrooms: row.bathrooms,
+    balconies: row.balconies,
+    floor: row.floor,
+    totalFloors: row.total_floors,
+    facing: row.facing,
+    furnishing: row.furnishing,
+    parking: row.parking,
+    propertyAge: row.property_age,
+    availabilityDate: row.availability_date,
+    possessionStatus: row.possession_status,
+    amenities: row.amenities ?? [],
+    featuredImage: row.featured_image,
+    galleryImages: row.gallery_images ?? [],
+    videoUrl: row.video_url,
+    contactName: row.contact_name,
+    contactPhone: row.contact_phone,
+    contactEmail: row.contact_email,
+    preferWhatsApp: row.prefer_whatsapp,
+    createdAt: row.created_at,
+  };
 }
 
 export function useProperties() {
-  const [properties, setProperties] = useState<Property[]>(loadProperties);
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(properties));
-  }, [properties]);
+    async function fetchProperties() {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('properties')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-  const addProperty = useCallback((property: Omit<Property, "id" | "createdAt">) => {
-    const newProp: Property = {
-      ...property,
-      id: `user-${Date.now()}`,
-      createdAt: new Date().toISOString(),
-    };
-    setProperties((prev) => [newProp, ...prev]);
-    return newProp;
+      if (error) {
+        setError(error.message);
+      } else {
+        setProperties((data ?? []).map(mapRow));
+      }
+      setLoading(false);
+    }
+
+    fetchProperties();
   }, []);
 
-  return { properties, addProperty };
+  return { properties, loading, error };
 }
