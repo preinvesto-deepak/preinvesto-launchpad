@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS properties (
-  id                  VARCHAR(36)    PRIMARY KEY DEFAULT (UUID()),
+  id                  VARCHAR(36)    PRIMARY KEY,
   listing_type        VARCHAR(10)    NOT NULL,
   property_type       VARCHAR(50)    NOT NULL,
   listed_by           VARCHAR(20)    NOT NULL,
@@ -31,9 +31,9 @@ CREATE TABLE IF NOT EXISTS properties (
   property_age        VARCHAR(20)    NOT NULL,
   availability_date   DATE           NULL,
   possession_status   VARCHAR(30)    NOT NULL,
-  amenities           JSON           NOT NULL DEFAULT ('[]'),
+  amenities           JSON           NOT NULL DEFAULT (JSON_ARRAY()),
   featured_image      VARCHAR(500)   NOT NULL,
-  gallery_images      JSON           NOT NULL DEFAULT ('[]'),
+  gallery_images      JSON           NOT NULL DEFAULT (JSON_ARRAY()),
   video_url           VARCHAR(500)   NULL,
   contact_name        VARCHAR(100)   NOT NULL,
   contact_phone       VARCHAR(20)    NOT NULL,
