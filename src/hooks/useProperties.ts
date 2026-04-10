@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
 import type { Property } from '@/data/propertiesSeed';
+
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 function mapRow(row: any): Property {
   return {
@@ -56,15 +57,13 @@ export function useProperties() {
   useEffect(() => {
     async function fetchProperties() {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('properties')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        setError(error.message);
-      } else {
+      try {
+        const res = await fetch(`${API_URL}/api/properties`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
         setProperties((data ?? []).map(mapRow));
+      } catch (err: any) {
+        setError(err.message);
       }
       setLoading(false);
     }
