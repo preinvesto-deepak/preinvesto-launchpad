@@ -12,6 +12,10 @@ export default defineConfig(({ mode }) => ({
       overlay: false,
     },
     proxy: {
+      '/api/properties.php': {
+        target: 'http://localhost:3001',
+        rewrite: () => '/api/properties',
+      },
       '/api': 'http://localhost:3001',
     },
   },

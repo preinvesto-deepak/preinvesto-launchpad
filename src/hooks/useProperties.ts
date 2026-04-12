@@ -58,7 +58,7 @@ export function useProperties() {
     async function fetchProperties() {
       setLoading(true);
       try {
-        const res = await fetch(`${API_URL}/api/properties`);
+        const res = await fetch(`${API_URL}/api/properties.php`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setProperties((data ?? []).map(mapRow));
