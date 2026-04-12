@@ -13,6 +13,8 @@ dist-ssr
 *.local
 server/.env
 public/api/db-config.php
+public/uploads/properties/*
+!public/uploads/properties/.gitkeep
 
 # Editor directories and files
 .vscode/*
