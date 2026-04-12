@@ -35,7 +35,7 @@ const FieldError = ({ error }: { error?: string }) =>
 
 const PropertyAdd = () => {
   const navigate = useNavigate();
-  const { addProperty } = useProperties();
+  const { addProperty, submitting } = useProperties();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const featuredInputRef = useRef<HTMLInputElement>(null);
@@ -79,7 +79,9 @@ const PropertyAdd = () => {
   const [amenities, setAmenities] = useState<string[]>([]);
 
   const [featuredPreview, setFeaturedPreview] = useState<string | null>(null);
+  const [featuredFile, setFeaturedFile] = useState<File | null>(null);
   const [galleryPreviews, setGalleryPreviews] = useState<string[]>([]);
+  const [galleryFiles, setGalleryFiles] = useState<File[]>([]);
 
   const [contactName, setContactName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
@@ -99,6 +101,7 @@ const PropertyAdd = () => {
       setErrors((prev) => ({ ...prev, featuredImage: "Only JPG, PNG, WEBP allowed" }));
       return;
     }
+    setFeaturedFile(file);
     const reader = new FileReader();
     reader.onload = () => {
       setFeaturedPreview(reader.result as string);
@@ -111,16 +114,19 @@ const PropertyAdd = () => {
     const files = e.target.files;
     if (!files) return;
     const newPreviews: string[] = [];
+    const newFiles: File[] = [];
     const remaining = 10 - galleryPreviews.length;
     const toProcess = Array.from(files).slice(0, remaining);
 
     toProcess.forEach((file) => {
       if (file.size > 5 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) return;
+      newFiles.push(file);
       const reader = new FileReader();
       reader.onload = () => {
         newPreviews.push(reader.result as string);
-        if (newPreviews.length === toProcess.length) {
+        if (newPreviews.length === newFiles.length) {
           setGalleryPreviews((prev) => [...prev, ...newPreviews]);
+          setGalleryFiles((prev) => [...prev, ...newFiles]);
         }
       };
       reader.readAsDataURL(file);
@@ -129,6 +135,7 @@ const PropertyAdd = () => {
 
   const removeGalleryImage = (index: number) => {
     setGalleryPreviews((prev) => prev.filter((_, i) => i !== index));
+    setGalleryFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const toggleAmenity = (a: string) => {
@@ -158,7 +165,7 @@ const PropertyAdd = () => {
     return Object.keys(errs).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) {
       toast({ title: "Please fix the errors", variant: "destructive" });
@@ -166,51 +173,61 @@ const PropertyAdd = () => {
       return;
     }
 
-    // For demo: store image data URLs as the image sources
-    // In production, these would upload to a storage service
-    addProperty({
-      listingType,
-      propertyType,
-      listedBy,
-      title: title.trim(),
-      description: description.trim(),
-      price: Number(price),
-      rentPerMonth: listingType === "rent" ? Number(price) : undefined,
-      securityDeposit: securityDeposit ? Number(securityDeposit) : undefined,
-      maintenanceCharges: maintenanceCharges ? Number(maintenanceCharges) : undefined,
-      negotiable,
-      city: city.trim(),
-      locality: locality.trim(),
-      projectName: projectName.trim() || undefined,
-      fullAddress: fullAddress.trim() || undefined,
-      landmark: landmark.trim() || undefined,
-      pincode: pincode.trim() || undefined,
-      lat: lat ? Number(lat) : undefined,
-      lng: lng ? Number(lng) : undefined,
-      builtUpArea: Number(builtUpArea),
-      carpetArea: carpetArea ? Number(carpetArea) : undefined,
-      bedrooms: bedrooms ? Number(bedrooms) : undefined,
-      bathrooms: bathrooms ? Number(bathrooms) : undefined,
-      balconies: balconies ? Number(balconies) : undefined,
-      floor: floor ? Number(floor) : undefined,
-      totalFloors: totalFloors ? Number(totalFloors) : undefined,
-      facing: facing || undefined,
-      furnishing,
-      parking: parking || "None",
-      propertyAge: propertyAge || "0-1 years",
-      availabilityDate: availabilityDate || undefined,
-      possessionStatus,
-      amenities,
-      featuredImage: featuredPreview || "/placeholder.svg",
-      galleryImages: galleryPreviews,
-      contactName: contactName.trim(),
-      contactPhone: contactPhone.trim(),
-      contactEmail: contactEmail.trim() || undefined,
-      preferWhatsApp,
-    });
+    if (!featuredFile) {
+      setErrors((prev) => ({ ...prev, featuredImage: "Featured image is required" }));
+      return;
+    }
 
-    toast({ title: "Property listed successfully!" });
-    navigate("/properties?sort=newest");
+    try {
+      await addProperty(
+        {
+          listingType,
+          propertyType,
+          listedBy,
+          title: title.trim(),
+          description: description.trim(),
+          price: Number(price),
+          rentPerMonth: listingType === "rent" ? Number(price) : undefined,
+          securityDeposit: securityDeposit ? Number(securityDeposit) : undefined,
+          maintenanceCharges: maintenanceCharges ? Number(maintenanceCharges) : undefined,
+          negotiable,
+          city: city.trim(),
+          locality: locality.trim(),
+          projectName: projectName.trim() || undefined,
+          fullAddress: fullAddress.trim() || undefined,
+          landmark: landmark.trim() || undefined,
+          pincode: pincode.trim() || undefined,
+          lat: lat ? Number(lat) : undefined,
+          lng: lng ? Number(lng) : undefined,
+          builtUpArea: Number(builtUpArea),
+          carpetArea: carpetArea ? Number(carpetArea) : undefined,
+          bedrooms: bedrooms ? Number(bedrooms) : undefined,
+          bathrooms: bathrooms ? Number(bathrooms) : undefined,
+          balconies: balconies ? Number(balconies) : undefined,
+          floor: floor ? Number(floor) : undefined,
+          totalFloors: totalFloors ? Number(totalFloors) : undefined,
+          facing: facing || undefined,
+          furnishing,
+          parking: parking || "None",
+          propertyAge: propertyAge || "0-1 years",
+          availabilityDate: availabilityDate || undefined,
+          possessionStatus,
+          amenities,
+          featuredImage: "",
+          galleryImages: [],
+          contactName: contactName.trim(),
+          contactPhone: contactPhone.trim(),
+          contactEmail: contactEmail.trim() || undefined,
+          preferWhatsApp,
+        },
+        featuredFile,
+        galleryFiles
+      );
+      toast({ title: "Property listed successfully!" });
+      navigate("/properties?sort=newest");
+    } catch (err: any) {
+      toast({ title: "Failed to submit property", description: err.message, variant: "destructive" });
+    }
   };
 
   const inputClass = "w-full border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent";
@@ -445,7 +462,7 @@ const PropertyAdd = () => {
                     <img src={featuredPreview} alt="Featured" className="max-h-40 rounded" />
                     <button
                       type="button"
-                      onClick={(e) => { e.stopPropagation(); setFeaturedPreview(null); }}
+                      onClick={(e) => { e.stopPropagation(); setFeaturedPreview(null); setFeaturedFile(null); }}
                       className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-0.5"
                     >
                       <X className="w-3 h-3" />
@@ -518,9 +535,10 @@ const PropertyAdd = () => {
             <div className="pt-6 border-t border-border mt-8">
               <button
                 type="submit"
-                className="w-full sm:w-auto px-8 py-3 bg-accent text-accent-foreground font-semibold rounded-lg hover:opacity-90 transition-opacity text-sm"
+                disabled={submitting}
+                className="w-full sm:w-auto px-8 py-3 bg-accent text-accent-foreground font-semibold rounded-lg hover:opacity-90 transition-opacity text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                SUBMIT PROPERTY
+                {submitting ? "UPLOADING..." : "SUBMIT PROPERTY"}
               </button>
             </div>
           </form>

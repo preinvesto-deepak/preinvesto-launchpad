@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import type { Property } from '@/data/propertiesSeed';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -49,27 +49,103 @@ function mapRow(row: any): Property {
   };
 }
 
+async function uploadImage(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append('image', file);
+  const res = await fetch(`${API_URL}/api/upload_image.php`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) throw new Error('Image upload failed');
+  const { url } = await res.json();
+  return url;
+}
+
 export function useProperties() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    async function fetchProperties() {
-      setLoading(true);
-      try {
-        const res = await fetch(`${API_URL}/api/properties.php`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        setProperties((data ?? []).map(mapRow));
-      } catch (err: any) {
-        setError(err.message);
-      }
-      setLoading(false);
+  const fetchProperties = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/properties.php`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setProperties((data ?? []).map(mapRow));
+    } catch (err: any) {
+      setError(err.message);
     }
-
-    fetchProperties();
+    setLoading(false);
   }, []);
 
-  return { properties, loading, error };
+  useEffect(() => {
+    fetchProperties();
+  }, [fetchProperties]);
+
+  async function addProperty(
+    property: Omit<Property, 'id' | 'createdAt'>,
+    featuredFile: File,
+    galleryFiles: File[]
+  ): Promise<void> {
+    setSubmitting(true);
+    try {
+      const featuredImage = await uploadImage(featuredFile);
+      const galleryImages = await Promise.all(galleryFiles.map(uploadImage));
+
+      const res = await fetch(`${API_URL}/api/add_property.php`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          listing_type:        property.listingType,
+          property_type:       property.propertyType,
+          listed_by:           property.listedBy,
+          title:               property.title,
+          description:         property.description,
+          price:               property.price,
+          rent_per_month:      property.rentPerMonth      ?? null,
+          security_deposit:    property.securityDeposit   ?? null,
+          maintenance_charges: property.maintenanceCharges ?? null,
+          negotiable:          property.negotiable,
+          city:                property.city,
+          locality:            property.locality,
+          project_name:        property.projectName       ?? null,
+          full_address:        property.fullAddress        ?? null,
+          landmark:            property.landmark          ?? null,
+          pincode:             property.pincode           ?? null,
+          lat:                 property.lat               ?? null,
+          lng:                 property.lng               ?? null,
+          built_up_area:       property.builtUpArea,
+          carpet_area:         property.carpetArea        ?? null,
+          bedrooms:            property.bedrooms          ?? null,
+          bathrooms:           property.bathrooms         ?? null,
+          balconies:           property.balconies         ?? null,
+          floor:               property.floor             ?? null,
+          total_floors:        property.totalFloors       ?? null,
+          facing:              property.facing            ?? null,
+          furnishing:          property.furnishing,
+          parking:             property.parking,
+          property_age:        property.propertyAge,
+          availability_date:   property.availabilityDate  ?? null,
+          possession_status:   property.possessionStatus,
+          amenities:           property.amenities,
+          featured_image:      featuredImage,
+          gallery_images:      galleryImages,
+          video_url:           property.videoUrl          ?? null,
+          contact_name:        property.contactName,
+          contact_phone:       property.contactPhone,
+          contact_email:       property.contactEmail      ?? null,
+          prefer_whatsapp:     property.preferWhatsApp,
+        }),
+      });
+
+      if (!res.ok) throw new Error('Failed to add property');
+      await fetchProperties();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return { properties, loading, error, submitting, addProperty };
 }
