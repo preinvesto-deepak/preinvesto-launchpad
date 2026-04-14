@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, MapPin, BedDouble, Bath, Maximize, Phone, ChevronLeft, ChevronRight, Building2, Calendar, Car, Compass, Home, Layers } from "lucide-react";
+import { ArrowLeft, MapPin, BedDouble, Bath, Maximize, Phone, ChevronLeft, ChevronRight, Building2, Calendar, Car, Compass, Home, Layers, Pencil, Trash2, Tag } from "lucide-react";
 import Header from "@/components/layout/Header";
 import WhatsAppButton from "@/components/layout/WhatsAppButton";
 import { useProperties } from "@/hooks/useProperties";
 import SEO from "@/components/SEO";
+import { useToast } from "@/hooks/use-toast";
+import { useAdmin } from "@/context/AdminContext";
 
 function formatPrice(price: number, listingType: string) {
   if (listingType === "rent") return `₹${price.toLocaleString("en-IN")}/mo`;
@@ -13,12 +15,23 @@ function formatPrice(price: number, listingType: string) {
   return `₹${price.toLocaleString("en-IN")}`;
 }
 
+const statusLabels: Record<string, { label: string; color: string }> = {
+  available: { label: "Available", color: "bg-green-600 text-white" },
+  sold:      { label: "Sold",      color: "bg-red-600 text-white" },
+  rented:    { label: "Rented",    color: "bg-blue-600 text-white" },
+};
+
 const PropertyDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { properties } = useProperties();
+  const { properties, updateStatus, deleteProperty } = useProperties();
+  const { isAdmin } = useAdmin();
+  const { toast } = useToast();
   const property = useMemo(() => properties.find((p) => p.id === id), [properties, id]);
   const [currentImage, setCurrentImage] = useState(0);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   if (!property) {
     return (
@@ -35,11 +48,36 @@ const PropertyDetail = () => {
   }
 
   const allImages = [property.featuredImage, ...property.galleryImages];
+  const currentStatus = property.status ?? 'available';
+  const isPlot = property.propertyCategory === 'plot';
 
   const whatsappMsg = encodeURIComponent(`Hi, I'm interested in: ${property.title} - ${formatPrice(property.price, property.listingType)} (${property.locality}, ${property.city})`);
   const whatsappLink = `https://wa.me/91${property.contactPhone}?text=${whatsappMsg}`;
 
-  const details = [
+  // Cost per sft / sq yard
+  const isRent = property.listingType === 'rent';
+  const costPerSft = !isPlot && property.builtUpArea > 0
+    ? (isRent ? (property.rentPerMonth ?? 0) : property.price) / property.builtUpArea : null;
+  const costPerSqYard = isPlot && property.plotArea && property.plotArea > 0
+    ? (isRent ? (property.rentPerMonth ?? 0) : property.price) / property.plotArea : null;
+
+  const details = isPlot ? [
+    // Plot-specific details
+    { icon: Home, label: "Type", value: property.propertyType },
+    property.plotArea    ? { icon: Maximize,  label: "Plot Area",         value: `${property.plotArea} sq.yd` } : null,
+    property.plotLength && property.plotWidth
+      ? { icon: Maximize, label: "Dimensions", value: `${property.plotLength} × ${property.plotWidth} ft` } : null,
+    property.ownership   ? { icon: Home,       label: "Ownership",         value: property.ownership } : null,
+    property.facing      ? { icon: Compass,    label: "Facing",            value: property.facing } : null,
+    property.facingRoadWidth ? { icon: Maximize, label: "Road Width",      value: `${property.facingRoadWidth} ft` } : null,
+    property.boundaryWall    ? { icon: Building2, label: "Boundary Wall",  value: property.boundaryWall } : null,
+    property.floorsAllowed   ? { icon: Layers,   label: "Floors Allowed",  value: `${property.floorsAllowed}` } : null,
+    { icon: Home, label: "Electricity", value: property.electricityConnection ? "Available" : "Not Available" },
+    { icon: Home, label: "Water Supply", value: property.waterSupply ? "Available" : "Not Available" },
+    { icon: Home, label: "Sewage",       value: property.sewageConnection ? "Available" : "Not Available" },
+    { icon: Home, label: "Possession",   value: property.possessionStatus },
+  ].filter(Boolean) as { icon: any; label: string; value: string }[] : [
+    // Building / commercial details
     { icon: Home, label: "Type", value: property.propertyType },
     { icon: Maximize, label: "Built-up Area", value: `${property.builtUpArea} sqft` },
     property.carpetArea ? { icon: Maximize, label: "Carpet Area", value: `${property.carpetArea} sqft` } : null,
@@ -54,6 +92,30 @@ const PropertyDetail = () => {
     { icon: Home, label: "Possession", value: property.possessionStatus },
   ].filter(Boolean) as { icon: any; label: string; value: string }[];
 
+  async function handleStatusChange(newStatus: 'available' | 'sold' | 'rented') {
+    if (newStatus === currentStatus) return;
+    setStatusUpdating(true);
+    try {
+      await updateStatus(property.id, newStatus);
+      toast({ title: `Marked as ${statusLabels[newStatus].label}` });
+    } catch (err: any) {
+      toast({ title: "Failed to update status", description: err.message, variant: "destructive" });
+    }
+    setStatusUpdating(false);
+  }
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await deleteProperty(property.id);
+      toast({ title: "Property deleted" });
+      navigate("/properties");
+    } catch (err: any) {
+      toast({ title: "Failed to delete", description: err.message, variant: "destructive" });
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <SEO title={`${property.title} | Preinvesto Properties`} description={property.description.slice(0, 160)} />
@@ -64,15 +126,112 @@ const PropertyDetail = () => {
             <ArrowLeft className="w-4 h-4" /> Back
           </button>
 
+          {/* Admin Actions Bar — only visible to admin */}
+          {isAdmin && <div className="flex flex-wrap items-center gap-3 bg-card border border-border rounded-lg px-4 py-3 mb-5">
+            {/* Current status badge */}
+            <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${statusLabels[currentStatus]?.color ?? 'bg-muted text-foreground'}`}>
+              {statusLabels[currentStatus]?.label ?? currentStatus}
+            </span>
+
+            {/* Status change */}
+            <div className="flex items-center gap-1.5 ml-auto flex-wrap">
+              <Tag className="w-4 h-4 text-muted-foreground shrink-0" />
+              <span className="text-xs text-muted-foreground">Mark as:</span>
+              {(['available', 'sold', 'rented'] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => handleStatusChange(s)}
+                  disabled={statusUpdating || s === currentStatus}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed
+                    ${s === currentStatus
+                      ? 'bg-muted text-foreground cursor-default'
+                      : s === 'available' ? 'bg-green-100 text-green-800 hover:bg-green-200'
+                      : s === 'sold'      ? 'bg-red-100 text-red-800 hover:bg-red-200'
+                      :                    'bg-blue-100 text-blue-800 hover:bg-blue-200'
+                    }`}
+                >
+                  {s.charAt(0).toUpperCase() + s.slice(1)}
+                </button>
+              ))}
+
+              {/* Divider */}
+              <span className="w-px h-5 bg-border mx-1" />
+
+              {/* Edit */}
+              <Link
+                to={`/properties/${property.id}/edit`}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-accent-foreground rounded-md text-xs font-medium hover:opacity-90 transition-opacity"
+              >
+                <Pencil className="w-3 h-3" /> Edit
+              </Link>
+
+              {/* Delete */}
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-destructive text-destructive-foreground rounded-md text-xs font-medium hover:opacity-90 transition-opacity"
+              >
+                <Trash2 className="w-3 h-3" /> Delete
+              </button>
+            </div>
+          </div>}
+
+          {/* Delete confirmation modal */}
+          {isAdmin && showDeleteConfirm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+              <div className="bg-card border border-border rounded-xl p-6 max-w-sm w-full shadow-xl">
+                <h3 className="font-bold text-foreground text-lg mb-2">Delete Property?</h3>
+                <p className="text-sm text-muted-foreground mb-5">
+                  This will permanently delete <span className="font-medium text-foreground">"{property.title}"</span>. This action cannot be undone.
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="flex-1 py-2 border border-border rounded-lg text-sm text-foreground hover:bg-muted transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className="flex-1 py-2 bg-destructive text-destructive-foreground rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+                  >
+                    {deleting ? "Deleting..." : "Yes, Delete"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Image Carousel */}
           <div className="relative rounded-xl overflow-hidden bg-muted mb-6">
             <div className="aspect-video relative">
               <img
                 src={allImages[currentImage]}
                 alt={property.title}
-                className="w-full h-full object-cover"
+                className={`w-full h-full object-cover ${(currentStatus === 'sold' || currentStatus === 'rented') ? 'opacity-70' : ''}`}
                 onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.svg"; }}
               />
+              {(currentStatus === 'sold' || currentStatus === 'rented') && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                  <div style={{
+                    transform: "rotate(-25deg)",
+                    border: "4px solid rgba(220,38,38,0.9)",
+                    color: "rgba(220,38,38,0.9)",
+                    fontSize: "clamp(24px, 5vw, 48px)",
+                    fontWeight: 900,
+                    padding: "6px 28px",
+                    letterSpacing: "6px",
+                    borderRadius: "4px",
+                    background: "rgba(255,255,255,0.15)",
+                    backdropFilter: "blur(1px)",
+                    textShadow: "0 1px 3px rgba(0,0,0,0.4)",
+                    userSelect: "none",
+                    whiteSpace: "nowrap",
+                  }}>
+                    {currentStatus === 'sold' ? 'SOLD' : 'RENTED'}
+                  </div>
+                </div>
+              )}
               {allImages.length > 1 && (
                 <>
                   <button
@@ -132,6 +291,8 @@ const PropertyDetail = () => {
                   </div>
                   <div className="text-right">
                     <p className="text-accent font-bold text-2xl">{formatPrice(property.price, property.listingType)}</p>
+                    {costPerSft    && <p className="text-sm text-muted-foreground">₹{Math.round(costPerSft).toLocaleString("en-IN")}/{isRent ? "sft/mo" : "sft"}</p>}
+                    {costPerSqYard && <p className="text-sm text-muted-foreground">₹{Math.round(costPerSqYard).toLocaleString("en-IN")}/{isRent ? "sq yd/mo" : "sq yd"}</p>}
                     {property.negotiable && <span className="text-xs text-muted-foreground">Negotiable</span>}
                   </div>
                 </div>
@@ -172,7 +333,7 @@ const PropertyDetail = () => {
               )}
 
               {/* Additional Info */}
-              {(property.securityDeposit || property.maintenanceCharges || property.projectName || property.landmark) && (
+              {(property.securityDeposit || property.maintenanceCharges || property.projectName || property.landmark || property.listedBy) && (
                 <div className="bg-card rounded-lg border border-border p-5">
                   <h2 className="font-semibold text-foreground mb-3">Additional Information</h2>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">

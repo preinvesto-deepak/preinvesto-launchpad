@@ -1,5 +1,5 @@
 import Footer from "@/components/layout/Footer";
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, MapPin } from "lucide-react";
 import { IMAGES } from "@/data/content";
@@ -11,11 +11,19 @@ import JourneySteps from "@/components/home/JourneySteps";
 import Testimonials from "@/components/home/Testimonials";
 import TrustSection from "@/components/home/TrustSection";
 import ContactTeaser from "@/components/home/ContactTeaser";
+import { getPlacePredictions, getPlaceDetails } from "@/hooks/useGooglePlaces";
+import type { GooglePlace, PlacePrediction } from "@/hooks/useGooglePlaces";
 
-const TABS = [
-  { label: "Buy", listingType: "sale" },
-  { label: "Rent", listingType: "rent" },
-  { label: "New Projects", listingType: "new" },
+const LISTING_TABS = [
+  { label: "Buy",          value: "sale" },
+  { label: "Rent",         value: "rent" },
+  { label: "New Projects", value: "new"  },
+];
+
+const CATEGORY_TABS = [
+  { label: "Building",   value: "building"   },
+  { label: "Plot",       value: "plot"       },
+  { label: "Commercial", value: "commercial" },
 ];
 
 const POPULAR = [
@@ -26,20 +34,73 @@ const POPULAR = [
 const PropertyHero = () => {
   const navigate = useNavigate();
   const { properties } = useProperties();
-  const [activeTab, setActiveTab] = useState(0);
-  const [search, setSearch] = useState("");
+
+  // Default: BUY + BUILDING
+  const [listing,  setListing]  = useState("sale");
+  const [category, setCategory] = useState("building");
+  const [search,   setSearch]   = useState("");
+  const [radius,   setRadius]   = useState(5);
+  const [selectedPlace, setSelectedPlace] = useState<GooglePlace | null>(null);
+  const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wrapperRef  = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const fetchPredictions = useCallback((value: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!value.trim()) { setPredictions([]); setShowDropdown(false); return; }
+    debounceRef.current = setTimeout(() => {
+      getPlacePredictions(value, (preds) => {
+        setPredictions(preds);
+        setShowDropdown(preds.length > 0);
+      });
+    }, 300);
+  }, []);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value;
+    setSearch(v);
+    setSelectedPlace(null);
+    fetchPredictions(v);
+  };
+
+  const handleSelectPrediction = (pred: PlacePrediction) => {
+    setSearch(pred.description);
+    setPredictions([]);
+    setShowDropdown(false);
+    getPlaceDetails(pred.placeId, (place) => {
+      if (place) setSelectedPlace(place);
+    });
+  };
 
   const handleSearch = () => {
+    setShowDropdown(false);
     const params = new URLSearchParams();
-    if (search) params.set("q", search);
-    if (TABS[activeTab].listingType !== "new") {
-      params.set("listing", TABS[activeTab].listingType);
+    if (search.trim()) params.set("lm", search.trim());
+    params.set("listing", listing);
+    params.set("cat", category);
+    params.set("radius", String(radius));
+    if (selectedPlace) {
+      params.set("lat", String(selectedPlace.lat));
+      params.set("lng", String(selectedPlace.lng));
     }
     navigate(`/properties?${params.toString()}`);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") handleSearch();
+    if (e.key === "Escape") setShowDropdown(false);
   };
 
   const forSale = properties.filter(p => p.listingType === "sale").length;
@@ -83,100 +144,190 @@ const PropertyHero = () => {
             style={{
               backgroundColor: "white",
               boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
-              overflow: "hidden",
-              maxWidth: "760px",
+              maxWidth: "800px",
               margin: "0 auto 40px auto",
               borderRadius: "16px",
             }}
           >
-            {/* Tabs */}
+            {/* Row 1: BUY / RENT / NEW PROJECTS */}
             <div style={{ display: "flex", borderBottom: "1px solid #f0f0f0" }}>
-              {TABS.map((tab, i) => (
+              {LISTING_TABS.map(tab => (
                 <button
-                  key={tab.label}
-                  onClick={() => setActiveTab(i)}
+                  key={tab.value}
+                  onClick={() => setListing(tab.value)}
                   style={{
                     flex: 1,
                     padding: "14px 0",
                     fontSize: "14px",
-                    fontWeight: 600,
+                    fontWeight: 700,
                     border: "none",
-                    borderBottom: activeTab === i ? "2px solid #C2570A" : "2px solid transparent",
+                    borderBottom: listing === tab.value ? "3px solid #C2570A" : "3px solid transparent",
                     cursor: "pointer",
-                    backgroundColor: activeTab === i ? "#fff7ed" : "white",
-                    color: activeTab === i ? "#C2570A" : "#666",
+                    backgroundColor: listing === tab.value ? "#fff7ed" : "white",
+                    color: listing === tab.value ? "#C2570A" : "#666",
                     transition: "all 0.2s",
+                    letterSpacing: "0.03em",
                   }}
                 >
-                  {tab.label}
+                  {tab.label.toUpperCase()}
                 </button>
               ))}
             </div>
 
-            {/* Search Input */}
-            <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "16px" }}>
-              <div
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "10px",
-                  backgroundColor: "#f8f8f8",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: "10px",
-                  padding: "12px 16px",
-                }}
-              >
-                <MapPin style={{ width: "18px", height: "18px", color: "#C2570A", flexShrink: 0 }} />
-                <input
-                  type="text"
-                  placeholder="Search by locality, project or property type..."
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  style={{ flex: 1, border: "none", background: "transparent", fontSize: "14px", color: "#1a1a1a", outline: "none" }}
-                />
-                {search && (
-                  <button
-                    onClick={() => setSearch("")}
-                    style={{ border: "none", background: "none", cursor: "pointer", color: "#999", fontSize: "12px" }}
-                  >
-                    ✕
-                  </button>
+            {/* Row 2: BUILDING / PLOT / COMMERCIAL */}
+            <div style={{ display: "flex", gap: "8px", padding: "12px 16px 8px", borderBottom: "1px solid #f0f0f0" }}>
+              {CATEGORY_TABS.map(cat => (
+                <button
+                  key={cat.value}
+                  onClick={() => setCategory(cat.value)}
+                  style={{
+                    padding: "6px 18px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    border: category === cat.value ? "2px solid #C2570A" : "2px solid #e5e7eb",
+                    borderRadius: "9999px",
+                    cursor: "pointer",
+                    backgroundColor: category === cat.value ? "#C2570A" : "white",
+                    color: category === cat.value ? "white" : "#555",
+                    transition: "all 0.2s",
+                  }}
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Row 3: Search input + radius + button */}
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px" }}>
+              {/* Search input with custom autocomplete dropdown */}
+              <div ref={wrapperRef} style={{ flex: 1, position: "relative" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    backgroundColor: "#f8f8f8",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "10px",
+                    padding: "10px 14px",
+                  }}
+                >
+                  <MapPin style={{ width: "18px", height: "18px", color: "#C2570A", flexShrink: 0 }} />
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    placeholder="Search locality, landmark or project name..."
+                    value={search}
+                    onChange={handleInputChange}
+                    onKeyDown={handleKeyDown}
+                    onFocus={() => predictions.length > 0 && setShowDropdown(true)}
+                    style={{ flex: 1, border: "none", background: "transparent", fontSize: "14px", color: "#1a1a1a", outline: "none", minWidth: 0 }}
+                  />
+                  {search && (
+                    <button onClick={() => { setSearch(""); setPredictions([]); setShowDropdown(false); setSelectedPlace(null); }}
+                      style={{ border: "none", background: "none", cursor: "pointer", color: "#999", fontSize: "14px", flexShrink: 0 }}>✕</button>
+                  )}
+                </div>
+
+                {/* Custom predictions dropdown */}
+                {showDropdown && predictions.length > 0 && (
+                  <div style={{
+                    position: "absolute",
+                    top: "calc(100% + 4px)",
+                    left: 0,
+                    right: 0,
+                    backgroundColor: "white",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "10px",
+                    boxShadow: "0 8px 30px rgba(0,0,0,0.15)",
+                    zIndex: 9999,
+                    overflow: "hidden",
+                  }}>
+                    {predictions.map((pred, i) => (
+                      <div
+                        key={pred.placeId}
+                        onMouseDown={() => handleSelectPrediction(pred)}
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: "10px",
+                          padding: "10px 14px",
+                          cursor: "pointer",
+                          borderTop: i > 0 ? "1px solid #f3f4f6" : "none",
+                          backgroundColor: "white",
+                          transition: "background-color 0.1s",
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.backgroundColor = "#fff7ed")}
+                        onMouseLeave={e => (e.currentTarget.style.backgroundColor = "white")}
+                      >
+                        <MapPin style={{ width: "15px", height: "15px", color: "#C2570A", flexShrink: 0, marginTop: "2px" }} />
+                        <div>
+                          <div style={{ fontSize: "13px", fontWeight: 600, color: "#1a1a1a" }}>{pred.mainText}</div>
+                          {pred.secondaryText && (
+                            <div style={{ fontSize: "11px", color: "#888", marginTop: "2px" }}>{pred.secondaryText}</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
+
+              {/* Radius field — always visible */}
+              <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={radius}
+                  onChange={e => setRadius(Math.max(1, Number(e.target.value)))}
+                  style={{
+                    width: "52px",
+                    padding: "10px 6px",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "8px",
+                    fontSize: "14px",
+                    textAlign: "center",
+                    outline: "none",
+                    backgroundColor: "#f8f8f8",
+                  }}
+                />
+                <span style={{ fontSize: "12px", color: "#888", whiteSpace: "nowrap" }}>km</span>
+              </div>
+
               <button
                 onClick={handleSearch}
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: "8px",
-                  padding: "12px 24px",
+                  padding: "10px 22px",
                   backgroundColor: "#C2570A",
                   color: "white",
-                  fontWeight: 600,
+                  fontWeight: 700,
                   fontSize: "14px",
                   border: "none",
                   borderRadius: "10px",
                   cursor: "pointer",
                   flexShrink: 0,
+                  letterSpacing: "0.03em",
                 }}
               >
                 <Search style={{ width: "16px", height: "16px" }} />
-                Search
+                SEARCH
               </button>
             </div>
 
             {/* Popular localities */}
-            <div style={{ padding: "0 16px 16px", display: "flex", flexWrap: "wrap", gap: "8px" }}>
+            <div style={{ padding: "0 16px 14px", display: "flex", flexWrap: "wrap", gap: "8px" }}>
               <span style={{ fontSize: "12px", color: "#999", alignSelf: "center" }}>Popular:</span>
               {POPULAR.map(area => (
                 <button
                   key={area}
-                  onClick={() => navigate(`/properties?q=${area}`)}
+                  onClick={() => navigate(`/properties?lm=${encodeURIComponent(area)}&listing=${listing}&cat=${category}&radius=${radius}`)}
                   style={{
                     fontSize: "12px",
-                    padding: "6px 12px",
+                    padding: "5px 12px",
                     backgroundColor: "#f3f4f6",
                     color: "#555",
                     border: "none",

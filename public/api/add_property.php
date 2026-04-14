@@ -68,6 +68,22 @@ $id = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
 $amenities     = json_encode(isset($data['amenities'])     && is_array($data['amenities'])     ? $data['amenities']     : []);
 $galleryImages = json_encode(isset($data['gallery_images']) && is_array($data['gallery_images']) ? $data['gallery_images'] : []);
 
+$negotiable            = isset($data['negotiable'])              && $data['negotiable']              ? 1 : 0;
+$preferWhatsapp        = isset($data['prefer_whatsapp'])         && $data['prefer_whatsapp']         ? 1 : 0;
+$isNewProject          = isset($data['is_new_project'])          && $data['is_new_project']          ? 1 : 0;
+$electricityConnection = isset($data['electricity_connection'])  && $data['electricity_connection']  ? 1 : 0;
+$waterSupply           = isset($data['water_supply'])            && $data['water_supply']            ? 1 : 0;
+$sewageConnection      = isset($data['sewage_connection'])       && $data['sewage_connection']       ? 1 : 0;
+
+$propertyCategory = $data['property_category'] ?? null;
+$plotLength       = isset($data['plot_length'])       ? (float)$data['plot_length']       : null;
+$plotWidth        = isset($data['plot_width'])        ? (float)$data['plot_width']        : null;
+$plotArea         = isset($data['plot_area'])         ? (float)$data['plot_area']         : null;
+$ownership        = $data['ownership']        ?? null;
+$facingRoadWidth  = isset($data['facing_road_width']) ? (float)$data['facing_road_width'] : null;
+$boundaryWall     = $data['boundary_wall']    ?? null;
+$floorsAllowed    = isset($data['floors_allowed'])    ? (int)$data['floors_allowed']      : null;
+
 $stmt = $mysqli->prepare(
     'INSERT INTO properties (
         id, listing_type, property_type, listed_by, title, description, price,
@@ -77,7 +93,10 @@ $stmt = $mysqli->prepare(
         floor, total_floors, facing, furnishing, parking, property_age,
         availability_date, possession_status, amenities, featured_image,
         gallery_images, video_url, contact_name, contact_phone, contact_email,
-        prefer_whatsapp
+        prefer_whatsapp,
+        property_category, is_new_project,
+        plot_length, plot_width, plot_area, ownership, facing_road_width,
+        boundary_wall, electricity_connection, water_supply, sewage_connection, floors_allowed
     ) VALUES (
         ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
@@ -86,7 +105,10 @@ $stmt = $mysqli->prepare(
         ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?, ?,
-        ?
+        ?,
+        ?, ?,
+        ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?
     )'
 );
 
@@ -97,11 +119,8 @@ if (!$stmt) {
     exit;
 }
 
-$negotiable     = isset($data['negotiable'])      && $data['negotiable']      ? 1 : 0;
-$preferWhatsapp = isset($data['prefer_whatsapp']) && $data['prefer_whatsapp'] ? 1 : 0;
-
 $stmt->bind_param(
-    'ssssssddddissssssddiddddiiisssssssssssssi',
+    'ssssssddddissssssddiddddiiisssssssssssssissidddssiiiis',
     $id,
     $data['listing_type'],
     $data['property_type'],
@@ -141,7 +160,12 @@ $stmt->bind_param(
     $data['contact_name'],
     $data['contact_phone'],
     $data['contact_email'],
-    $preferWhatsapp
+    $preferWhatsapp,
+    $propertyCategory,       $isNewProject,
+    $plotLength,             $plotWidth,                $plotArea,
+    $ownership,              $facingRoadWidth,
+    $boundaryWall,           $electricityConnection,    $waterSupply,
+    $sewageConnection,       $floorsAllowed
 );
 
 if (!$stmt->execute()) {
