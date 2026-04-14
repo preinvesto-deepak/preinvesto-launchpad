@@ -33,10 +33,15 @@ function nval($arr, $key) {
     return isset($arr[$key]) && $arr[$key] !== '' ? $arr[$key] : null;
 }
 
-// Required field check
+// Required field check (category-aware)
+$isPlot = isset($data['property_category']) && $data['property_category'] === 'plot';
 $required = ['listing_type','property_type','listed_by','title','description',
-             'price','city','locality','built_up_area','furnishing','parking',
-             'property_age','possession_status','featured_image','contact_name','contact_phone'];
+             'price','city','locality','possession_status','featured_image',
+             'contact_name','contact_phone'];
+// built_up_area, furnishing, parking, property_age only required for non-plot
+if (!$isPlot) {
+    $required = array_merge($required, ['built_up_area','furnishing','parking','property_age']);
+}
 foreach ($required as $field) {
     if (empty($data[$field]) && $data[$field] !== 0 && $data[$field] !== false) {
         http_response_code(400);
