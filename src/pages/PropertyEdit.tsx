@@ -1,5 +1,5 @@
-import { useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useRef, useMemo, useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Upload, X, ImageIcon } from "lucide-react";
 import Header from "@/components/layout/Header";
 import WhatsAppButton from "@/components/layout/WhatsAppButton";
@@ -35,108 +35,183 @@ const FieldLabel = ({ children, required }: { children: React.ReactNode; require
 const FieldError = ({ error }: { error?: string }) =>
   error ? <p className="text-destructive text-xs mt-1">{error}</p> : null;
 
-const PropertyAdd = () => {
+const PropertyEdit = () => {
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { addProperty, submitting } = useProperties();
+  const { properties, loading, updateProperty, submitting } = useProperties();
   const { toast } = useToast();
+  const property = useMemo(() => properties.find((p) => p.id === id), [properties, id]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const featuredInputRef = useRef<HTMLInputElement>(null);
-
   const [errors, setErrors] = useState<FormErrors>({});
 
-  // Form state
-  const [listingType, setListingType] = useState<"sale" | "rent">("sale");
-  const [propertyType, setPropertyType] = useState("");
-  const [listedBy, setListedBy] = useState("");
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [price, setPrice] = useState("");
-  const [securityDeposit, setSecurityDeposit] = useState("");
-  const [maintenanceCharges, setMaintenanceCharges] = useState("");
-  const [negotiable, setNegotiable] = useState(false);
+  // Initialise form state from existing property
+  const [listingType, setListingType] = useState<"sale" | "rent">((property?.listingType as any) ?? "sale");
+  const [propertyType, setPropertyType] = useState(property?.propertyType ?? "");
+  const [listedBy, setListedBy] = useState(property?.listedBy ?? "");
+  const [title, setTitle] = useState(property?.title ?? "");
+  const [description, setDescription] = useState(property?.description ?? "");
+  const [price, setPrice] = useState(String(property?.price ?? ""));
+  const [securityDeposit, setSecurityDeposit] = useState(String(property?.securityDeposit ?? ""));
+  const [maintenanceCharges, setMaintenanceCharges] = useState(String(property?.maintenanceCharges ?? ""));
+  const [negotiable, setNegotiable] = useState(property?.negotiable ?? false);
 
-  const [city, setCity] = useState("");
-  const [locality, setLocality] = useState("");
-  const [projectName, setProjectName] = useState("");
-  const [fullAddress, setFullAddress] = useState("");
-  const [landmark, setLandmark] = useState("");
-  const [pincode, setPincode] = useState("");
-  const [lat, setLat] = useState("");
-  const [lng, setLng] = useState("");
+  const [city, setCity] = useState(property?.city ?? "");
+  const [locality, setLocality] = useState(property?.locality ?? "");
+  const [projectName, setProjectName] = useState(property?.projectName ?? "");
+  const [fullAddress, setFullAddress] = useState(property?.fullAddress ?? "");
+  const [landmark, setLandmark] = useState(property?.landmark ?? "");
+  const [pincode, setPincode] = useState(property?.pincode ?? "");
+  const [lat, setLat] = useState(String(property?.lat ?? ""));
+  const [lng, setLng] = useState(String(property?.lng ?? ""));
 
-  const [builtUpArea, setBuiltUpArea] = useState("");
-  const [carpetArea, setCarpetArea] = useState("");
-  const [bedrooms, setBedrooms] = useState("");
-  const [bathrooms, setBathrooms] = useState("");
-  const [balconies, setBalconies] = useState("");
-  const [floor, setFloor] = useState("");
-  const [totalFloors, setTotalFloors] = useState("");
-  const [facing, setFacing] = useState("");
-  const [furnishing, setFurnishing] = useState("");
-  const [parking, setParking] = useState("");
-  const [propertyAge, setPropertyAge] = useState("");
-  const [availabilityDate, setAvailabilityDate] = useState("");
-  const [possessionStatus, setPossessionStatus] = useState("");
+  const [builtUpArea, setBuiltUpArea] = useState(String(property?.builtUpArea ?? ""));
+  const [carpetArea, setCarpetArea] = useState(String(property?.carpetArea ?? ""));
+  const [bedrooms, setBedrooms] = useState(String(property?.bedrooms ?? ""));
+  const [bathrooms, setBathrooms] = useState(String(property?.bathrooms ?? ""));
+  const [balconies, setBalconies] = useState(String(property?.balconies ?? ""));
+  const [floor, setFloor] = useState(String(property?.floor ?? ""));
+  const [totalFloors, setTotalFloors] = useState(String(property?.totalFloors ?? ""));
+  const [facing, setFacing] = useState(property?.facing ?? "");
+  const [furnishing, setFurnishing] = useState(property?.furnishing ?? "");
+  const [parking, setParking] = useState(property?.parking ?? "");
+  const [propertyAge, setPropertyAge] = useState(property?.propertyAge ?? "");
+  const [availabilityDate, setAvailabilityDate] = useState(property?.availabilityDate ?? "");
+  const [possessionStatus, setPossessionStatus] = useState(property?.possessionStatus ?? "");
 
-  const [amenities, setAmenities] = useState<string[]>([]);
+  const [amenities, setAmenities] = useState<string[]>(property?.amenities ?? []);
 
-  const [featuredPreview, setFeaturedPreview] = useState<string | null>(null);
+  // Featured image — keep existing URL or replace with new file
+  const [featuredPreview, setFeaturedPreview] = useState<string | null>(property?.featuredImage ?? null);
   const [featuredFile, setFeaturedFile] = useState<File | null>(null);
+
+  // Gallery — track existing URLs separately from new uploads
+  const [existingGalleryUrls, setExistingGalleryUrls] = useState<string[]>(property?.galleryImages ?? []);
   const [galleryPreviews, setGalleryPreviews] = useState<string[]>([]);
   const [galleryFiles, setGalleryFiles] = useState<File[]>([]);
 
-  const [contactName, setContactName] = useState("");
-  const [contactPhone, setContactPhone] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
-  const [preferWhatsApp, setPreferWhatsApp] = useState(false);
+  const [contactName, setContactName] = useState(property?.contactName ?? "");
+  const [contactPhone, setContactPhone] = useState(property?.contactPhone ?? "");
+  const [contactEmail, setContactEmail] = useState(property?.contactEmail ?? "");
+  const [preferWhatsApp, setPreferWhatsApp] = useState(property?.preferWhatsApp ?? false);
 
   // Category & new project
-  const [propertyCategory, setPropertyCategory] = useState<"building" | "plot" | "commercial" | "">("");
-  const [isNewProject, setIsNewProject] = useState(false);
+  const [propertyCategory, setPropertyCategory] = useState<"building" | "plot" | "commercial" | "">(
+    (property?.propertyCategory as any) ?? ""
+  );
+  const [isNewProject, setIsNewProject] = useState(property?.isNewProject ?? false);
 
   // Plot-specific fields
-  const [plotLength, setPlotLength] = useState("");
-  const [plotWidth, setPlotWidth] = useState("");
-  const [plotArea, setPlotArea] = useState("");
-  const [ownership, setOwnership] = useState("");
-  const [facingRoadWidth, setFacingRoadWidth] = useState("");
-  const [boundaryWall, setBoundaryWall] = useState("");
-  const [electricityConnection, setElectricityConnection] = useState(false);
-  const [waterSupply, setWaterSupply] = useState(false);
-  const [sewageConnection, setSewageConnection] = useState(false);
-  const [floorsAllowed, setFloorsAllowed] = useState("");
+  const [plotLength, setPlotLength] = useState(String(property?.plotLength ?? ""));
+  const [plotWidth, setPlotWidth] = useState(String(property?.plotWidth ?? ""));
+  const [plotArea, setPlotArea] = useState(String(property?.plotArea ?? ""));
+  const [ownership, setOwnership] = useState(property?.ownership ?? "");
+  const [facingRoadWidth, setFacingRoadWidth] = useState(String(property?.facingRoadWidth ?? ""));
+  const [boundaryWall, setBoundaryWall] = useState(property?.boundaryWall ?? "");
+  const [electricityConnection, setElectricityConnection] = useState(property?.electricityConnection ?? false);
+  const [waterSupply, setWaterSupply] = useState(property?.waterSupply ?? false);
+  const [sewageConnection, setSewageConnection] = useState(property?.sewageConnection ?? false);
+  const [floorsAllowed, setFloorsAllowed] = useState(String(property?.floorsAllowed ?? ""));
 
   const isPlot = propertyCategory === "plot";
   const isResidential = !isPlot && !["Commercial Office", "Shop"].includes(propertyType);
 
+  // Populate form once property loads from API
+  useEffect(() => {
+    if (!property) return;
+    setListingType((property.listingType as any) ?? "sale");
+    setPropertyType(property.propertyType ?? "");
+    setListedBy(property.listedBy ?? "");
+    setTitle(property.title ?? "");
+    setDescription(property.description ?? "");
+    setPrice(String(property.price ?? ""));
+    setSecurityDeposit(String(property.securityDeposit ?? ""));
+    setMaintenanceCharges(String(property.maintenanceCharges ?? ""));
+    setNegotiable(property.negotiable ?? false);
+    setCity(property.city ?? "");
+    setLocality(property.locality ?? "");
+    setProjectName(property.projectName ?? "");
+    setFullAddress(property.fullAddress ?? "");
+    setLandmark(property.landmark ?? "");
+    setPincode(property.pincode ?? "");
+    setLat(String(property.lat ?? ""));
+    setLng(String(property.lng ?? ""));
+    setBuiltUpArea(String(property.builtUpArea ?? ""));
+    setCarpetArea(String(property.carpetArea ?? ""));
+    setBedrooms(String(property.bedrooms ?? ""));
+    setBathrooms(String(property.bathrooms ?? ""));
+    setBalconies(String(property.balconies ?? ""));
+    setFloor(String(property.floor ?? ""));
+    setTotalFloors(String(property.totalFloors ?? ""));
+    setFacing(property.facing ?? "");
+    setFurnishing(property.furnishing ?? "");
+    setParking(property.parking ?? "");
+    setPropertyAge(property.propertyAge ?? "");
+    setAvailabilityDate(property.availabilityDate ?? "");
+    setPossessionStatus(property.possessionStatus ?? "");
+    setAmenities(property.amenities ?? []);
+    setFeaturedPreview(property.featuredImage ?? null);
+    setExistingGalleryUrls(property.galleryImages ?? []);
+    setContactName(property.contactName ?? "");
+    setContactPhone(property.contactPhone ?? "");
+    setContactEmail(property.contactEmail ?? "");
+    setPreferWhatsApp(property.preferWhatsApp ?? false);
+    setPropertyCategory((property.propertyCategory as any) ?? "");
+    setIsNewProject(property.isNewProject ?? false);
+    setPlotLength(String(property.plotLength ?? ""));
+    setPlotWidth(String(property.plotWidth ?? ""));
+    setPlotArea(String(property.plotArea ?? ""));
+    setOwnership(property.ownership ?? "");
+    setFacingRoadWidth(String(property.facingRoadWidth ?? ""));
+    setBoundaryWall(property.boundaryWall ?? "");
+    setElectricityConnection(property.electricityConnection ?? false);
+    setWaterSupply(property.waterSupply ?? false);
+    setSewageConnection(property.sewageConnection ?? false);
+    setFloorsAllowed(String(property.floorsAllowed ?? ""));
+  }, [property]);
+
+  if (loading && !property) {
+    return (
+      <div className="min-h-screen flex flex-col bg-background">
+        <Header />
+        <div className="flex-1 flex items-center justify-center pt-20">
+          <p className="text-muted-foreground">Loading property...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!loading && !property) {
+    return (
+      <div className="min-h-screen flex flex-col bg-background">
+        <Header />
+        <div className="flex-1 flex items-center justify-center pt-20">
+          <p className="text-muted-foreground">Property not found.</p>
+        </div>
+      </div>
+    );
+  }
+
   const handleFeaturedImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setErrors((prev) => ({ ...prev, featuredImage: "Image must be under 5MB" }));
-      return;
-    }
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-      setErrors((prev) => ({ ...prev, featuredImage: "Only JPG, PNG, WEBP allowed" }));
-      return;
-    }
+    if (file.size > 5 * 1024 * 1024) { setErrors((p) => ({ ...p, featuredImage: "Max 5MB" })); return; }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { setErrors((p) => ({ ...p, featuredImage: "Only JPG/PNG/WEBP" })); return; }
     setFeaturedFile(file);
     const reader = new FileReader();
-    reader.onload = () => {
-      setFeaturedPreview(reader.result as string);
-      setErrors((prev) => ({ ...prev, featuredImage: "" }));
-    };
+    reader.onload = () => { setFeaturedPreview(reader.result as string); setErrors((p) => ({ ...p, featuredImage: "" })); };
     reader.readAsDataURL(file);
   };
 
   const handleGalleryImages = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
+    const totalExisting = existingGalleryUrls.length + galleryPreviews.length;
+    const remaining = 10 - totalExisting;
+    const toProcess = Array.from(files).slice(0, remaining);
     const newPreviews: string[] = [];
     const newFiles: File[] = [];
-    const remaining = 10 - galleryPreviews.length;
-    const toProcess = Array.from(files).slice(0, remaining);
-
     toProcess.forEach((file) => {
       if (file.size > 5 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) return;
       newFiles.push(file);
@@ -144,22 +219,24 @@ const PropertyAdd = () => {
       reader.onload = () => {
         newPreviews.push(reader.result as string);
         if (newPreviews.length === newFiles.length) {
-          setGalleryPreviews((prev) => [...prev, ...newPreviews]);
-          setGalleryFiles((prev) => [...prev, ...newFiles]);
+          setGalleryPreviews((p) => [...p, ...newPreviews]);
+          setGalleryFiles((p) => [...p, ...newFiles]);
         }
       };
       reader.readAsDataURL(file);
     });
   };
 
-  const removeGalleryImage = (index: number) => {
-    setGalleryPreviews((prev) => prev.filter((_, i) => i !== index));
-    setGalleryFiles((prev) => prev.filter((_, i) => i !== index));
+  const removeExistingGallery = (index: number) =>
+    setExistingGalleryUrls((p) => p.filter((_, i) => i !== index));
+
+  const removeNewGallery = (index: number) => {
+    setGalleryPreviews((p) => p.filter((_, i) => i !== index));
+    setGalleryFiles((p) => p.filter((_, i) => i !== index));
   };
 
-  const toggleAmenity = (a: string) => {
-    setAmenities((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]));
-  };
+  const toggleAmenity = (a: string) =>
+    setAmenities((p) => (p.includes(a) ? p.filter((x) => x !== a) : [...p, a]));
 
   const validate = (): boolean => {
     const errs: FormErrors = {};
@@ -171,34 +248,23 @@ const PropertyAdd = () => {
     if (!city.trim()) errs.city = "Required";
     if (!locality.trim()) errs.locality = "Required";
     if (!isPlot && (!builtUpArea || isNaN(Number(builtUpArea)) || Number(builtUpArea) <= 0)) errs.builtUpArea = "Enter valid area";
-    if (isResidential && (!bedrooms || isNaN(Number(bedrooms)))) errs.bedrooms = "Required for residential";
-    if (isResidential && (!bathrooms || isNaN(Number(bathrooms)))) errs.bathrooms = "Required for residential";
     if (!possessionStatus) errs.possessionStatus = "Required";
     if (!isPlot && !furnishing) errs.furnishing = "Required";
-    if (!featuredPreview) errs.featuredImage = "Featured image is required";
+    if (!featuredPreview) errs.featuredImage = "Featured image required";
     if (!contactName.trim()) errs.contactName = "Required";
-    if (!contactPhone.trim() || !/^[6-9]\d{9}$/.test(contactPhone.trim())) errs.contactPhone = "Enter valid 10-digit Indian number";
+    if (!contactPhone.trim() || !/^[6-9]\d{9}$/.test(contactPhone.trim())) errs.contactPhone = "Enter valid 10-digit number";
     if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) errs.contactEmail = "Invalid email";
-
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) {
-      toast({ title: "Please fix the errors", variant: "destructive" });
-      window.scrollTo({ top: 0, behavior: "smooth" });
-      return;
-    }
-
-    if (!featuredFile) {
-      setErrors((prev) => ({ ...prev, featuredImage: "Featured image is required" }));
-      return;
-    }
+    if (!validate()) { toast({ title: "Please fix the errors", variant: "destructive" }); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
 
     try {
-      await addProperty(
+      await updateProperty(
+        property.id,
         {
           listingType,
           propertyType,
@@ -234,8 +300,9 @@ const PropertyAdd = () => {
           availabilityDate: availabilityDate || undefined,
           possessionStatus,
           amenities,
-          featuredImage: "",
-          galleryImages: [],
+          featuredImage: property.featuredImage,
+          galleryImages: existingGalleryUrls,
+          videoUrl: property.videoUrl,
           contactName: contactName.trim(),
           contactPhone: contactPhone.trim(),
           contactEmail: contactEmail.trim() || undefined,
@@ -252,29 +319,31 @@ const PropertyAdd = () => {
           floorsAllowed: floorsAllowed ? Number(floorsAllowed) : undefined,
         },
         featuredFile,
-        galleryFiles
+        galleryFiles,
+        existingGalleryUrls
       );
-      toast({ title: "Property listed successfully!" });
-      navigate("/properties?sort=newest");
+      toast({ title: "Property updated successfully!" });
+      navigate(`/properties/${property.id}`);
     } catch (err: any) {
-      toast({ title: "Failed to submit property", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to update property", description: err.message, variant: "destructive" });
     }
   };
 
   const inputClass = "w-full border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent";
   const selectClass = "w-full border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-accent appearance-none";
+  const totalGalleryCount = existingGalleryUrls.length + galleryPreviews.length;
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      <SEO title="Add Property | Preinvesto" description="List your property for sale or rent" />
+      <SEO title="Edit Property | Preinvesto" description="Edit property listing" />
       <Header />
       <div className="flex-1 pt-20 md:pt-24 pb-10">
         <div className="container max-w-3xl">
           <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors">
             <ArrowLeft className="w-4 h-4" /> Back
           </button>
-          <h1 className="font-display text-2xl font-bold text-foreground mb-2">ADD YOUR PROPERTY</h1>
-          <p className="text-muted-foreground text-sm mb-6">Fill in the details below to list your property.</p>
+          <h1 className="font-display text-2xl font-bold text-foreground mb-2">EDIT PROPERTY</h1>
+          <p className="text-muted-foreground text-sm mb-6">Update the details for this property listing.</p>
 
           <form onSubmit={handleSubmit} className="space-y-2">
             {/* A) Basic Details */}
@@ -284,12 +353,8 @@ const PropertyAdd = () => {
                 <FieldLabel required>Listing Type</FieldLabel>
                 <div className="flex gap-2">
                   {(["sale", "rent"] as const).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setListingType(t)}
-                      className={`flex-1 py-2 text-sm rounded-md border transition-colors ${listingType === t ? "bg-accent text-accent-foreground border-accent" : "border-border text-foreground hover:bg-muted"}`}
-                    >
+                    <button key={t} type="button" onClick={() => setListingType(t)}
+                      className={`flex-1 py-2 text-sm rounded-md border transition-colors ${listingType === t ? "bg-accent text-accent-foreground border-accent" : "border-border text-foreground hover:bg-muted"}`}>
                       {t === "sale" ? "For Sale" : "For Rent"}
                     </button>
                   ))}
@@ -327,18 +392,18 @@ const PropertyAdd = () => {
             </label>
             <div>
               <FieldLabel required>Property Title</FieldLabel>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Spacious 3BHK in Gachibowli" className={inputClass} />
+              <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} />
               <FieldError error={errors.title} />
             </div>
             <div>
               <FieldLabel required>Description</FieldLabel>
-              <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} placeholder="Describe your property in detail..." className={inputClass} />
+              <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} className={inputClass} />
               <FieldError error={errors.description} />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <FieldLabel required>{listingType === "rent" ? "Rent/Month (₹)" : "Price (₹)"}</FieldLabel>
-                <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="e.g. 5000000" className={inputClass} />
+                <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className={inputClass} />
                 <FieldError error={errors.price} />
               </div>
               {listingType === "rent" && (
@@ -360,59 +425,23 @@ const PropertyAdd = () => {
             {/* B) Location */}
             <SectionTitle>Location</SectionTitle>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <FieldLabel required>City</FieldLabel>
-                <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Hyderabad" className={inputClass} />
-                <FieldError error={errors.city} />
-              </div>
-              <div>
-                <FieldLabel required>Locality / Area</FieldLabel>
-                <input value={locality} onChange={(e) => setLocality(e.target.value)} placeholder="e.g. Gachibowli" className={inputClass} />
-                <FieldError error={errors.locality} />
-              </div>
-              <div>
-                <FieldLabel>Project / Society Name</FieldLabel>
-                <input value={projectName} onChange={(e) => setProjectName(e.target.value)} className={inputClass} />
-              </div>
-              <div>
-                <FieldLabel>Landmark</FieldLabel>
-                <input value={landmark} onChange={(e) => setLandmark(e.target.value)} className={inputClass} />
-              </div>
-              <div>
-                <FieldLabel>Full Address</FieldLabel>
-                <input value={fullAddress} onChange={(e) => setFullAddress(e.target.value)} className={inputClass} />
-              </div>
-              <div>
-                <FieldLabel>Pincode</FieldLabel>
-                <input value={pincode} onChange={(e) => setPincode(e.target.value)} maxLength={6} className={inputClass} />
-              </div>
-              <div>
-                <FieldLabel>Latitude</FieldLabel>
-                <input type="number" step="any" value={lat} onChange={(e) => setLat(e.target.value)} placeholder="e.g. 17.4401" className={inputClass} />
-              </div>
-              <div>
-                <FieldLabel>Longitude</FieldLabel>
-                <input type="number" step="any" value={lng} onChange={(e) => setLng(e.target.value)} placeholder="e.g. 78.3489" className={inputClass} />
-              </div>
+              <div><FieldLabel required>City</FieldLabel><input value={city} onChange={(e) => setCity(e.target.value)} className={inputClass} /><FieldError error={errors.city} /></div>
+              <div><FieldLabel required>Locality / Area</FieldLabel><input value={locality} onChange={(e) => setLocality(e.target.value)} className={inputClass} /><FieldError error={errors.locality} /></div>
+              <div><FieldLabel>Project / Society Name</FieldLabel><input value={projectName} onChange={(e) => setProjectName(e.target.value)} className={inputClass} /></div>
+              <div><FieldLabel>Landmark</FieldLabel><input value={landmark} onChange={(e) => setLandmark(e.target.value)} className={inputClass} /></div>
+              <div><FieldLabel>Full Address</FieldLabel><input value={fullAddress} onChange={(e) => setFullAddress(e.target.value)} className={inputClass} /></div>
+              <div><FieldLabel>Pincode</FieldLabel><input value={pincode} onChange={(e) => setPincode(e.target.value)} maxLength={6} className={inputClass} /></div>
+              <div><FieldLabel>Latitude</FieldLabel><input type="number" step="any" value={lat} onChange={(e) => setLat(e.target.value)} className={inputClass} /></div>
+              <div><FieldLabel>Longitude</FieldLabel><input type="number" step="any" value={lng} onChange={(e) => setLng(e.target.value)} className={inputClass} /></div>
             </div>
 
             {/* C) Property Features */}
             <SectionTitle>Property Features</SectionTitle>
             {isPlot ? (
-              /* Plot-specific fields */
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                <div>
-                  <FieldLabel>Plot Area (sq. yards)</FieldLabel>
-                  <input type="number" step="0.01" value={plotArea} onChange={(e) => setPlotArea(e.target.value)} className={inputClass} />
-                </div>
-                <div>
-                  <FieldLabel>Plot Length (ft)</FieldLabel>
-                  <input type="number" step="0.1" value={plotLength} onChange={(e) => setPlotLength(e.target.value)} className={inputClass} />
-                </div>
-                <div>
-                  <FieldLabel>Plot Width (ft)</FieldLabel>
-                  <input type="number" step="0.1" value={plotWidth} onChange={(e) => setPlotWidth(e.target.value)} className={inputClass} />
-                </div>
+                <div><FieldLabel>Plot Area (sq. yards)</FieldLabel><input type="number" step="0.01" value={plotArea} onChange={(e) => setPlotArea(e.target.value)} className={inputClass} /></div>
+                <div><FieldLabel>Plot Length (ft)</FieldLabel><input type="number" step="0.1" value={plotLength} onChange={(e) => setPlotLength(e.target.value)} className={inputClass} /></div>
+                <div><FieldLabel>Plot Width (ft)</FieldLabel><input type="number" step="0.1" value={plotWidth} onChange={(e) => setPlotWidth(e.target.value)} className={inputClass} /></div>
                 <div>
                   <FieldLabel>Ownership</FieldLabel>
                   <select value={ownership} onChange={(e) => setOwnership(e.target.value)} className={selectClass}>
@@ -427,10 +456,7 @@ const PropertyAdd = () => {
                     {FACING_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
                   </select>
                 </div>
-                <div>
-                  <FieldLabel>Facing Road Width (ft)</FieldLabel>
-                  <input type="number" step="0.1" value={facingRoadWidth} onChange={(e) => setFacingRoadWidth(e.target.value)} className={inputClass} />
-                </div>
+                <div><FieldLabel>Facing Road Width (ft)</FieldLabel><input type="number" step="0.1" value={facingRoadWidth} onChange={(e) => setFacingRoadWidth(e.target.value)} className={inputClass} /></div>
                 <div>
                   <FieldLabel>Boundary Wall</FieldLabel>
                   <select value={boundaryWall} onChange={(e) => setBoundaryWall(e.target.value)} className={selectClass}>
@@ -438,14 +464,7 @@ const PropertyAdd = () => {
                     {BOUNDARY_WALL_OPTIONS.map((b) => <option key={b} value={b}>{b}</option>)}
                   </select>
                 </div>
-                <div>
-                  <FieldLabel>Floors Allowed</FieldLabel>
-                  <input type="number" value={floorsAllowed} onChange={(e) => setFloorsAllowed(e.target.value)} className={inputClass} />
-                </div>
-                <div>
-                  <FieldLabel>Project / Society Name</FieldLabel>
-                  <input value={projectName} onChange={(e) => setProjectName(e.target.value)} className={inputClass} />
-                </div>
+                <div><FieldLabel>Floors Allowed</FieldLabel><input type="number" value={floorsAllowed} onChange={(e) => setFloorsAllowed(e.target.value)} className={inputClass} /></div>
                 <div>
                   <FieldLabel required>Possession Status</FieldLabel>
                   <select value={possessionStatus} onChange={(e) => setPossessionStatus(e.target.value)} className={selectClass}>
@@ -470,43 +489,18 @@ const PropertyAdd = () => {
                 </div>
               </div>
             ) : (
-              /* Building / commercial fields */
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                <div>
-                  <FieldLabel required>Built-up Area (sqft)</FieldLabel>
-                  <input type="number" value={builtUpArea} onChange={(e) => setBuiltUpArea(e.target.value)} className={inputClass} />
-                  <FieldError error={errors.builtUpArea} />
-                </div>
-                <div>
-                  <FieldLabel>Carpet Area (sqft)</FieldLabel>
-                  <input type="number" value={carpetArea} onChange={(e) => setCarpetArea(e.target.value)} className={inputClass} />
-                </div>
+                <div><FieldLabel required>Built-up Area (sqft)</FieldLabel><input type="number" value={builtUpArea} onChange={(e) => setBuiltUpArea(e.target.value)} className={inputClass} /><FieldError error={errors.builtUpArea} /></div>
+                <div><FieldLabel>Carpet Area (sqft)</FieldLabel><input type="number" value={carpetArea} onChange={(e) => setCarpetArea(e.target.value)} className={inputClass} /></div>
                 {isResidential && (
                   <>
-                    <div>
-                      <FieldLabel required>Bedrooms (BHK)</FieldLabel>
-                      <input type="number" value={bedrooms} onChange={(e) => setBedrooms(e.target.value)} className={inputClass} />
-                      <FieldError error={errors.bedrooms} />
-                    </div>
-                    <div>
-                      <FieldLabel required>Bathrooms</FieldLabel>
-                      <input type="number" value={bathrooms} onChange={(e) => setBathrooms(e.target.value)} className={inputClass} />
-                      <FieldError error={errors.bathrooms} />
-                    </div>
-                    <div>
-                      <FieldLabel>Balconies</FieldLabel>
-                      <input type="number" value={balconies} onChange={(e) => setBalconies(e.target.value)} className={inputClass} />
-                    </div>
+                    <div><FieldLabel>Bedrooms</FieldLabel><input type="number" value={bedrooms} onChange={(e) => setBedrooms(e.target.value)} className={inputClass} /></div>
+                    <div><FieldLabel>Bathrooms</FieldLabel><input type="number" value={bathrooms} onChange={(e) => setBathrooms(e.target.value)} className={inputClass} /></div>
+                    <div><FieldLabel>Balconies</FieldLabel><input type="number" value={balconies} onChange={(e) => setBalconies(e.target.value)} className={inputClass} /></div>
                   </>
                 )}
-                <div>
-                  <FieldLabel>Floor</FieldLabel>
-                  <input type="number" value={floor} onChange={(e) => setFloor(e.target.value)} className={inputClass} />
-                </div>
-                <div>
-                  <FieldLabel>Total Floors</FieldLabel>
-                  <input type="number" value={totalFloors} onChange={(e) => setTotalFloors(e.target.value)} className={inputClass} />
-                </div>
+                <div><FieldLabel>Floor</FieldLabel><input type="number" value={floor} onChange={(e) => setFloor(e.target.value)} className={inputClass} /></div>
+                <div><FieldLabel>Total Floors</FieldLabel><input type="number" value={totalFloors} onChange={(e) => setTotalFloors(e.target.value)} className={inputClass} /></div>
                 <div>
                   <FieldLabel>Facing</FieldLabel>
                   <select value={facing} onChange={(e) => setFacing(e.target.value)} className={selectClass}>
@@ -544,10 +538,7 @@ const PropertyAdd = () => {
                   </select>
                   <FieldError error={errors.possessionStatus} />
                 </div>
-                <div>
-                  <FieldLabel>Availability Date</FieldLabel>
-                  <input type="date" value={availabilityDate} onChange={(e) => setAvailabilityDate(e.target.value)} className={inputClass} />
-                </div>
+                <div><FieldLabel>Availability Date</FieldLabel><input type="date" value={availabilityDate} onChange={(e) => setAvailabilityDate(e.target.value)} className={inputClass} /></div>
               </div>
             )}
 
@@ -556,12 +547,7 @@ const PropertyAdd = () => {
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
               {AMENITIES_OPTIONS.map((a) => (
                 <label key={a} className="flex items-center gap-2 text-sm text-foreground cursor-pointer py-1">
-                  <input
-                    type="checkbox"
-                    checked={amenities.includes(a)}
-                    onChange={() => toggleAmenity(a)}
-                    className="accent-accent"
-                  />
+                  <input type="checkbox" checked={amenities.includes(a)} onChange={() => toggleAmenity(a)} className="accent-accent" />
                   {a}
                 </label>
               ))}
@@ -571,18 +557,13 @@ const PropertyAdd = () => {
             <SectionTitle>Media</SectionTitle>
             <div>
               <FieldLabel required>Featured Image</FieldLabel>
-              <div
-                onClick={() => featuredInputRef.current?.click()}
-                className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-accent transition-colors"
-              >
+              <div onClick={() => featuredInputRef.current?.click()}
+                className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-accent transition-colors">
                 {featuredPreview ? (
                   <div className="relative inline-block">
                     <img src={featuredPreview} alt="Featured" className="max-h-40 rounded" />
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); setFeaturedPreview(null); setFeaturedFile(null); }}
-                      className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-0.5"
-                    >
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setFeaturedPreview(null); setFeaturedFile(null); }}
+                      className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-0.5">
                       <X className="w-3 h-3" />
                     </button>
                   </div>
@@ -597,26 +578,34 @@ const PropertyAdd = () => {
               <input ref={featuredInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFeaturedImage} className="hidden" />
               <FieldError error={errors.featuredImage} />
             </div>
+
             <div className="mt-4">
               <FieldLabel>Gallery Images (up to 10)</FieldLabel>
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mb-3">
-                {galleryPreviews.map((src, i) => (
-                  <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-border">
-                    <img src={src} alt={`Gallery ${i + 1}`} className="w-full h-full object-cover" />
-                    <button
-                      type="button"
-                      onClick={() => removeGalleryImage(i)}
-                      className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full p-0.5"
-                    >
+                {/* Existing gallery images */}
+                {existingGalleryUrls.map((src, i) => (
+                  <div key={`existing-${i}`} className="relative aspect-square rounded-lg overflow-hidden border border-border">
+                    <img src={src} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.svg"; }} />
+                    <button type="button" onClick={() => removeExistingGallery(i)}
+                      className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full p-0.5">
                       <X className="w-3 h-3" />
                     </button>
                   </div>
                 ))}
-                {galleryPreviews.length < 10 && (
-                  <div
-                    onClick={() => fileInputRef.current?.click()}
-                    className="aspect-square border-2 border-dashed border-border rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-accent transition-colors text-muted-foreground"
-                  >
+                {/* New gallery images */}
+                {galleryPreviews.map((src, i) => (
+                  <div key={`new-${i}`} className="relative aspect-square rounded-lg overflow-hidden border border-accent">
+                    <img src={src} alt="" className="w-full h-full object-cover" />
+                    <button type="button" onClick={() => removeNewGallery(i)}
+                      className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full p-0.5">
+                      <X className="w-3 h-3" />
+                    </button>
+                    <span className="absolute bottom-1 left-1 bg-accent text-accent-foreground text-[9px] px-1 rounded">NEW</span>
+                  </div>
+                ))}
+                {totalGalleryCount < 10 && (
+                  <div onClick={() => fileInputRef.current?.click()}
+                    className="aspect-square border-2 border-dashed border-border rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-accent transition-colors text-muted-foreground">
                     <Upload className="w-5 h-5" />
                     <span className="text-xs mt-1">Add</span>
                   </div>
@@ -628,21 +617,9 @@ const PropertyAdd = () => {
             {/* F) Contact */}
             <SectionTitle>Contact Information</SectionTitle>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <FieldLabel required>Contact Name</FieldLabel>
-                <input value={contactName} onChange={(e) => setContactName(e.target.value)} className={inputClass} />
-                <FieldError error={errors.contactName} />
-              </div>
-              <div>
-                <FieldLabel required>Phone Number</FieldLabel>
-                <input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="10-digit number" maxLength={10} className={inputClass} />
-                <FieldError error={errors.contactPhone} />
-              </div>
-              <div>
-                <FieldLabel>Email</FieldLabel>
-                <input type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} className={inputClass} />
-                <FieldError error={errors.contactEmail} />
-              </div>
+              <div><FieldLabel required>Contact Name</FieldLabel><input value={contactName} onChange={(e) => setContactName(e.target.value)} className={inputClass} /><FieldError error={errors.contactName} /></div>
+              <div><FieldLabel required>Phone Number</FieldLabel><input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} maxLength={10} className={inputClass} /><FieldError error={errors.contactPhone} /></div>
+              <div><FieldLabel>Email</FieldLabel><input type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} className={inputClass} /><FieldError error={errors.contactEmail} /></div>
               <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer self-end pb-2">
                 <input type="checkbox" checked={preferWhatsApp} onChange={(e) => setPreferWhatsApp(e.target.checked)} className="accent-accent" />
                 Prefer WhatsApp
@@ -651,12 +628,9 @@ const PropertyAdd = () => {
 
             {/* Submit */}
             <div className="pt-6 border-t border-border mt-8">
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full sm:w-auto px-8 py-3 bg-accent text-accent-foreground font-semibold rounded-lg hover:opacity-90 transition-opacity text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {submitting ? "UPLOADING..." : "SUBMIT PROPERTY"}
+              <button type="submit" disabled={submitting}
+                className="w-full sm:w-auto px-8 py-3 bg-accent text-accent-foreground font-semibold rounded-lg hover:opacity-90 transition-opacity text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                {submitting ? "SAVING..." : "SAVE CHANGES"}
               </button>
             </div>
           </form>
@@ -667,4 +641,4 @@ const PropertyAdd = () => {
   );
 };
 
-export default PropertyAdd;
+export default PropertyEdit;

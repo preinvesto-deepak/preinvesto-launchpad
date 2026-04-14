@@ -1,11 +1,14 @@
 import { useState, useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { Menu, X, ChevronDown, Phone } from "lucide-react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Menu, X, ChevronDown, Phone, ShieldCheck } from "lucide-react";
 import { NAV_ITEMS, BRAND } from "@/data/content";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAdmin } from "@/context/AdminContext";
 
 const Header = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { isAdmin, logout } = useAdmin();
   const isHomepage = location.pathname === "/";
 
   const [isScrolled, setIsScrolled] = useState(false);
@@ -110,6 +113,23 @@ const Header = () => {
             <Phone className="w-4 h-4" />
             <span className="hidden xl:inline">{BRAND.phone}</span>
           </a>
+          {isAdmin ? (
+            <div className="hidden md:flex items-center gap-2">
+              <Link
+                to="/admin/review"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-semibold rounded-md hover:bg-green-700 transition-colors"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" /> Review
+              </Link>
+              <button
+                onClick={() => { logout(); navigate("/"); }}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                title="Logout admin"
+              >
+                Logout
+              </button>
+            </div>
+          ) : null}
           <Link
             to="/contact"
             className="hidden md:inline-flex items-center px-5 py-2.5 bg-accent text-accent-foreground text-sm font-semibold rounded-lg hover:opacity-90 transition-opacity"

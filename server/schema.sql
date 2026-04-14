@@ -38,6 +38,21 @@ CREATE TABLE IF NOT EXISTS properties (
   contact_name        VARCHAR(100)   NOT NULL,
   contact_phone       VARCHAR(20)    NOT NULL,
   contact_email       VARCHAR(100)   NULL,
-  prefer_whatsapp     BOOLEAN        NOT NULL DEFAULT FALSE,
-  created_at          TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP
+  prefer_whatsapp       BOOLEAN        NOT NULL DEFAULT FALSE,
+  status                VARCHAR(15)    NOT NULL DEFAULT 'available',
+  created_at            TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  -- Category
+  property_category     VARCHAR(20)    NULL,
+  is_new_project        BOOLEAN        NOT NULL DEFAULT FALSE,
+  -- Plot-specific fields
+  plot_length           DECIMAL(10,2)  NULL,
+  plot_width            DECIMAL(10,2)  NULL,
+  plot_area             DECIMAL(10,2)  NULL,
+  ownership             VARCHAR(50)    NULL,
+  facing_road_width     DECIMAL(10,2)  NULL,
+  boundary_wall         VARCHAR(30)    NULL,
+  electricity_connection BOOLEAN       NOT NULL DEFAULT FALSE,
+  water_supply          BOOLEAN        NOT NULL DEFAULT FALSE,
+  sewage_connection     BOOLEAN        NOT NULL DEFAULT FALSE,
+  floors_allowed        INT            NULL
 );

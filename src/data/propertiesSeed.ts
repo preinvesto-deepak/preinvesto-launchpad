@@ -2,6 +2,8 @@ export interface Property {
   id: string;
   listingType: "sale" | "rent";
   propertyType: string;
+  propertyCategory?: 'building' | 'plot' | 'commercial';
+  isNewProject?: boolean;
   listedBy: string;
   title: string;
   description: string;
@@ -39,7 +41,21 @@ export interface Property {
   contactPhone: string;
   contactEmail?: string;
   preferWhatsApp: boolean;
+  status?: 'available' | 'sold' | 'rented' | 'expired';
+  reviewStatus?: 'pending' | 'approved' | 'rejected' | 'flagged';
+  soldAt?: string | null;
   createdAt: string;
+  // Plot-specific fields
+  plotLength?: number;       // feet
+  plotWidth?: number;        // feet
+  plotArea?: number;         // sq yards
+  ownership?: string;        // 'Freehold' | 'Leasehold' | 'Co-operative' | 'Power of Attorney'
+  facingRoadWidth?: number;  // feet
+  boundaryWall?: string;     // 'Fully Constructed' | 'Partially Constructed' | 'Not Constructed'
+  electricityConnection?: boolean;
+  waterSupply?: boolean;
+  sewageConnection?: boolean;
+  floorsAllowed?: number;
 }
 
 export const AMENITIES_OPTIONS = [
@@ -77,6 +93,9 @@ export const PARKING_OPTIONS = ["None", "1", "2+"];
 export const AGE_OPTIONS = ["0-1 years", "1-5 years", "5-10 years", "10+ years"];
 export const LISTED_BY_OPTIONS = ["Owner", "Agent", "Builder"];
 export const STATUS_OPTIONS = ["Ready to Move", "Under Construction"];
+export const OWNERSHIP_OPTIONS = ["Freehold", "Leasehold", "Co-operative Society", "Power of Attorney"];
+export const BOUNDARY_WALL_OPTIONS = ["Fully Constructed", "Partially Constructed", "Not Constructed"];
+export const PROPERTY_CATEGORY_OPTIONS = ["building", "plot", "commercial"] as const;
 
 const SEED_PROPERTIES: Property[] = [
   {

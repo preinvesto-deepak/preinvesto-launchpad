@@ -2,8 +2,9 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { lazy, Suspense } from "react";
+import { AdminProvider, useAdmin } from "@/context/AdminContext";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import ScrollToTop from "./components/ScrollToTop";
@@ -21,7 +22,19 @@ const Properties = lazy(() => import("./pages/Properties"));
 const InteriorDesign = lazy(() => import("./pages/Index_InteriorDesign"));
 const Construction = lazy(() => import("./pages/Index_Construction"));
 const PropertyAdd = lazy(() => import("./pages/PropertyAdd"));
+const PropertyEdit = lazy(() => import("./pages/PropertyEdit"));
 const PropertyDetail = lazy(() => import("./pages/PropertyDetail"));
+const SoldProperties = lazy(() => import("./pages/SoldProperties"));
+const AdminLogin = lazy(() => import("./pages/AdminLogin"));
+const AdminReview = lazy(() => import("./pages/AdminReview"));
+
+// Redirects to /admin login if not admin, preserving intended destination
+const AdminRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isAdmin } = useAdmin();
+  const location = useLocation();
+  if (!isAdmin) return <Navigate to="/admin" state={{ from: location.pathname }} replace />;
+  return <>{children}</>;
+};
 
 const queryClient = new QueryClient();
 
@@ -37,6 +50,7 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
+      <AdminProvider>
         <Suspense fallback={<Loading />}>
           <ScrollToTop />
           <Routes>
@@ -59,11 +73,16 @@ const App = () => (
             <Route path="/properties" element={<Properties />} />
             <Route path="/interior-design" element={<InteriorDesign />} />
             <Route path="/construction-home" element={<Construction />} />
+            <Route path="/admin" element={<AdminLogin />} />
+            <Route path="/admin/review" element={<AdminRoute><AdminReview /></AdminRoute>} />
             <Route path="/properties/add" element={<PropertyAdd />} />
+            <Route path="/properties/sold" element={<SoldProperties />} />
+            <Route path="/properties/:id/edit" element={<AdminRoute><PropertyEdit /></AdminRoute>} />
             <Route path="/properties/:id" element={<PropertyDetail />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
+      </AdminProvider>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

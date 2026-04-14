@@ -106,3 +106,12 @@
     text-wrap: balance;
   }
 }
+
+/* Google Places autocomplete dropdown */
+.pac-container {
+  z-index: 9999 !important;
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+  font-family: inherit;
+  margin-top: 4px;
+}
