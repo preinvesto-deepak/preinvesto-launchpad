@@ -56,7 +56,7 @@ $stmt = $mysqli->prepare(
 if (!$stmt) { http_response_code(500); echo json_encode(['error' => 'Prepare failed: ' . $mysqli->error]); $mysqli->close(); exit; }
 
 $stmt->bind_param(
-    'sssssddddissssssddiddddiiisssssssssssssissidddssiiiis',
+    'sssssddddissssssddiddddiisssssssssssssisidddsdsiiiis',
     $data['listing_type'],   $data['property_type'],   $data['listed_by'],
     $data['title'],          $data['description'],      $data['price'],
     $data['rent_per_month'], $data['security_deposit'], $data['maintenance_charges'],
