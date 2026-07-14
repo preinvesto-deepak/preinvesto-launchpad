@@ -86,6 +86,8 @@ const PropertyEdit = () => {
   const [featuredPreview, setFeaturedPreview] = useState<string | null>(property?.featuredImage ?? null);
   const [featuredFile, setFeaturedFile] = useState<File | null>(null);
 
+  const [videoUrl, setVideoUrl] = useState(property?.videoUrl ?? "");
+
   // Gallery — track existing URLs separately from new uploads
   const [existingGalleryUrls, setExistingGalleryUrls] = useState<string[]>(property?.galleryImages ?? []);
   const [galleryPreviews, setGalleryPreviews] = useState<string[]>([]);
@@ -152,6 +154,7 @@ const PropertyEdit = () => {
     setPossessionStatus(property.possessionStatus ?? "");
     setAmenities(property.amenities ?? []);
     setFeaturedPreview(property.featuredImage ?? null);
+    setVideoUrl(property.videoUrl ?? "");
     setExistingGalleryUrls(property.galleryImages ?? []);
     setContactName(property.contactName ?? "");
     setContactPhone(property.contactPhone ?? "");
@@ -302,7 +305,7 @@ const PropertyEdit = () => {
           amenities,
           featuredImage: property.featuredImage,
           galleryImages: existingGalleryUrls,
-          videoUrl: property.videoUrl,
+          videoUrl: videoUrl.trim() || undefined,
           contactName: contactName.trim(),
           contactPhone: contactPhone.trim(),
           contactEmail: contactEmail.trim() || undefined,
@@ -612,6 +615,17 @@ const PropertyEdit = () => {
                 )}
               </div>
               <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={handleGalleryImages} className="hidden" />
+            </div>
+            <div>
+              <FieldLabel>YouTube Video URL</FieldLabel>
+              <input
+                type="url"
+                value={videoUrl}
+                onChange={(e) => setVideoUrl(e.target.value)}
+                placeholder="https://www.youtube.com/watch?v=..."
+                className={inputClass}
+              />
+              <p className="text-xs text-muted-foreground mt-1">Optional — video will appear first when viewing the property</p>
             </div>
 
             {/* F) Contact */}

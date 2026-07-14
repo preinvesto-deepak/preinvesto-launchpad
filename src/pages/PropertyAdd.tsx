@@ -84,6 +84,7 @@ const PropertyAdd = () => {
   const [featuredFile, setFeaturedFile] = useState<File | null>(null);
   const [galleryPreviews, setGalleryPreviews] = useState<string[]>([]);
   const [galleryFiles, setGalleryFiles] = useState<File[]>([]);
+  const [videoUrl, setVideoUrl] = useState("");
 
   const [contactName, setContactName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
@@ -236,6 +237,7 @@ const PropertyAdd = () => {
           amenities,
           featuredImage: "",
           galleryImages: [],
+          videoUrl: videoUrl.trim() || undefined,
           contactName: contactName.trim(),
           contactPhone: contactPhone.trim(),
           contactEmail: contactEmail.trim() || undefined,
@@ -623,6 +625,17 @@ const PropertyAdd = () => {
                 )}
               </div>
               <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={handleGalleryImages} className="hidden" />
+            </div>
+            <div>
+              <FieldLabel>YouTube Video URL</FieldLabel>
+              <input
+                type="url"
+                value={videoUrl}
+                onChange={(e) => setVideoUrl(e.target.value)}
+                placeholder="https://www.youtube.com/watch?v=..."
+                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Optional — video will appear first when viewing the property</p>
             </div>
 
             {/* F) Contact */}

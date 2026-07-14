@@ -49,6 +49,15 @@ const PropertyDetail = () => {
 
   const allImages = [property.featuredImage, ...property.galleryImages];
   const currentStatus = property.status ?? 'available';
+
+  // YouTube helpers
+  const getYouTubeId = (url: string) => {
+    const m = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+    return m ? m[1] : null;
+  };
+  const ytId = property.videoUrl ? getYouTubeId(property.videoUrl) : null;
+  const hasVideo = !!ytId;
+  const totalSlides = allImages.length + (hasVideo ? 1 : 0);
   const isPlot = property.propertyCategory === 'plot';
 
   const whatsappMsg = encodeURIComponent(`Hi, I'm interested in: ${property.title} - ${formatPrice(property.price, property.listingType)} (${property.locality}, ${property.city})`);
@@ -202,52 +211,65 @@ const PropertyDetail = () => {
             </div>
           )}
 
-          {/* Image Carousel */}
+          {/* Media Carousel — video first if available, then images */}
           <div className="relative rounded-xl overflow-hidden bg-muted mb-6">
             <div className="aspect-video relative">
-              <img
-                src={allImages[currentImage]}
-                alt={property.title}
-                className={`w-full h-full object-cover ${(currentStatus === 'sold' || currentStatus === 'rented') ? 'opacity-70' : ''}`}
-                onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.svg"; }}
-              />
-              {(currentStatus === 'sold' || currentStatus === 'rented') && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-                  <div style={{
-                    transform: "rotate(-25deg)",
-                    border: "4px solid rgba(220,38,38,0.9)",
-                    color: "rgba(220,38,38,0.9)",
-                    fontSize: "clamp(24px, 5vw, 48px)",
-                    fontWeight: 900,
-                    padding: "6px 28px",
-                    letterSpacing: "6px",
-                    borderRadius: "4px",
-                    background: "rgba(255,255,255,0.15)",
-                    backdropFilter: "blur(1px)",
-                    textShadow: "0 1px 3px rgba(0,0,0,0.4)",
-                    userSelect: "none",
-                    whiteSpace: "nowrap",
-                  }}>
-                    {currentStatus === 'sold' ? 'SOLD' : 'RENTED'}
-                  </div>
-                </div>
+              {/* Slide 0 = YouTube video (if available) */}
+              {hasVideo && currentImage === 0 ? (
+                <iframe
+                  src={`https://www.youtube.com/embed/${ytId}`}
+                  title={property.title}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  className="w-full h-full border-0"
+                />
+              ) : (
+                <>
+                  <img
+                    src={allImages[hasVideo ? currentImage - 1 : currentImage]}
+                    alt={property.title}
+                    className={`w-full h-full object-cover ${(currentStatus === 'sold' || currentStatus === 'rented') ? 'opacity-70' : ''}`}
+                    onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.svg"; }}
+                  />
+                  {(currentStatus === 'sold' || currentStatus === 'rented') && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                      <div style={{
+                        transform: "rotate(-25deg)",
+                        border: "4px solid rgba(220,38,38,0.9)",
+                        color: "rgba(220,38,38,0.9)",
+                        fontSize: "clamp(24px, 5vw, 48px)",
+                        fontWeight: 900,
+                        padding: "6px 28px",
+                        letterSpacing: "6px",
+                        borderRadius: "4px",
+                        background: "rgba(255,255,255,0.15)",
+                        backdropFilter: "blur(1px)",
+                        textShadow: "0 1px 3px rgba(0,0,0,0.4)",
+                        userSelect: "none",
+                        whiteSpace: "nowrap",
+                      }}>
+                        {currentStatus === 'sold' ? 'SOLD' : 'RENTED'}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
-              {allImages.length > 1 && (
+              {totalSlides > 1 && (
                 <>
                   <button
-                    onClick={() => setCurrentImage((prev) => (prev - 1 + allImages.length) % allImages.length)}
+                    onClick={() => setCurrentImage((prev) => (prev - 1 + totalSlides) % totalSlides)}
                     className="absolute left-3 top-1/2 -translate-y-1/2 bg-card/80 backdrop-blur p-2 rounded-full hover:bg-card transition-colors"
                   >
                     <ChevronLeft className="w-5 h-5 text-foreground" />
                   </button>
                   <button
-                    onClick={() => setCurrentImage((prev) => (prev + 1) % allImages.length)}
+                    onClick={() => setCurrentImage((prev) => (prev + 1) % totalSlides)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 bg-card/80 backdrop-blur p-2 rounded-full hover:bg-card transition-colors"
                   >
                     <ChevronRight className="w-5 h-5 text-foreground" />
                   </button>
                   <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
-                    {allImages.map((_, i) => (
+                    {Array.from({ length: totalSlides }).map((_, i) => (
                       <button
                         key={i}
                         onClick={() => setCurrentImage(i)}
@@ -259,13 +281,30 @@ const PropertyDetail = () => {
               )}
             </div>
             {/* Thumbnails */}
-            {allImages.length > 1 && (
+            {totalSlides > 1 && (
               <div className="flex gap-2 p-3 overflow-x-auto">
+                {hasVideo && (
+                  <button
+                    onClick={() => setCurrentImage(0)}
+                    className={`shrink-0 w-16 h-12 rounded overflow-hidden border-2 transition-colors relative ${0 === currentImage ? "border-accent" : "border-transparent"}`}
+                  >
+                    <img
+                      src={`https://img.youtube.com/vi/${ytId}/mqdefault.jpg`}
+                      alt="Video"
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                      <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z"/>
+                      </svg>
+                    </div>
+                  </button>
+                )}
                 {allImages.map((src, i) => (
                   <button
                     key={i}
-                    onClick={() => setCurrentImage(i)}
-                    className={`shrink-0 w-16 h-12 rounded overflow-hidden border-2 transition-colors ${i === currentImage ? "border-accent" : "border-transparent"}`}
+                    onClick={() => setCurrentImage(hasVideo ? i + 1 : i)}
+                    className={`shrink-0 w-16 h-12 rounded overflow-hidden border-2 transition-colors ${(hasVideo ? i + 1 : i) === currentImage ? "border-accent" : "border-transparent"}`}
                   >
                     <img src={src} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.svg"; }} />
                   </button>
