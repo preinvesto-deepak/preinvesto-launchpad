@@ -111,6 +111,7 @@ const Footer = () => (
         <div className="flex gap-4">
           <Link to="/contact" className="text-xs text-primary-foreground/50 hover:text-accent transition-colors">Privacy Policy</Link>
           <Link to="/contact" className="text-xs text-primary-foreground/50 hover:text-accent transition-colors">Terms of Service</Link>
+          <Link to="/terms" className="hover:text-accent transition-colors">Terms &amp; Conditions</Link>
         </div>
       </div>
     </div>

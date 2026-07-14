@@ -8,6 +8,7 @@ import { AdminProvider, useAdmin } from "@/context/AdminContext";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import ScrollToTop from "./components/ScrollToTop";
+import TermsAndConditions from "./pages/TermsAndConditions";
 
 const About = lazy(() => import("./pages/About"));
 const Services = lazy(() => import("./pages/Services"));
@@ -80,6 +81,7 @@ const App = () => (
             <Route path="/properties/:id/edit" element={<AdminRoute><PropertyEdit /></AdminRoute>} />
             <Route path="/properties/:id" element={<PropertyDetail />} />
             <Route path="*" element={<NotFound />} />
+            <Route path="/terms" element={<TermsAndConditions />} />
           </Routes>
         </Suspense>
       </AdminProvider>

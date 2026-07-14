@@ -291,10 +291,7 @@ const MobileBottomSheet = ({ property, onClose }: { property: Property | null; o
     <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 1000, backgroundColor: "white", borderRadius: "16px 16px 0 0", boxShadow: "0 -4px 20px rgba(0,0,0,0.2)", overflow: "hidden" }}>
       <div style={{ position: "relative" }}>
         <PopupCarousel images={allImages} badge={badge} />
-        <button
-          onClick={onClose}
-          style={{ position: "absolute", top: "10px", right: "10px", zIndex: 10, backgroundColor: "#C2570A", border: "2px solid white", borderRadius: "50%", width: "34px", height: "34px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }}
-        >
+        <button onClick={onClose} style={{ position: "absolute", top: "10px", right: "10px", zIndex: 10, backgroundColor: "#C2570A", border: "2px solid white", borderRadius: "50%", width: "34px", height: "34px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }}>
           <X style={{ width: "16px", height: "16px", color: "white" }} />
         </button>
       </div>
