@@ -341,6 +341,32 @@ const PropertyAdd = () => {
               <div>
                 <FieldLabel required>{listingType === "rent" ? "Rent/Month (₹)" : "Price (₹)"}</FieldLabel>
                 <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="e.g. 5000000" className={inputClass} />
+                {/* Live per-unit price preview */}
+                {(() => {
+                  const p = Number(price);
+                  if (!p || p <= 0) return null;
+                  if (isPlot) {
+                    const area = Number(plotArea);
+                    if (!area || area <= 0) return null;
+                    const perSqYd = p / area;
+                    return (
+                      <p className="text-xs text-accent mt-1 font-medium">
+                        = ₹{Math.round(perSqYd).toLocaleString("en-IN")} / sq yd
+                        {listingType === "rent" ? " / mo" : ""}
+                      </p>
+                    );
+                  } else {
+                    const area = Number(builtUpArea);
+                    if (!area || area <= 0) return null;
+                    const perSft = p / area;
+                    return (
+                      <p className="text-xs text-accent mt-1 font-medium">
+                        = ₹{Math.round(perSft).toLocaleString("en-IN")} / sft
+                        {listingType === "rent" ? " / mo" : ""}
+                      </p>
+                    );
+                  }
+                })()}
                 <FieldError error={errors.price} />
               </div>
               {listingType === "rent" && (

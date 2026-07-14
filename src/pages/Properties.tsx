@@ -485,7 +485,7 @@ const Properties = () => {
   }, [view, search, listing, category, landmark, radiusKm, bedrooms, furnishing, listedBy, sort, setSearchParams]);
 
   const clearFilters = () => {
-    setSearch(""); setListing(""); setCategory(""); setLandmark(""); setRadiusKm(5);
+    setSearch(""); setListing("sale"); setCategory("building"); setLandmark(""); setRadiusKm(5);
     setLandmarkCoords(null); setBedrooms(""); setFurnishing(""); setListedBy(""); setSort("newest");
     const pr = PRICE_RANGES.sale_building;
     setPriceMin(0); setPriceMax(pr.max);
@@ -493,7 +493,7 @@ const Properties = () => {
     setSqYardMin(0); setSqYardMax(SQYARD_RANGES.sale.max);
   };
 
-  const hasActiveFilters = !!(search || listing || category || landmark || bedrooms || furnishing || listedBy);
+  const hasActiveFilters = !!(search || landmark || bedrooms || furnishing || listedBy);
 
   const priceEffMax = PRICE_RANGES[prCtx]?.max ?? prRange.max;
   const sftEffMax   = SFT_RANGES[isRent ? "rent" : "sale"].max;
@@ -608,10 +608,6 @@ const Properties = () => {
 
             {/* Listing type tabs */}
             <div className="flex border border-border rounded-md overflow-hidden shrink-0">
-              <button onClick={() => setListing("")}
-                className={`px-3 py-2 text-xs font-semibold transition-colors ${listing === "" ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted"}`}>
-                ALL
-              </button>
               <button onClick={() => setListing("sale")}
                 className={`px-3 py-2 text-xs font-semibold transition-colors ${listing === "sale" ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted"}`}>
                 BUY
@@ -696,7 +692,6 @@ const Properties = () => {
           <div className="border-t border-border">
             <div className="container py-2 flex items-center gap-4">
               {([
-                { val: "",           label: "All Types" },
                 { val: "building",   label: "Building" },
                 { val: "plot",       label: "Plot" },
                 { val: "commercial", label: "Commercial" },
@@ -768,10 +763,10 @@ const Properties = () => {
               onLow={setPriceMin} onHigh={setPriceMax}
             />
 
-            {/* Cost/sft or Rent/sft */}
+            {/* Cost/sft or Rent/sft — building & commercial */}
             {showSftSlider && (
               <DualRangeSlider
-                label={isRent ? "Rent / sft / mo" : "Cost / sft"}
+                label={isRent ? "Rent (Rs) per Sft" : "Cost (Rs) per sft"}
                 min={sftRange.min} max={sftRange.max} step={sftRange.step}
                 low={sftMin} high={sftMax}
                 format={(v) => `₹${v.toLocaleString("en-IN")}`}
@@ -779,10 +774,10 @@ const Properties = () => {
               />
             )}
 
-            {/* Cost/sq yard (plot only) */}
+            {/* Cost/sq yard or Rent/sq yard — plot only */}
             {showSqYardSlider && (
               <DualRangeSlider
-                label={isRent ? "Rent / sq yd / mo" : "Cost / sq yd"}
+                label={isRent ? "Rent (Rs) per Sq Yard" : "Cost (Rs) per Sq Yard"}
                 min={sqYardRange.min} max={sqYardRange.max} step={sqYardRange.step}
                 low={sqYardMin} high={sqYardMax}
                 format={(v) => `₹${v.toLocaleString("en-IN")}`}

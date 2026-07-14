@@ -125,7 +125,7 @@ if (!$stmt) {
 }
 
 $stmt->bind_param(
-    'ssssssddddissssssddiddddiiisssssssssssssissidddssiiiis',
+    'ssssssddddissssssddiddddiisssssssssssssisidddsdsiiii',
     $id,
     $data['listing_type'],
     $data['property_type'],
