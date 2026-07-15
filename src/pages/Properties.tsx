@@ -6,7 +6,11 @@ import { Search, MapPin, BedDouble, Bath, Maximize, X, List, Map as MapIcon, Plu
 import Header from "@/components/layout/Header";
 import WhatsAppButton from "@/components/layout/WhatsAppButton";
 import { useProperties } from "@/hooks/useProperties";
-import { FURNISHING_OPTIONS, LISTED_BY_OPTIONS } from "@/data/propertiesSeed";
+import {
+  FURNISHING_OPTIONS, LISTED_BY_OPTIONS, PROPERTY_TYPES,
+  FACING_OPTIONS, PARKING_OPTIONS, AGE_OPTIONS, STATUS_OPTIONS,
+  AMENITIES_OPTIONS, OWNERSHIP_OPTIONS, BOUNDARY_WALL_OPTIONS,
+} from "@/data/propertiesSeed";
 import type { Property } from "@/data/propertiesSeed";
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMapEvents } from "react-leaflet";
 import L from "leaflet";
@@ -451,10 +455,26 @@ const Properties = () => {
   const [sqYardMax, setSqYardMax] = useState(sqYardRange.max);
 
   // Additional filters
-  const [bedrooms,   setBedrooms]   = useState(searchParams.get("beds")       || "");
-  const [furnishing, setFurnishing] = useState(searchParams.get("furnishing") || "");
-  const [listedBy,   setListedBy]   = useState(searchParams.get("listedBy")   || "");
-  const [sort,       setSort]       = useState(searchParams.get("sort")       || "newest");
+  const [bedrooms,             setBedrooms]             = useState(searchParams.get("beds")        || "");
+  const [bathrooms,            setBathrooms]            = useState(searchParams.get("baths")       || "");
+  const [balconies,            setBalconies]            = useState(searchParams.get("balconies")   || "");
+  const [furnishing,           setFurnishing]           = useState(searchParams.get("furnishing")  || "");
+  const [parking,              setParking]              = useState(searchParams.get("parking")     || "");
+  const [propertyType,         setPropertyType]         = useState(searchParams.get("propType")    || "");
+  const [propertyAge,          setPropertyAge]          = useState(searchParams.get("age")         || "");
+  const [possessionStatus,     setPossessionStatus]     = useState(searchParams.get("status")      || "");
+  const [facing,               setFacing]               = useState(searchParams.get("facing")      || "");
+  const [amenities,            setAmenities]            = useState<string[]>(
+    searchParams.get("amenities") ? searchParams.get("amenities")!.split(",") : []
+  );
+  // Plot-specific filters
+  const [ownership,            setOwnership]            = useState(searchParams.get("ownership")   || "");
+  const [boundaryWall,         setBoundaryWall]         = useState(searchParams.get("wall")        || "");
+  const [electricityFilter,    setElectricityFilter]    = useState(searchParams.get("elec") === "1");
+  const [waterSupplyFilter,    setWaterSupplyFilter]    = useState(searchParams.get("water") === "1");
+  const [sewageFilter,         setSewageFilter]         = useState(searchParams.get("sewage") === "1");
+  const [listedBy,             setListedBy]             = useState(searchParams.get("listedBy")    || "");
+  const [sort,                 setSort]                 = useState(searchParams.get("sort")        || "newest");
 
   // Reset sliders when context changes
   useEffect(() => {
@@ -471,29 +491,55 @@ const Properties = () => {
 
   useEffect(() => {
     const params: Record<string, string> = {};
-    if (view !== "list")   params.view       = view;
-    if (search)            params.q          = search;
-    if (listing)           params.listing    = listing;
-    if (category)          params.cat        = category;
-    if (landmark)          params.lm         = landmark;
-    if (radiusKm !== 5)    params.radius     = String(radiusKm);
-    if (bedrooms)          params.beds       = bedrooms;
-    if (furnishing)        params.furnishing = furnishing;
-    if (listedBy)          params.listedBy   = listedBy;
-    if (sort !== "newest") params.sort       = sort;
+    if (view !== "list")        params.view       = view;
+    if (search)                 params.q          = search;
+    if (listing)                params.listing    = listing;
+    if (category)               params.cat        = category;
+    if (landmark)               params.lm         = landmark;
+    if (radiusKm !== 5)         params.radius     = String(radiusKm);
+    if (bedrooms)               params.beds       = bedrooms;
+    if (bathrooms)              params.baths      = bathrooms;
+    if (balconies)              params.balconies  = balconies;
+    if (furnishing)             params.furnishing = furnishing;
+    if (parking)                params.parking    = parking;
+    if (propertyType)           params.propType   = propertyType;
+    if (propertyAge)            params.age        = propertyAge;
+    if (possessionStatus)       params.status     = possessionStatus;
+    if (facing)                 params.facing     = facing;
+    if (amenities.length)       params.amenities  = amenities.join(",");
+    if (ownership)              params.ownership  = ownership;
+    if (boundaryWall)           params.wall       = boundaryWall;
+    if (electricityFilter)      params.elec       = "1";
+    if (waterSupplyFilter)      params.water      = "1";
+    if (sewageFilter)           params.sewage     = "1";
+    if (listedBy)               params.listedBy   = listedBy;
+    if (sort !== "newest")      params.sort       = sort;
     setSearchParams(params, { replace: true });
-  }, [view, search, listing, category, landmark, radiusKm, bedrooms, furnishing, listedBy, sort, setSearchParams]);
+  }, [view, search, listing, category, landmark, radiusKm,
+      bedrooms, bathrooms, balconies, furnishing, parking, propertyType,
+      propertyAge, possessionStatus, facing, amenities, ownership,
+      boundaryWall, electricityFilter, waterSupplyFilter, sewageFilter,
+      listedBy, sort, setSearchParams]);
 
   const clearFilters = () => {
     setSearch(""); setListing("sale"); setCategory("building"); setLandmark(""); setRadiusKm(5);
-    setLandmarkCoords(null); setBedrooms(""); setFurnishing(""); setListedBy(""); setSort("newest");
+    setLandmarkCoords(null);
+    setBedrooms(""); setBathrooms(""); setBalconies("");
+    setFurnishing(""); setParking(""); setPropertyType("");
+    setPropertyAge(""); setPossessionStatus(""); setFacing("");
+    setAmenities([]); setOwnership(""); setBoundaryWall("");
+    setElectricityFilter(false); setWaterSupplyFilter(false); setSewageFilter(false);
+    setListedBy(""); setSort("newest");
     const pr = PRICE_RANGES.sale_building;
     setPriceMin(0); setPriceMax(pr.max);
     setSftMin(0); setSftMax(SFT_RANGES.sale.max);
     setSqYardMin(0); setSqYardMax(SQYARD_RANGES.sale.max);
   };
 
-  const hasActiveFilters = !!(search || landmark || bedrooms || furnishing || listedBy);
+  const hasActiveFilters = !!(search || landmark || bedrooms || bathrooms || balconies ||
+    furnishing || parking || propertyType || propertyAge || possessionStatus || facing ||
+    amenities.length || ownership || boundaryWall || electricityFilter || waterSupplyFilter ||
+    sewageFilter || listedBy);
 
   const priceEffMax = PRICE_RANGES[prCtx]?.max ?? prRange.max;
   const sftEffMax   = SFT_RANGES[isRent ? "rent" : "sale"].max;
@@ -563,9 +609,32 @@ const Properties = () => {
       const b = parseInt(bedrooms);
       result = result.filter((p) => (b === 4 ? (p.bedrooms || 0) >= 4 : p.bedrooms === b));
     }
+    // Bathrooms
+    if (bathrooms) {
+      const b = parseInt(bathrooms);
+      result = result.filter((p) => (b === 4 ? (p.bathrooms || 0) >= 4 : p.bathrooms === b));
+    }
+    // Balconies
+    if (balconies) {
+      const b = parseInt(balconies);
+      result = result.filter((p) => (b === 3 ? (p.balconies || 0) >= 3 : p.balconies === b));
+    }
 
-    if (furnishing) result = result.filter((p) => p.furnishing === furnishing);
-    if (listedBy)   result = result.filter((p) => p.listedBy === listedBy);
+    if (furnishing)       result = result.filter((p) => p.furnishing === furnishing);
+    if (parking)          result = result.filter((p) => p.parking === parking);
+    if (propertyType)     result = result.filter((p) => p.propertyType === propertyType);
+    if (propertyAge)      result = result.filter((p) => p.propertyAge === propertyAge);
+    if (possessionStatus) result = result.filter((p) => p.possessionStatus === possessionStatus);
+    if (facing)           result = result.filter((p) => p.facing === facing);
+    if (amenities.length) result = result.filter((p) => amenities.every((a) => p.amenities?.includes(a)));
+    if (listedBy)         result = result.filter((p) => p.listedBy === listedBy);
+
+    // Plot-specific
+    if (ownership)           result = result.filter((p) => p.ownership === ownership);
+    if (boundaryWall)        result = result.filter((p) => p.boundaryWall === boundaryWall);
+    if (electricityFilter)   result = result.filter((p) => p.electricityConnection);
+    if (waterSupplyFilter)   result = result.filter((p) => p.waterSupply);
+    if (sewageFilter)        result = result.filter((p) => p.sewageConnection);
 
     switch (sort) {
       case "price-asc":  result.sort((a, b) => a.price - b.price); break;
@@ -575,7 +644,10 @@ const Properties = () => {
     return result;
   }, [properties, search, listing, category, landmarkCoords, landmark, radiusKm,
       priceMin, priceMax, sftMin, sftMax, sqYardMin, sqYardMax,
-      bedrooms, furnishing, listedBy, sort, priceEffMax, sftEffMax, sqYardEffMax]);
+      bedrooms, bathrooms, balconies, furnishing, parking, propertyType,
+      propertyAge, possessionStatus, facing, amenities, ownership,
+      boundaryWall, electricityFilter, waterSupplyFilter, sewageFilter,
+      listedBy, sort, priceEffMax, sftEffMax, sqYardEffMax]);
 
   const propertiesWithCoords = filtered.filter((p) => p.lat && p.lng);
   const mapCenter: [number, number] = landmarkCoords
@@ -733,13 +805,13 @@ const Properties = () => {
           <aside
             className={[
               "w-64 shrink-0 border-r border-border bg-background p-4 space-y-5 overflow-y-auto",
-              view === "map" ? "h-full" : "",
-              // Mobile: absolute overlay; Desktop: always visible
-              "lg:relative lg:block lg:z-auto lg:shadow-none",
+              // Mobile: absolute overlay; Desktop: sticky with own scroll
+              "lg:relative lg:block lg:z-auto lg:shadow-none lg:sticky lg:top-0 lg:self-start",
               showFilters
                 ? "absolute z-40 top-0 left-0 h-full shadow-lg"
                 : "hidden lg:block",
             ].join(" ")}
+            style={{ maxHeight: "100vh" }}
           >
             {/* Header row */}
             <div className="flex items-center justify-between">
@@ -787,21 +859,55 @@ const Properties = () => {
 
             <hr className="border-border" />
 
-            {/* Bedrooms — pill buttons, building only */}
+            {/* Property Type */}
+            <div className="relative">
+              <p className="text-xs text-muted-foreground mb-1">Property Type</p>
+              <select value={propertyType} onChange={(e) => setPropertyType(e.target.value)}
+                className="appearance-none bg-card border border-border rounded-md px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent w-full">
+                <option value="">Any Type</option>
+                {PROPERTY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <ChevronDown className="absolute right-2 bottom-2.5 w-4 h-4 text-muted-foreground pointer-events-none" />
+            </div>
+
+            {/* Bedrooms — building only */}
             {category !== "plot" && category !== "commercial" && (
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">Bedrooms</p>
                 <div className="flex flex-wrap gap-2">
                   {[{ label: "1 BHK", value: "1" }, { label: "2 BHK", value: "2" }, { label: "3 BHK", value: "3" }, { label: "4+ BHK", value: "4" }].map((o) => (
-                    <button
-                      key={o.value}
-                      onClick={() => setBedrooms(bedrooms === o.value ? "" : o.value)}
-                      className={`rounded-full px-3 py-1 text-xs border transition-colors ${
-                        bedrooms === o.value
-                          ? "bg-accent text-accent-foreground border-accent"
-                          : "border-border text-foreground hover:border-accent hover:text-accent"
-                      }`}
-                    >
+                    <button key={o.value} onClick={() => setBedrooms(bedrooms === o.value ? "" : o.value)}
+                      className={`rounded-full px-3 py-1 text-xs border transition-colors ${bedrooms === o.value ? "bg-accent text-accent-foreground border-accent" : "border-border text-foreground hover:border-accent hover:text-accent"}`}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Bathrooms — building only */}
+            {category !== "plot" && category !== "commercial" && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">Bathrooms</p>
+                <div className="flex flex-wrap gap-2">
+                  {[{ label: "1", value: "1" }, { label: "2", value: "2" }, { label: "3", value: "3" }, { label: "4+", value: "4" }].map((o) => (
+                    <button key={o.value} onClick={() => setBathrooms(bathrooms === o.value ? "" : o.value)}
+                      className={`rounded-full px-3 py-1 text-xs border transition-colors ${bathrooms === o.value ? "bg-accent text-accent-foreground border-accent" : "border-border text-foreground hover:border-accent hover:text-accent"}`}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Balconies — building only */}
+            {category !== "plot" && category !== "commercial" && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">Balconies</p>
+                <div className="flex flex-wrap gap-2">
+                  {[{ label: "0", value: "0" }, { label: "1", value: "1" }, { label: "2", value: "2" }, { label: "3+", value: "3" }].map((o) => (
+                    <button key={o.value} onClick={() => setBalconies(balconies === o.value ? "" : o.value)}
+                      className={`rounded-full px-3 py-1 text-xs border transition-colors ${balconies === o.value ? "bg-accent text-accent-foreground border-accent" : "border-border text-foreground hover:border-accent hover:text-accent"}`}>
                       {o.label}
                     </button>
                   ))}
@@ -813,11 +919,8 @@ const Properties = () => {
             {category !== "plot" && (
               <div className="relative">
                 <p className="text-xs text-muted-foreground mb-1">Furnishing</p>
-                <select
-                  value={furnishing}
-                  onChange={(e) => setFurnishing(e.target.value)}
-                  className="appearance-none bg-card border border-border rounded-md px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent w-full"
-                >
+                <select value={furnishing} onChange={(e) => setFurnishing(e.target.value)}
+                  className="appearance-none bg-card border border-border rounded-md px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent w-full">
                   <option value="">Any Furnishing</option>
                   {FURNISHING_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
                 </select>
@@ -825,14 +928,117 @@ const Properties = () => {
               </div>
             )}
 
+            {/* Parking — not plot */}
+            {category !== "plot" && (
+              <div className="relative">
+                <p className="text-xs text-muted-foreground mb-1">Parking</p>
+                <select value={parking} onChange={(e) => setParking(e.target.value)}
+                  className="appearance-none bg-card border border-border rounded-md px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent w-full">
+                  <option value="">Any Parking</option>
+                  {PARKING_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <ChevronDown className="absolute right-2 bottom-2.5 w-4 h-4 text-muted-foreground pointer-events-none" />
+              </div>
+            )}
+
+            {/* Facing */}
+            <div className="relative">
+              <p className="text-xs text-muted-foreground mb-1">Facing</p>
+              <select value={facing} onChange={(e) => setFacing(e.target.value)}
+                className="appearance-none bg-card border border-border rounded-md px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent w-full">
+                <option value="">Any Direction</option>
+                {FACING_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
+              </select>
+              <ChevronDown className="absolute right-2 bottom-2.5 w-4 h-4 text-muted-foreground pointer-events-none" />
+            </div>
+
+            {/* Property Age — not plot */}
+            {category !== "plot" && (
+              <div className="relative">
+                <p className="text-xs text-muted-foreground mb-1">Property Age</p>
+                <select value={propertyAge} onChange={(e) => setPropertyAge(e.target.value)}
+                  className="appearance-none bg-card border border-border rounded-md px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent w-full">
+                  <option value="">Any Age</option>
+                  {AGE_OPTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
+                </select>
+                <ChevronDown className="absolute right-2 bottom-2.5 w-4 h-4 text-muted-foreground pointer-events-none" />
+              </div>
+            )}
+
+            {/* Possession Status */}
+            <div className="relative">
+              <p className="text-xs text-muted-foreground mb-1">Possession Status</p>
+              <select value={possessionStatus} onChange={(e) => setPossessionStatus(e.target.value)}
+                className="appearance-none bg-card border border-border rounded-md px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent w-full">
+                <option value="">Any Status</option>
+                {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <ChevronDown className="absolute right-2 bottom-2.5 w-4 h-4 text-muted-foreground pointer-events-none" />
+            </div>
+
+            {/* Plot-specific filters */}
+            {category === "plot" && (
+              <>
+                <div className="relative">
+                  <p className="text-xs text-muted-foreground mb-1">Ownership</p>
+                  <select value={ownership} onChange={(e) => setOwnership(e.target.value)}
+                    className="appearance-none bg-card border border-border rounded-md px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent w-full">
+                    <option value="">Any Ownership</option>
+                    {OWNERSHIP_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                  <ChevronDown className="absolute right-2 bottom-2.5 w-4 h-4 text-muted-foreground pointer-events-none" />
+                </div>
+                <div className="relative">
+                  <p className="text-xs text-muted-foreground mb-1">Boundary Wall</p>
+                  <select value={boundaryWall} onChange={(e) => setBoundaryWall(e.target.value)}
+                    className="appearance-none bg-card border border-border rounded-md px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent w-full">
+                    <option value="">Any</option>
+                    {BOUNDARY_WALL_OPTIONS.map((b) => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                  <ChevronDown className="absolute right-2 bottom-2.5 w-4 h-4 text-muted-foreground pointer-events-none" />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">Utilities Available</p>
+                  <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
+                    <input type="checkbox" checked={electricityFilter} onChange={(e) => setElectricityFilter(e.target.checked)} className="accent-accent" />
+                    Electricity Connection
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
+                    <input type="checkbox" checked={waterSupplyFilter} onChange={(e) => setWaterSupplyFilter(e.target.checked)} className="accent-accent" />
+                    Water Supply
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
+                    <input type="checkbox" checked={sewageFilter} onChange={(e) => setSewageFilter(e.target.checked)} className="accent-accent" />
+                    Sewage Connection
+                  </label>
+                </div>
+              </>
+            )}
+
+            {/* Amenities — building & commercial only */}
+            {category !== "plot" && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">Amenities</p>
+                <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                  {AMENITIES_OPTIONS.map((a) => (
+                    <label key={a} className="flex items-center gap-2 text-sm text-foreground cursor-pointer py-0.5">
+                      <input type="checkbox" checked={amenities.includes(a)}
+                        onChange={() => setAmenities((prev) => prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a])}
+                        className="accent-accent" />
+                      {a}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <hr className="border-border" />
+
             {/* Listed By */}
             <div className="relative">
               <p className="text-xs text-muted-foreground mb-1">Listed By</p>
-              <select
-                value={listedBy}
-                onChange={(e) => setListedBy(e.target.value)}
-                className="appearance-none bg-card border border-border rounded-md px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent w-full"
-              >
+              <select value={listedBy} onChange={(e) => setListedBy(e.target.value)}
+                className="appearance-none bg-card border border-border rounded-md px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent w-full">
                 <option value="">Any</option>
                 {LISTED_BY_OPTIONS.map((l) => <option key={l} value={l}>{l}</option>)}
               </select>
@@ -844,11 +1050,8 @@ const Properties = () => {
             {/* Sort */}
             <div className="relative">
               <p className="text-xs text-muted-foreground mb-1">Sort</p>
-              <select
-                value={sort}
-                onChange={(e) => setSort(e.target.value)}
-                className="appearance-none bg-card border border-border rounded-md px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent w-full"
-              >
+              <select value={sort} onChange={(e) => setSort(e.target.value)}
+                className="appearance-none bg-card border border-border rounded-md px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent w-full">
                 {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
               <ChevronDown className="absolute right-2 bottom-2.5 w-4 h-4 text-muted-foreground pointer-events-none" />
