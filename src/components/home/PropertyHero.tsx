@@ -152,7 +152,7 @@ const PropertyHero = () => {
           >
             {/* Row 1: BUY / RENT / NEW PROJECTS */}
             <div style={{ display: "flex", borderBottom: "1px solid #f0f0f0" }}>
-              {LISTING_TABS.map(tab => (
+              {LISTING_TABS.map((tab, i) => (
                 <button
                   key={tab.value}
                   onClick={() => setListing(tab.value)}
@@ -168,6 +168,8 @@ const PropertyHero = () => {
                     color: listing === tab.value ? "#C2570A" : "#666",
                     transition: "all 0.2s",
                     letterSpacing: "0.03em",
+                    borderTopLeftRadius: i === 0 ? "16px" : 0,
+                    borderTopRightRadius: i === LISTING_TABS.length - 1 ? "16px" : 0,
                   }}
                 >
                   {tab.label.toUpperCase()}
@@ -199,9 +201,20 @@ const PropertyHero = () => {
             </div>
 
             {/* Row 3: Search input + radius + button */}
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px" }}>
+            <style>{`
+              .search-row { display:flex; align-items:center; gap:10px; padding:14px 16px; flex-wrap:nowrap; }
+              .search-input-wrap { flex:1; min-width:0; position:relative; }
+              .search-controls { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+              @media (max-width: 640px) {
+                .search-row { flex-wrap:wrap; }
+                .search-input-wrap { flex:1 1 100%; }
+                .search-controls { flex:1 1 100%; }
+                .search-controls .search-btn { flex:1; justify-content:center; }
+              }
+            `}</style>
+            <div className="search-row">
               {/* Search input with custom autocomplete dropdown */}
-              <div ref={wrapperRef} style={{ flex: 1, position: "relative" }}>
+              <div ref={wrapperRef} className="search-input-wrap">
                 <div
                   style={{
                     display: "flex",
@@ -274,8 +287,7 @@ const PropertyHero = () => {
                 )}
               </div>
 
-              {/* Radius field — always visible */}
-              <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+              <div className="search-controls">
                 <input
                   type="number"
                   min={1}
@@ -294,29 +306,29 @@ const PropertyHero = () => {
                   }}
                 />
                 <span style={{ fontSize: "12px", color: "#888", whiteSpace: "nowrap" }}>km</span>
+                <button
+                  onClick={handleSearch}
+                  className="search-btn"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    padding: "10px 22px",
+                    backgroundColor: "#C2570A",
+                    color: "white",
+                    fontWeight: 700,
+                    fontSize: "14px",
+                    border: "none",
+                    borderRadius: "10px",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                    letterSpacing: "0.03em",
+                  }}
+                >
+                  <Search style={{ width: "16px", height: "16px" }} />
+                  SEARCH
+                </button>
               </div>
-
-              <button
-                onClick={handleSearch}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  padding: "10px 22px",
-                  backgroundColor: "#C2570A",
-                  color: "white",
-                  fontWeight: 700,
-                  fontSize: "14px",
-                  border: "none",
-                  borderRadius: "10px",
-                  cursor: "pointer",
-                  flexShrink: 0,
-                  letterSpacing: "0.03em",
-                }}
-              >
-                <Search style={{ width: "16px", height: "16px" }} />
-                SEARCH
-              </button>
             </div>
 
             {/* Popular localities */}
