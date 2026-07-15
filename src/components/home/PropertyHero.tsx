@@ -95,6 +95,7 @@ const PropertyHero = () => {
       params.set("lat", String(selectedPlace.lat));
       params.set("lng", String(selectedPlace.lng));
     }
+    params.set("view", "map");
     navigate(`/properties?${params.toString()}`);
   };
 
@@ -324,7 +325,7 @@ const PropertyHero = () => {
               {POPULAR.map(area => (
                 <button
                   key={area}
-                  onClick={() => navigate(`/properties?lm=${encodeURIComponent(area)}&listing=${listing}&cat=${category}&radius=${radius}`)}
+                  onClick={() => navigate(`/properties?lm=${encodeURIComponent(area)}&listing=${listing}&cat=${category}&radius=${radius}&view=map`)}
                   style={{
                     fontSize: "12px",
                     padding: "5px 12px",
