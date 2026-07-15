@@ -515,8 +515,8 @@ const Properties = () => {
         p.lat && p.lng &&
         haversineKm(landmarkCoords.lat, landmarkCoords.lng, p.lat, p.lng) <= radiusKm
       );
-    } else if (search) {
-      const q = search.toLowerCase();
+    } else if (search || landmark) {
+      const q = (search || landmark).toLowerCase();
       result = result.filter((p) =>
         p.title.toLowerCase().includes(q) ||
         p.locality.toLowerCase().includes(q) ||
