@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Send, MessageCircle, Loader2 } from "lucide-react";
 import { BRAND } from "@/data/content";
@@ -33,7 +33,7 @@ const ContactTeaser = () => {
   };
 
   return (
-    <section className="py-20 lg:py-28 bg-background">
+    <section className="py-10 lg:py-14 bg-background">
       <div className="container">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
           <div>
@@ -136,3 +136,4 @@ const ContactTeaser = () => {
 };
 
 export default ContactTeaser;
+

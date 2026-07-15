@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+﻿import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { usePortfolioIndex } from "@/hooks/usePortfolioIndex";
 
@@ -11,7 +11,7 @@ const PortfolioPreview = () => {
   const projects = (data?.projects ?? []).slice(0, 6);
 
   return (
-    <section className="py-20 lg:py-28 bg-background">
+    <section className="py-10 lg:py-14 bg-background">
       <div className="container">
         <div className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4 mb-12">
           <div>
@@ -21,7 +21,7 @@ const PortfolioPreview = () => {
             </h2>
           </div>
           <Link to="/portfolio" className="text-sm font-medium text-accent hover:underline whitespace-nowrap">
-            View All Projects →
+            View All Projects â†’
           </Link>
         </div>
 
@@ -68,3 +68,4 @@ const PortfolioPreview = () => {
 };
 
 export default PortfolioPreview;
+

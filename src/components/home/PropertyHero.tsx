@@ -2,7 +2,7 @@ import Footer from "@/components/layout/Footer";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, MapPin } from "lucide-react";
-import { IMAGES } from "@/data/content";
+import { IMAGES, BRAND } from "@/data/content";
 import { useProperties } from "@/hooks/useProperties";
 import ServicesPreview from "@/components/home/ServicesPreview";
 import VideoShowcase from "@/components/home/VideoShowcase";
@@ -378,6 +378,74 @@ const PropertyHero = () => {
 
       {/* Services — reusing existing ServicesPreview component (matches live site exactly) */}
       <ServicesPreview />
+
+      {/* List your property CTA */}
+      <section className="py-10 lg:py-14 bg-background">
+        <div className="container">
+          {/* Section heading */}
+          <div className="text-center max-w-2xl mx-auto mb-8">
+            <p className="text-accent font-medium tracking-widest uppercase text-sm mb-3">List With Us</p>
+            <h2 className="font-display text-3xl sm:text-4xl font-bold text-foreground">
+              Want to List Your Property?
+            </h2>
+            <p className="mt-4 text-muted-foreground text-sm leading-relaxed">
+              Reach thousands of genuine buyers and renters across Hyderabad. Share your property details with us and we'll handle the rest.
+            </p>
+          </div>
+
+          {/* Options */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {[
+              {
+                key: "call",
+                path: "M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z",
+                title: "Call us",
+                desc: "Call our listing team and share your property details — location, size, price, and type.",
+                cta: "Call now", href: `tel:${BRAND.phone.replace(/\s/g, "")}`, external: true,
+              },
+              {
+                key: "whatsapp",
+                path: "M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z",
+                title: "WhatsApp",
+                desc: "Message us on WhatsApp with details and photos for a quick, easy listing process.",
+                cta: "Chat now", href: BRAND.whatsappLink, external: true,
+              },
+              {
+                key: "add",
+                path: "M12 4.5v15m7.5-7.5h-15",
+                title: "Add it yourself",
+                desc: "Agents and owners can submit listings directly using our online property form.",
+                cta: "Add property", href: "/add-property", external: false,
+              },
+            ].map(({ key, path, title, desc, cta, href, external }) => (
+              <a
+                key={key}
+                href={href}
+                target={external ? "_blank" : undefined}
+                rel={external ? "noopener noreferrer" : undefined}
+                className="text-center relative group block"
+              >
+                <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-section-alt group-hover:bg-accent/10 transition-colors flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d={path} />
+                  </svg>
+                </div>
+                <h3 className="font-display text-lg font-semibold text-foreground mb-2">{title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-4">{desc}</p>
+                <span className="text-sm font-medium text-accent group-hover:underline">
+                  {cta} →
+                </span>
+              </a>
+            ))}
+          </div>
+
+          {/* Note */}
+          <p className="text-center text-xs text-muted-foreground mt-12">
+            * Your property will be live after review by our team.
+          </p>
+        </div>
+      </section>
+
       <VideoShowcase />
       <PortfolioPreview />
       <JourneySteps />

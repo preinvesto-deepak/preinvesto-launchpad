@@ -1,13 +1,13 @@
-import { motion } from "framer-motion";
+﻿import { motion } from "framer-motion";
 import { IndianRupee, Award, Clock, ShieldCheck } from "lucide-react";
 import { TRUST_ITEMS } from "@/data/content";
 
 const iconMap: Record<string, React.ElementType> = { IndianRupee, Award, Clock, ShieldCheck };
 
 const TrustSection = () => (
-  <section className="py-20 lg:py-28 bg-primary text-primary-foreground">
+  <section className="py-10 lg:py-14 bg-primary text-primary-foreground">
     <div className="container">
-      <div className="text-center max-w-2xl mx-auto mb-16">
+      <div className="text-center max-w-2xl mx-auto mb-8">
         <p className="text-accent font-medium tracking-widest uppercase text-sm mb-3">Why Choose Us</p>
         <h2 className="font-display text-3xl sm:text-4xl font-bold">
           Built on Trust & Quality
@@ -40,3 +40,5 @@ const TrustSection = () => (
 );
 
 export default TrustSection;
+
+

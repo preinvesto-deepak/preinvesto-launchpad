@@ -1,11 +1,11 @@
-import { motion } from "framer-motion";
+﻿import { motion } from "framer-motion";
 import { Star } from "lucide-react";
 import { TESTIMONIALS } from "@/data/content";
 
 const Testimonials = () => (
-  <section className="py-20 lg:py-28 bg-section-alt">
+  <section className="py-10 lg:py-14 bg-section-alt">
     <div className="container">
-      <div className="text-center max-w-2xl mx-auto mb-16">
+      <div className="text-center max-w-2xl mx-auto mb-8">
         <p className="text-accent font-medium tracking-widest uppercase text-sm mb-3">Testimonials</p>
         <h2 className="font-display text-3xl sm:text-4xl font-bold text-foreground">
           What Our Clients Say
@@ -40,3 +40,5 @@ const Testimonials = () => (
 );
 
 export default Testimonials;
+
+
