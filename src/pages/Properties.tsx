@@ -673,7 +673,7 @@ const Properties = () => {
       <div className="flex-1 pt-16 md:pt-20">
 
         {/* ── Sticky filter header ── */}
-        <div className="bg-card border-b border-border sticky top-16 md:top-20 z-30">
+        <div className="bg-card border-b border-border sticky top-16 md:top-20 z-[1100]">
 
           {/* Row 1: BUY / RENT / NEW PROJECTS + search + view controls */}
           <div className="container py-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
@@ -796,7 +796,7 @@ const Properties = () => {
           {/* Mobile overlay backdrop */}
           {showFilters && (
             <div
-              className="fixed inset-0 bg-black/40 z-30 lg:hidden"
+              className="fixed inset-0 bg-black/40 z-[1050] lg:hidden"
               onClick={() => setShowFilters(false)}
             />
           )}
@@ -808,7 +808,7 @@ const Properties = () => {
               // Mobile: absolute overlay; Desktop: sticky with own scroll
               "lg:relative lg:block lg:z-auto lg:shadow-none lg:sticky lg:top-0 lg:self-start",
               showFilters
-                ? "absolute z-40 top-0 left-0 h-full shadow-lg"
+                ? "absolute z-[1060] top-0 left-0 h-full shadow-lg"
                 : "hidden lg:block",
             ].join(" ")}
             style={{ maxHeight: "100vh" }}
