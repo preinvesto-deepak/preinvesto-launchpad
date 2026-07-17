@@ -15,9 +15,8 @@ import { getPlacePredictions, getPlaceDetails } from "@/hooks/useGooglePlaces";
 import type { GooglePlace, PlacePrediction } from "@/hooks/useGooglePlaces";
 
 const LISTING_TABS = [
-  { label: "Buy",          value: "sale" },
-  { label: "Rent",         value: "rent" },
-  { label: "New Projects", value: "new"  },
+  { label: "Buy",  value: "sale" },
+  { label: "Rent", value: "rent" },
 ];
 
 const CATEGORY_TABS = [
