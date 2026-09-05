@@ -400,6 +400,18 @@ const Properties = () => {
   const lmDebounceRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lmWrapperRef   = useRef<HTMLDivElement>(null);
 
+  // Auto-geocode landmark text when arriving without lat/lng (e.g. homepage search or area quick-links)
+  useEffect(() => {
+    if (!landmark || landmarkCoords) return;
+    getPlacePredictions(landmark, (preds) => {
+      if (preds.length === 0) return;
+      getPlaceDetails(preds[0].placeId, (place) => {
+        if (place) setLandmarkCoords({ lat: place.lat, lng: place.lng });
+      });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [landmark]);
+
   // Close landmark dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
