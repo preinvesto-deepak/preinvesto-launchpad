@@ -419,6 +419,8 @@ const Properties = () => {
   const [showLmDropdown, setShowLmDropdown] = useState(false);
   const lmDebounceRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lmWrapperRef   = useRef<HTMLDivElement>(null);
+  // Stores coords pre-resolved by Nominatim so handleLmSelect can use them directly
+  const nominatimCoordsRef = useRef<Record<string, { lat: number; lng: number }>>({});
 
   // Auto-geocode landmark text when arriving without lat/lng (e.g. homepage search or area quick-links)
   useEffect(() => {
@@ -453,10 +455,30 @@ const Properties = () => {
     setLandmarkCoords(null);
     if (lmDebounceRef.current) clearTimeout(lmDebounceRef.current);
     if (!value.trim()) { setLmPredictions([]); setShowLmDropdown(false); return; }
-    lmDebounceRef.current = setTimeout(() => {
-      getPlacePredictions(value, (preds) => {
-        setLmPredictions(preds);
-        setShowLmDropdown(preds.length > 0);
+    lmDebounceRef.current = setTimeout(async () => {
+      getPlacePredictions(value, async (preds) => {
+        if (preds.length > 0) {
+          setLmPredictions(preds);
+          setShowLmDropdown(true);
+        } else {
+          // Fallback: Nominatim autocomplete
+          try {
+            const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(value + ", Hyderabad, India")}&format=json&limit=5&addressdetails=1`;
+            const res = await fetch(url, { headers: { "Accept-Language": "en" } });
+            const data = await res.json();
+            const nmPreds: PlacePrediction[] = data.map((r: any) => ({
+              placeId: `nm_${r.place_id}`,
+              description: r.display_name,
+              mainText: r.name || r.display_name.split(",")[0],
+              secondaryText: r.display_name.split(",").slice(1).join(",").trim(),
+            }));
+            nmPreds.forEach((p, i) => {
+              nominatimCoordsRef.current[p.placeId] = { lat: parseFloat(data[i].lat), lng: parseFloat(data[i].lon) };
+            });
+            setLmPredictions(nmPreds);
+            setShowLmDropdown(nmPreds.length > 0);
+          } catch { /* ignore */ }
+        }
       });
     }, 300);
   }, []);
@@ -466,6 +488,9 @@ const Properties = () => {
     setSearch(pred.description);
     setLmPredictions([]);
     setShowLmDropdown(false);
+    // If coords already resolved by Nominatim, use them directly
+    const nmCoords = nominatimCoordsRef.current[pred.placeId];
+    if (nmCoords) { setLandmarkCoords(nmCoords); return; }
     getPlaceDetails(pred.placeId, (place) => {
       if (place) setLandmarkCoords({ lat: place.lat, lng: place.lng });
     });
