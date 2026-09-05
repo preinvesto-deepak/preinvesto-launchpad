@@ -12,7 +12,7 @@ import {
   AMENITIES_OPTIONS, OWNERSHIP_OPTIONS, BOUNDARY_WALL_OPTIONS,
 } from "@/data/propertiesSeed";
 import type { Property } from "@/data/propertiesSeed";
-import { MapContainer, TileLayer, Marker, Popup, Circle, useMapEvents } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMapEvents, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import SEO from "@/components/SEO";
@@ -330,6 +330,14 @@ const MapClickHandler = ({ onMapClick }: { onMapClick: () => void }) => {
   return null;
 };
 
+const FlyToLocation = ({ coords }: { coords: { lat: number; lng: number } | null }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (coords) map.flyTo([coords.lat, coords.lng], 13, { duration: 1 });
+  }, [coords, map]);
+  return null;
+};
+
 // Price range presets per context
 const PRICE_RANGES = {
   sale_building:   { min: 0, max: 50000000, step: 500000 },
@@ -371,6 +379,18 @@ const SelectFilter = ({ label, value, onChange, options }: {
   </div>
 );
 
+async function nominatimGeocode(
+  query: string,
+  onResult: (coords: { lat: number; lng: number }) => void
+) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ", Hyderabad, India")}&format=json&limit=1`;
+    const res = await fetch(url, { headers: { "Accept-Language": "en" } });
+    const data = await res.json();
+    if (data.length > 0) onResult({ lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
+  } catch { /* silently ignore */ }
+}
+
 const Properties = () => {
   const { properties } = useProperties();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -403,11 +423,16 @@ const Properties = () => {
   // Auto-geocode landmark text when arriving without lat/lng (e.g. homepage search or area quick-links)
   useEffect(() => {
     if (!landmark || landmarkCoords) return;
+    // Try Google Places first; fall back to Nominatim (works without API key)
     getPlacePredictions(landmark, (preds) => {
-      if (preds.length === 0) return;
-      getPlaceDetails(preds[0].placeId, (place) => {
-        if (place) setLandmarkCoords({ lat: place.lat, lng: place.lng });
-      });
+      if (preds.length > 0) {
+        getPlaceDetails(preds[0].placeId, (place) => {
+          if (place) { setLandmarkCoords({ lat: place.lat, lng: place.lng }); return; }
+          nominatimGeocode(landmark, setLandmarkCoords);
+        });
+      } else {
+        nominatimGeocode(landmark, setLandmarkCoords);
+      }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [landmark]);
@@ -1096,6 +1121,7 @@ const Properties = () => {
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                   />
                   <MapClickHandler onMapClick={() => setSelectedProperty(null)} />
+                  <FlyToLocation coords={landmarkCoords} />
                   {landmarkCoords && (
                     <Circle
                       center={[landmarkCoords.lat, landmarkCoords.lng]}
