@@ -14,7 +14,7 @@ interface AuthContextType {
   /** True while the stored token is being checked on first load. */
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  signup: (name: string, email: string, password: string) => Promise<void>;
+  signup: (name: string, email: string, mobile: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   forgotPassword: (email: string) => Promise<string>;
   resetPassword: (token: string, password: string) => Promise<string>;
@@ -100,8 +100,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(data.user);
   }, []);
 
-  const signup = useCallback(async (name: string, email: string, password: string) => {
-    const data = await postJson("/api/auth_signup.php", { name, email, password });
+  const signup = useCallback(async (name: string, email: string, mobile: string, password: string) => {
+    const data = await postJson("/api/auth_signup.php", { name, email, mobile, password });
     localStorage.setItem(TOKEN_KEY, data.token);
     setUser(data.user);
   }, []);

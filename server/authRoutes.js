@@ -83,10 +83,15 @@ export default function registerAuthRoutes(app, pool) {
     try {
       const name = String(req.body?.name ?? '').trim();
       const email = String(req.body?.email ?? '').trim().toLowerCase();
+      // Drop spaces, dashes and any +91, then require exactly ten digits.
+      const mobile = String(req.body?.mobile ?? '').replace(/[^0-9]/g, '');
       const password = String(req.body?.password ?? '');
 
       if (!name || name.length > 100) {
         return res.status(400).json({ success: false, error: 'Please enter your name.' });
+      }
+      if (!/^[0-9]{10}$/.test(mobile)) {
+        return res.status(400).json({ success: false, error: 'Please enter a valid 10-digit mobile number.' });
       }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 190) {
         return res.status(400).json({ success: false, error: 'Please enter a valid email address.' });
@@ -105,8 +110,8 @@ export default function registerAuthRoutes(app, pool) {
       const id = crypto.randomUUID();
       const hash = bcrypt.hashSync(password, 10);
       await pool.query(
-        'INSERT INTO users (id, name, email, password_hash, last_login_at) VALUES (?, ?, ?, ?, NOW())',
-        [id, name, email, hash]
+        'INSERT INTO users (id, name, email, mobile, password_hash, last_login_at) VALUES (?, ?, ?, ?, ?, NOW())',
+        [id, name, email, mobile, hash]
       );
 
       res.json({ success: true, token: await issueSession(id), user: { id, name, email } });

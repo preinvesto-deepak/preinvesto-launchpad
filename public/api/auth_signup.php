@@ -1,6 +1,6 @@
 <?php
 // POST /api/auth_signup.php — create an account and log straight in.
-// Body: { name, email, password }  ->  { success, token, user }
+// Body: { name, email, mobile, password }  ->  { success, token, user }
 
 require_once __DIR__ . '/auth_common.php';
 
@@ -10,6 +10,9 @@ require_method(['POST']);
 $data     = json_body();
 $name     = trim($data['name'] ?? '');
 $email    = strtolower(trim($data['email'] ?? ''));
+// Drop spaces, dashes and any +91 the user may have typed, then require
+// exactly ten digits.
+$mobile   = preg_replace('/\D/', '', (string) ($data['mobile'] ?? ''));
 $password = (string) ($data['password'] ?? '');
 
 if ($name === '' || mb_strlen($name) > 100) {
@@ -17,6 +20,9 @@ if ($name === '' || mb_strlen($name) > 100) {
 }
 if (!filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 190) {
     json_fail(400, 'Please enter a valid email address.');
+}
+if (!preg_match('/^[0-9]{10}$/', $mobile)) {
+    json_fail(400, 'Please enter a valid 10-digit mobile number.');
 }
 if (strlen($password) < 8) {
     json_fail(400, 'Password must be at least 8 characters.');
@@ -38,10 +44,10 @@ $id   = new_uuid();
 $hash = password_hash($password, PASSWORD_DEFAULT);
 
 $stmt = db()->prepare(
-    'INSERT INTO users (id, name, email, password_hash, last_login_at)
-     VALUES (?, ?, ?, ?, NOW())'
+    'INSERT INTO users (id, name, email, mobile, password_hash, last_login_at)
+     VALUES (?, ?, ?, ?, ?, NOW())'
 );
-$stmt->bind_param('ssss', $id, $name, $email, $hash);
+$stmt->bind_param('sssss', $id, $name, $email, $mobile, $hash);
 
 if (!$stmt->execute()) {
     $stmt->close();

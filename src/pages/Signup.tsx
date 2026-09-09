@@ -12,6 +12,7 @@ const Signup = () => {
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [mobile, setMobile] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -22,8 +23,14 @@ const Signup = () => {
 
   const mismatch = confirm !== "" && confirm !== password;
   const tooShort = password !== "" && password.length < MIN_PASSWORD;
+  const mobileValid = /^[0-9]{10}$/.test(mobile);
+  const mobileTooShort = mobile !== "" && !mobileValid;
   const canSubmit =
-    name.trim() !== "" && email.trim() !== "" && password.length >= MIN_PASSWORD && confirm === password;
+    name.trim() !== "" &&
+    email.trim() !== "" &&
+    mobileValid &&
+    password.length >= MIN_PASSWORD &&
+    confirm === password;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -31,7 +38,7 @@ const Signup = () => {
     setBusy(true);
     setError("");
     try {
-      await signup(name.trim(), email.trim(), password);
+      await signup(name.trim(), email.trim(), mobile, password);
       navigate("/interior", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create your account.");
@@ -75,6 +82,20 @@ const Signup = () => {
           required
         />
 
+        <AuthInput
+          type="tel"
+          inputMode="numeric"
+          value={mobile}
+          // Keep only digits and cap at 10, so the field can't hold anything
+          // the server would reject.
+          onChange={(e) => { setMobile(e.target.value.replace(/[^0-9]/g, "").slice(0, 10)); setError(""); }}
+          placeholder="Mobile number (10 digits)"
+          autoComplete="tel"
+          // No maxLength: it would cap raw keystrokes, so a stray non-digit
+          // would eat into the ten the user is allowed. onChange caps instead.
+          required
+        />
+
         <div className="relative">
           <AuthInput
             type={showPassword ? "text" : "password"}
@@ -103,6 +124,9 @@ const Signup = () => {
           required
         />
 
+        {mobileTooShort && (
+          <p className="text-destructive text-xs">Mobile number must be exactly 10 digits.</p>
+        )}
         {tooShort && (
           <p className="text-destructive text-xs">Password must be at least {MIN_PASSWORD} characters.</p>
         )}
