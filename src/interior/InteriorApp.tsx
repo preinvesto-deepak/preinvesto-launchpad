@@ -1,5 +1,5 @@
 import { Routes, Route, useLocation, Link } from "react-router-dom";
-import { ArrowLeft, LogOut } from "lucide-react";
+import { ArrowLeft, LogOut, UserCog } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { AppDataProvider } from "./context/AppDataContext";
 import Sidebar from "./components/Sidebar";
@@ -77,7 +77,14 @@ function InteriorTopBar() {
       </Link>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        {user && <span style={{ color: "var(--stone-700)" }}>{user.name}</span>}
+        <Link
+          to="/profile"
+          style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--stone-700)", textDecoration: "none" }}
+          title="Your profile"
+        >
+          <UserCog size={14} />
+          {user ? user.name : "Profile"}
+        </Link>
         <button
           onClick={logout}
           style={{

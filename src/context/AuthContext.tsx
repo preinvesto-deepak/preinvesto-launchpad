@@ -7,6 +7,7 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
+  mobile: string;
 }
 
 interface AuthContextType {
@@ -18,6 +19,8 @@ interface AuthContextType {
   logout: () => Promise<void>;
   forgotPassword: (email: string) => Promise<string>;
   resetPassword: (token: string, password: string) => Promise<string>;
+  updateProfile: (name: string, email: string, mobile: string) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<string>;
 }
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
@@ -47,6 +50,21 @@ async function postJson(path: string, body: unknown) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  let data: any = {};
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error("The server returned an unexpected response. Please try again.");
+  }
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || "Something went wrong. Please try again.");
+  }
+  return data;
+}
+
+/** postJson, but with the session token attached. */
+async function postJsonAuth(path: string, body: unknown) {
+  const res = await authFetch(path, { method: "POST", body: JSON.stringify(body) });
   let data: any = {};
   try {
     data = await res.json();
@@ -126,8 +144,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return data.message as string;
   }, []);
 
+  const updateProfile = useCallback(async (name: string, email: string, mobile: string) => {
+    const data = await postJsonAuth("/api/auth_update_profile.php", { name, email, mobile });
+    setUser(data.user);
+  }, []);
+
+  // The server keeps this session alive and drops the others, so there's no
+  // token to swap here.
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+    const data = await postJsonAuth("/api/auth_change_password.php", { currentPassword, newPassword });
+    return data.message as string;
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, forgotPassword, resetPassword }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, signup, logout, forgotPassword, resetPassword, updateProfile, changePassword }}
+    >
       {children}
     </AuthContext.Provider>
   );

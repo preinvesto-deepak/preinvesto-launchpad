@@ -57,5 +57,5 @@ $stmt->close();
 
 json_ok([
     'token' => issue_session($id),
-    'user'  => ['id' => $id, 'name' => $name, 'email' => $email],
+    'user'  => ['id' => $id, 'name' => $name, 'email' => $email, 'mobile' => $mobile],
 ]);

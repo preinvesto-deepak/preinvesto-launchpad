@@ -17,7 +17,7 @@ if ($email === '' || $password === '') {
 
 purge_expired();
 
-$stmt = db()->prepare('SELECT id, name, email, password_hash FROM users WHERE email = ? LIMIT 1');
+$stmt = db()->prepare('SELECT id, name, email, mobile, password_hash FROM users WHERE email = ? LIMIT 1');
 $stmt->bind_param('s', $email);
 $stmt->execute();
 $user = $stmt->get_result()->fetch_assoc();
@@ -36,5 +36,5 @@ $stmt->close();
 
 json_ok([
     'token' => issue_session($user['id']),
-    'user'  => ['id' => $user['id'], 'name' => $user['name'], 'email' => $user['email']],
+    'user'  => ['id' => $user['id'], 'name' => $user['name'], 'email' => $user['email'], 'mobile' => $user['mobile']],
 ]);

@@ -12,6 +12,9 @@ import crypto from 'crypto';
 const SESSION_TTL_DAYS = 30;
 const RESET_TTL_MINUTES = 60;
 
+// Shared so every handler validates addresses the same way.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 // Only the hash of a token is ever stored, so a DB leak can't be replayed.
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
@@ -44,7 +47,7 @@ export default function registerAuthRoutes(app, pool) {
     const token = bearer(req);
     if (!token) return null;
     const [rows] = await pool.query(
-      `SELECT u.id, u.name, u.email
+      `SELECT u.id, u.name, u.email, u.mobile
          FROM user_sessions s
          JOIN users u ON u.id = s.user_id
         WHERE s.token_hash = ? AND s.expires_at > NOW()
@@ -93,7 +96,7 @@ export default function registerAuthRoutes(app, pool) {
       if (!/^[0-9]{10}$/.test(mobile)) {
         return res.status(400).json({ success: false, error: 'Please enter a valid 10-digit mobile number.' });
       }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 190) {
+      if (!EMAIL_RE.test(email) || email.length > 190) {
         return res.status(400).json({ success: false, error: 'Please enter a valid email address.' });
       }
       if (password.length < 8) {
@@ -114,7 +117,7 @@ export default function registerAuthRoutes(app, pool) {
         [id, name, email, mobile, hash]
       );
 
-      res.json({ success: true, token: await issueSession(id), user: { id, name, email } });
+      res.json({ success: true, token: await issueSession(id), user: { id, name, email, mobile } });
     } catch (err) {
       console.error('signup failed:', err.message);
       res.status(500).json({ success: false, error: 'Could not create the account. Please try again.' });
@@ -133,7 +136,7 @@ export default function registerAuthRoutes(app, pool) {
       await purgeExpired();
 
       const [rows] = await pool.query(
-        'SELECT id, name, email, password_hash FROM users WHERE email = ? LIMIT 1',
+        'SELECT id, name, email, mobile, password_hash FROM users WHERE email = ? LIMIT 1',
         [email]
       );
       const user = rows[0];
@@ -148,7 +151,7 @@ export default function registerAuthRoutes(app, pool) {
       res.json({
         success: true,
         token: await issueSession(user.id),
-        user: { id: user.id, name: user.name, email: user.email },
+        user: { id: user.id, name: user.name, email: user.email, mobile: user.mobile },
       });
     } catch (err) {
       console.error('login failed:', err.message);
@@ -173,7 +176,7 @@ export default function registerAuthRoutes(app, pool) {
   app.post(paths('auth_forgot_password'), async (req, res) => {
     try {
       const email = String(req.body?.email ?? '').trim().toLowerCase();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (!EMAIL_RE.test(email)) {
         return res.status(400).json({ success: false, error: 'Please enter a valid email address.' });
       }
 
@@ -241,6 +244,75 @@ export default function registerAuthRoutes(app, pool) {
       res.status(500).json({ success: false, error: 'Could not reset the password.' });
     }
   });
+
+  // ---- profile -----------------------------------------------------------
+  app.post(paths('auth_update_profile'), withUser(async (req, res, user) => {
+    try {
+      const name = String(req.body?.name ?? '').trim();
+      const email = String(req.body?.email ?? '').trim().toLowerCase();
+      const mobile = String(req.body?.mobile ?? '').replace(/[^0-9]/g, '');
+
+      if (!name || name.length > 100) {
+        return res.status(400).json({ success: false, error: 'Please enter your name.' });
+      }
+      if (!EMAIL_RE.test(email) || email.length > 190) {
+        return res.status(400).json({ success: false, error: 'Please enter a valid email address.' });
+      }
+      if (!/^[0-9]{10}$/.test(mobile)) {
+        return res.status(400).json({ success: false, error: 'Please enter a valid 10-digit mobile number.' });
+      }
+
+      // Email is the login identifier, so it must stay unique — the user's own
+      // row doesn't count as a clash.
+      const [taken] = await pool.query(
+        'SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1', [email, user.id]
+      );
+      if (taken.length) {
+        return res.status(409).json({ success: false, error: 'That email is already used by another account.' });
+      }
+
+      await pool.query('UPDATE users SET name = ?, email = ?, mobile = ? WHERE id = ?',
+        [name, email, mobile, user.id]);
+
+      res.json({ success: true, user: { id: user.id, name, email, mobile } });
+    } catch (err) {
+      console.error('update-profile failed:', err.message);
+      res.status(500).json({ success: false, error: 'Could not save your changes.' });
+    }
+  }));
+
+  app.post(paths('auth_change_password'), withUser(async (req, res, user) => {
+    try {
+      const current = String(req.body?.currentPassword ?? '');
+      const next = String(req.body?.newPassword ?? '');
+
+      if (!current) {
+        return res.status(400).json({ success: false, error: 'Please enter your current password.' });
+      }
+      if (next.length < 8) {
+        return res.status(400).json({ success: false, error: 'New password must be at least 8 characters.' });
+      }
+
+      const [rows] = await pool.query('SELECT password_hash FROM users WHERE id = ? LIMIT 1', [user.id]);
+      // Proving knowledge of the current password stops someone with a
+      // borrowed session from locking the real owner out.
+      if (!rows.length || !bcrypt.compareSync(current, rows[0].password_hash)) {
+        return res.status(401).json({ success: false, error: 'Your current password is incorrect.' });
+      }
+
+      await pool.query('UPDATE users SET password_hash = ? WHERE id = ?',
+        [bcrypt.hashSync(next, 10), user.id]);
+
+      // Sign out other devices but keep this session alive.
+      await pool.query('DELETE FROM user_sessions WHERE user_id = ? AND token_hash != ?',
+        [user.id, sha256(bearer(req))]);
+
+      res.json({ success: true, message: 'Password updated. Other devices have been signed out.' });
+    } catch (err) {
+      console.error('change-password failed:', err.message);
+      res.status(500).json({ success: false, error: 'Could not change your password.' });
+    }
+  }));
 
   // ---- Interior tool workspace (per user) --------------------------------
   app.get(paths('interior_state'), withUser(async (_req, res, user) => {

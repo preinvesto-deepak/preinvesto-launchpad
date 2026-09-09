@@ -104,7 +104,7 @@ function current_user(): ?array {
     if ($token === '') return null;
 
     $stmt = db()->prepare(
-        'SELECT u.id, u.name, u.email
+        'SELECT u.id, u.name, u.email, u.mobile
            FROM user_sessions s
            JOIN users u ON u.id = s.user_id
           WHERE s.token_hash = ? AND s.expires_at > NOW()
