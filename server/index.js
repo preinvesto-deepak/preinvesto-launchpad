@@ -7,6 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import registerAuthRoutes from './authRoutes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -388,6 +389,9 @@ app.post(['/api/update_property', '/api/update_property.php'], async (req, res) 
     res.status(500).json({ error: 'Failed to update property', detail: err.message });
   }
 });
+
+// Auth (signup/login/forgot-password) + the Interior tool's per-user workspace.
+registerAuthRoutes(app, pool);
 
 app.listen(port, () => {
   console.log(`API server running on http://localhost:${port}`);

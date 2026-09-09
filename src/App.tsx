@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import { AdminProvider, useAdmin } from "@/context/AdminContext";
+import { AuthProvider, useAuth } from "@/context/AuthContext";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import ScrollToTop from "./components/ScrollToTop";
@@ -28,6 +29,13 @@ const PropertyDetail = lazy(() => import("./pages/PropertyDetail"));
 const SoldProperties = lazy(() => import("./pages/SoldProperties"));
 const AdminLogin = lazy(() => import("./pages/AdminLogin"));
 const AdminReview = lazy(() => import("./pages/AdminReview"));
+const Login = lazy(() => import("./pages/Login"));
+const Signup = lazy(() => import("./pages/Signup"));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+// Lazy so the Interior tool's bundle (and jsPDF/xlsx) only loads for the
+// people who actually open it, not every visitor to the marketing site.
+const InteriorApp = lazy(() => import("./interior/InteriorApp"));
 
 // Redirects to /admin login if not admin, preserving intended destination
 const AdminRoute = ({ children }: { children: React.ReactNode }) => {
@@ -45,12 +53,24 @@ const Loading = () => (
   </div>
 );
 
+// Sends signed-out visitors to /login, remembering where they were headed so
+// they land there after signing in. Waits for the stored token to be checked
+// first, otherwise a refresh would bounce a signed-in user straight out.
+const RequireAuth = ({ children }: { children: React.ReactNode }) => {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+  if (loading) return <Loading />;
+  if (!user) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  return <>{children}</>;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
       <Sonner />
       <BrowserRouter>
+      <AuthProvider>
       <AdminProvider>
         <Suspense fallback={<Loading />}>
           <ScrollToTop />
@@ -80,11 +100,23 @@ const App = () => (
             <Route path="/properties/sold" element={<SoldProperties />} />
             <Route path="/properties/:id/edit" element={<AdminRoute><PropertyEdit /></AdminRoute>} />
             <Route path="/properties/:id" element={<PropertyDetail />} />
+
+            {/* Interior Quotation tool — account area */}
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route
+              path="/interior/*"
+              element={<RequireAuth><InteriorApp /></RequireAuth>}
+            />
+
             <Route path="*" element={<NotFound />} />
             <Route path="/terms" element={<TermsAndConditions />} />
           </Routes>
         </Suspense>
       </AdminProvider>
+      </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

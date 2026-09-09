@@ -65,6 +65,9 @@ export const NAV_ITEMS = [
   { label: "Portfolio", path: "/portfolio" },
   { label: "Blogs", path: "/blog" },
   { label: "Gallery", path: "/gallery" },
+  // Signed-out visitors hitting /interior are redirected to /login by the
+  // route guard, which is where the Signup / Forgot-password links live.
+  { label: "Interior Tool", path: "/interior" },
 ];
 
 export const JOURNEY_STEPS = [

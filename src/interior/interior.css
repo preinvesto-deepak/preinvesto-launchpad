@@ -1,0 +1,236 @@
+.interior-app {
+  --brand: #185fa5;
+  --brand-light: #e6f1fb;
+  --brand-dark: #0c447c;
+  --stone-50: #fafaf9;
+  --stone-100: #f5f5f4;
+  --stone-200: #e7e5e4;
+  --stone-300: #d6d3d1;
+  --stone-400: #a8a29e;
+  --stone-500: #78716c;
+  --stone-700: #44403c;
+  --stone-800: #292524;
+}
+
+
+/* ── Layout ── */
+.interior-app .app-layout {
+  display: flex;
+  min-height: 100vh;
+  background-color: var(--stone-100);
+}
+
+
+/* ── Sidebar ── */
+.interior-app .sidebar {
+  width: 220px;
+  min-width: 220px;
+  background: #ffffff;
+  border-right: 1px solid rgba(231, 229, 228, 0.8);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.interior-app .sidebar-brand {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--stone-100);
+}
+
+.interior-app .sidebar-brand-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--stone-800);
+}
+
+.interior-app .sidebar-brand-sub {
+  font-size: 10px;
+  color: var(--stone-400);
+  margin-top: 1px;
+}
+
+.interior-app .sidebar-search {
+  margin: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--stone-50);
+  border: 1px solid var(--stone-200);
+  border-radius: 8px;
+  padding: 5px 8px;
+}
+
+.interior-app .sidebar-search svg {
+  color: var(--stone-400);
+  flex-shrink: 0;
+}
+
+.interior-app .sidebar-search input {
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 11px;
+  color: var(--stone-700);
+  width: 100%;
+  padding: 0;
+}
+
+.interior-app .sidebar-search input::placeholder {
+  color: var(--stone-400);
+}
+
+.interior-app .sidebar nav {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 16px;
+}
+
+.interior-app .sidebar nav::-webkit-scrollbar { width: 3px; }
+.interior-app .sidebar nav::-webkit-scrollbar-thumb { background: var(--stone-200); border-radius: 99px; }
+
+.interior-app .sidebar ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.interior-app .sidebar li {
+  margin: 0;
+}
+
+.interior-app .sidebar a {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--stone-700);
+  text-decoration: none;
+  padding: 6px 8px 6px 12px;
+  border-radius: 8px;
+  margin: 0 4px;
+  font-size: 12px;
+  transition: background 0.12s;
+}
+
+.interior-app .sidebar a:hover {
+  background: var(--stone-100);
+  color: var(--stone-800);
+}
+
+.interior-app .sidebar a.active {
+  background: var(--brand-light);
+  color: var(--brand);
+  font-weight: 600;
+}
+
+
+/* ── Group label ── */
+.interior-app .sidebar-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--stone-400);
+  text-transform: uppercase;
+  padding: 12px 12px 4px;
+}
+
+
+/* ── Main content ── */
+.interior-app .main-content {
+  flex: 1;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+
+/* ── Page card ── */
+.interior-app .page-card {
+  background: white;
+  border: 1px solid var(--stone-200);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+
+/* ── Global form elements ── */
+.interior-app input,
+.interior-app select,
+.interior-app button {
+  font-size: 14px;
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.interior-app input,
+.interior-app select {
+  border: 1px solid var(--stone-300);
+  width: 100%;
+}
+
+.interior-app button {
+  border: none;
+  background: var(--brand);
+  color: white;
+  cursor: pointer;
+}
+
+.interior-app button:hover {
+  background: var(--brand-dark);
+}
+
+.interior-app table {
+  background: white;
+  border-collapse: collapse;
+}
+
+.interior-app th {
+  background: var(--stone-50);
+}
+
+
+/* ── Page header ── */
+.interior-app .page-header {
+  margin-bottom: 20px;
+}
+
+.interior-app .page-header h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--stone-800);
+}
+
+/* ── Print ── */
+@media print {
+.interior-app .no-print,
+.interior-app .sidebar,
+.interior-app .page-header {
+    display: none !important;
+  }
+
+.interior-app .main-content {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white;
+  }
+
+.interior-app .page-card {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+  }
+
+.interior-app .quotation-print-area {
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 20px !important;
+  }
+
+.interior-app body {
+    background: white !important;
+  }
+}
