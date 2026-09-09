@@ -22,10 +22,6 @@ const defaultData = {
   materialModelProfitPercent: { economy: 0, standard: 0, premium: 0 },
   templates: [],
   selectedTemplateId: "",
-  generatedParts: [],
-  configuredWardrobe: null,
-  wardrobeRecords: [],
-  editingWardrobeRecordId: null,
   materialStockSettings: {},
   kerfWidth: 0,
 };
@@ -44,10 +40,6 @@ function AppDataProvider({ children }) {
   const [materialModelProfitPercent, setMaterialModelProfitPercent] = useState(defaultData.materialModelProfitPercent);
   const [templates, setTemplates] = useState(defaultData.templates);
   const [selectedTemplateId, setSelectedTemplateId] = useState(defaultData.selectedTemplateId);
-  const [generatedParts, setGeneratedParts] = useState(defaultData.generatedParts);
-  const [configuredWardrobe, setConfiguredWardrobe] = useState(defaultData.configuredWardrobe);
-  const [wardrobeRecords, setWardrobeRecords] = useState(defaultData.wardrobeRecords);
-  const [editingWardrobeRecordId, setEditingWardrobeRecordId] = useState(defaultData.editingWardrobeRecordId);
   const [materialStockSettings, setMaterialStockSettings] = useState(defaultData.materialStockSettings);
   const [kerfWidth, setKerfWidth] = useState(defaultData.kerfWidth);
 
@@ -83,10 +75,6 @@ function AppDataProvider({ children }) {
         setMaterialModelProfitPercent(data.materialModelProfitPercent || defaultData.materialModelProfitPercent);
         setTemplates(data.templates || []);
         setSelectedTemplateId(data.selectedTemplateId || "");
-        setGeneratedParts(data.generatedParts || []);
-        setConfiguredWardrobe(data.configuredWardrobe ?? null);
-        setWardrobeRecords(data.wardrobeRecords || []);
-        setEditingWardrobeRecordId(data.editingWardrobeRecordId ?? null);
         setMaterialStockSettings(data.materialStockSettings || {});
         setKerfWidth(data.kerfWidth ?? 0);
       })
@@ -116,10 +104,6 @@ function AppDataProvider({ children }) {
         materialModelProfitPercent,
         templates,
         selectedTemplateId,
-        generatedParts,
-        configuredWardrobe,
-        wardrobeRecords,
-        editingWardrobeRecordId,
         materialStockSettings,
         kerfWidth,
       };
@@ -142,10 +126,6 @@ function AppDataProvider({ children }) {
     materialModelProfitPercent,
     templates,
     selectedTemplateId,
-    generatedParts,
-    configuredWardrobe,
-    wardrobeRecords,
-    editingWardrobeRecordId,
     materialStockSettings,
     kerfWidth,
   ]);
@@ -196,10 +176,6 @@ function AppDataProvider({ children }) {
     setMaterialModelProfitPercent({ economy: 0, standard: 0, premium: 0 });
     setTemplates([]);
     setSelectedTemplateId("");
-    setGeneratedParts([]);
-    setConfiguredWardrobe(null);
-    setWardrobeRecords([]);
-    setEditingWardrobeRecordId(null);
     setMaterialStockSettings({});
     setKerfWidth(0);
     // The debounced save effect above picks this up and POSTs the cleared
@@ -213,10 +189,6 @@ function AppDataProvider({ children }) {
     setPrices(priceList);
     setTemplates([]);
     setSelectedTemplateId("");
-    setGeneratedParts([]);
-    setConfiguredWardrobe(null);
-    setWardrobeRecords([]);
-    setEditingWardrobeRecordId(null);
     setMaterialStockSettings({});
     setKerfWidth(0);
     // Same as resetAllData — the debounced save effect persists this.
@@ -241,14 +213,6 @@ function AppDataProvider({ children }) {
         setTemplates,
         selectedTemplateId,
         setSelectedTemplateId,
-        generatedParts,
-        setGeneratedParts,
-        configuredWardrobe,
-        setConfiguredWardrobe,
-        wardrobeRecords,
-        setWardrobeRecords,
-        editingWardrobeRecordId,
-        setEditingWardrobeRecordId,
         materialStockSettings,
         setMaterialStockSettings,
         kerfWidth,

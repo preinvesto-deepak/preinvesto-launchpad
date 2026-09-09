@@ -5,8 +5,7 @@
  *
  * This lets BOQ/Quotation pages compute real material quantities (and real
  * nested sheet counts via computeSheetCounts) directly from a project's
- * actual applied templates, instead of the separate/unused Configurator
- * (wardrobeRecords) pipeline.
+ * actual applied templates.
  */
 
 import { mmToFeet } from "./unitConversions";

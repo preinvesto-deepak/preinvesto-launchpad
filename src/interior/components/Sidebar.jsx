@@ -131,14 +131,9 @@ function Sidebar() {
           <li><NavLink to="/interior/items-pricing">Items Pricing</NavLink></li>
           <li><NavLink to="/interior/material-models">Material Models</NavLink></li>
           <li><NavLink to="/interior/template-master">Templates</NavLink></li>
-          <li><NavLink to="/interior/wardrobe-configurator">Configurator</NavLink></li>
-          <li><NavLink to="/interior/wardrobe-records">Saved Records</NavLink></li>
 
           <GroupLabel label="Output" />
-          <li><NavLink to="/interior/cut-sheet-output">Cut Sheet</NavLink></li>
-          <li><NavLink to="/interior/boq">BOQ</NavLink></li>
           <li><NavLink to="/interior/project-boq">Project BOQ</NavLink></li>
-          <li><NavLink to="/interior/quotation">Quotation</NavLink></li>
           <li><NavLink to="/interior/project-quotation">Project Quotation</NavLink></li>
         </ul>
       </nav>

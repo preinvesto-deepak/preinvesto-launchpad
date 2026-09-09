@@ -28,10 +28,6 @@ const INTERIOR_DEFAULTS = {
   materialModelProfitPercent: { economy: 0, standard: 0, premium: 0 },
   templates: [],
   selectedTemplateId: '',
-  generatedParts: [],
-  configuredWardrobe: null,
-  wardrobeRecords: [],
-  editingWardrobeRecordId: null,
   materialStockSettings: {},
   kerfWidth: 0,
 };

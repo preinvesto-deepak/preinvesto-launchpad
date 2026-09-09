@@ -715,8 +715,7 @@ function Projects() {
   const {
     projects, setProjects,
     subProjects, setSubProjects,
-    wardrobeRecords,
-    setConfiguredWardrobe, setGeneratedParts, setSelectedTemplateId, setEditingWardrobeRecordId,
+    setSelectedTemplateId,
     prices,
     materialModelRates,
     materialStockSettings,
@@ -832,11 +831,6 @@ function Projects() {
     rooms.find((r) => r.id === activeRoomId) ??
     rooms[0] ??
     null;
-  const roomItems = wardrobeRecords.filter(
-    (r) =>
-      r.projectName === selectedProject?.name &&
-      r.subProjectName === activeRoom?.subProject
-  );
 
   // Seed the Extra drafts from the active room's persisted values whenever the
   // room changes, so typing stays smooth (raw string while typing, committed
@@ -1024,29 +1018,6 @@ function Projects() {
     setPendingTemplate(null);
   };
 
-  const openInConfigurator = (box) => {
-    const wardrobeData = {
-      projectName: selectedProject?.name || "",
-      subProjectName: activeRoom?.subProject || "",
-      itemName: box.itemName || box.name,
-      templateId: box.templateId,
-      templateName: box.templateName,
-      widthMm: Number(box.widthMm) || 0,
-      heightMm: Number(box.heightMm) || 0,
-      depthMm: Number(box.depthMm) || 0,
-      doorType: box.doorType || "swing",
-      doorsH: Number(box.doorsH) || 0,
-      doorsV: Number(box.doorsV) || 0,
-      shelves: Number(box.shelves) || 0,
-      partitions: Number(box.partitions) || 0,
-      backParts: Number(box.backParts) || 1,
-      frontFrame: Number(box.frontFrame) || 0,
-    };
-    setConfiguredWardrobe(wardrobeData);
-    setSelectedTemplateId(String(box.templateId || ""));
-    setEditingWardrobeRecordId(null);
-    navigate("/interior/wardrobe-configurator");
-  };
 
   const updateBox = (field, value) => {
     if (!activeBox) return;
@@ -1416,14 +1387,6 @@ function Projects() {
     updateBoxById(boxId, "hardwareItems", (box?.hardwareItems || []).filter((h) => h.id !== id));
   };
 
-  // ── Item actions ─────────────────────────────────────────────────────────────
-  const editItem = (record) => {
-    setConfiguredWardrobe(record);
-    setGeneratedParts(record.parts || []);
-    setSelectedTemplateId(String(record.templateId || ""));
-    setEditingWardrobeRecordId(record.id);
-    navigate("/interior/wardrobe-configurator");
-  };
 
   // ─────────────────────────────────────────────────────────────────────────────
   return (
@@ -2538,85 +2501,13 @@ function Projects() {
                     })()}
                   </div>
 
-                  {/* 2. Items in this Room */}
-                  <Section title={`Items in ${activeRoom.subProject}`} badge={roomItems.length} defaultOpen>
-                    {roomItems.length > 0 ? (
-                      <div style={{ overflowX: "auto", marginBottom: 14 }}>
-                        <table border="1" cellPadding="9" cellSpacing="0" width="100%" style={{ fontSize: 13 }}>
-                          <thead>
-                            <tr>
-                              <th style={{ textAlign: "left" }}>Item Name</th>
-                              <th style={{ textAlign: "left" }}>Template</th>
-                              <th>Size (W × H × D mm)</th>
-                              <th style={{ textAlign: "right" }}>Est. Cost</th>
-                              <th>Actions</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {roomItems.map((item) => {
-                              const sheetArea = 2440 * 1220;
-                              const woodAmt = (item.parts || []).reduce((acc, p) => {
-                                const area = Number(p.lengthMm) * Number(p.widthMm) * Number(p.qty);
-                                const rateData = (prices || []).find((pr) => pr.materialName === p.material);
-                                const sheets = Math.ceil(area / sheetArea);
-                                return acc + sheets * Number(rateData?.rate || 0);
-                              }, 0);
-                              const hwItems = Array.isArray(item.hardwareItems) ? item.hardwareItems : [];
-                              const hwAmt = hwItems.reduce((s, h) => s + Number(h.qty || 0) * Number(h.rate || 0), 0) || Number(item.hardwareAmount || 0);
-                              const estCost = woodAmt + Number(item.laminateAmount || 0) + Number(item.edgeBandAmount || 0) + hwAmt + Number(item.laborAmount || 0) + Number(item.transportAmount || 0);
-                              return (
-                                <tr key={item.id}>
-                                  <td>
-                                    <strong>{item.itemName}</strong>
-                                    {item.doorType && item.doorType !== "none" && (
-                                      <span style={{ marginLeft: 6, fontSize: 11, color: "#6b7280" }}>({item.doorType})</span>
-                                    )}
-                                  </td>
-                                  <td style={{ color: "#6b7280" }}>{item.templateName}</td>
-                                  <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                                    {item.widthMm} × {item.heightMm} × {item.depthMm}
-                                    <br />
-                                    <span style={{ fontSize: 11, color: "#9ca3af" }}>
-                                      {roundTo2(mmToFeet(item.widthMm))} × {roundTo2(mmToFeet(item.heightMm))} × {roundTo2(mmToFeet(item.depthMm))} ft
-                                    </span>
-                                  </td>
-                                  <td style={{ textAlign: "right", fontWeight: 600 }}>{formatCurrency(estCost)}</td>
-                                  <td>
-                                    <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                                      <button onClick={() => editItem(item)} style={{ background: "#6b7280", padding: "3px 9px", fontSize: 11 }}>Edit</button>
-                                      <button onClick={() => navigate(`/interior/boq?record=${item.id}`)} style={{ background: "#059669", padding: "3px 9px", fontSize: 11 }}>BOQ</button>
-                                      <button onClick={() => navigate(`/interior/quotation?record=${item.id}`)} style={{ background: "#7c3aed", padding: "3px 9px", fontSize: 11 }}>Quote</button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <p style={{ color: "#6b7280", margin: "0 0 12px", fontSize: 13 }}>
-                        No items configured for this room yet.
-                      </p>
-                    )}
-                    <button
-                      onClick={() => navigate("/interior/wardrobe-configurator")}
-                      style={{ background: "#2563eb", padding: "8px 16px" }}
-                    >
-                      + Configure New Item
-                    </button>
-                  </Section>
-
-                  {/* 3. Output Actions */}
+                  {/* 2. Output Actions */}
                   <Section title="Output" defaultOpen={false}>
                     <p style={{ fontSize: 13, color: "#6b7280", margin: "0 0 14px" }}>
                       Generate reports for <strong>{selectedProject.name}</strong>
                     </p>
                     <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                      <button onClick={() => navigate("/interior/cut-sheet-output")} style={{ background: "#0891b2" }}>Cut Sheet</button>
-                      <button onClick={() => navigate("/interior/boq")} style={{ background: "#059669" }}>BOQ (Single Item)</button>
                       <button onClick={() => navigate(`/interior/project-boq?project=${encodeURIComponent(selectedProject.name)}`)} style={{ background: "#047857" }}>Project BOQ</button>
-                      <button onClick={() => navigate("/interior/quotation")} style={{ background: "#7c3aed" }}>Quotation</button>
                       <button onClick={() => navigate(`/interior/project-quotation?project=${encodeURIComponent(selectedProject.name)}`)} style={{ background: "#6d28d9" }}>Project Quotation</button>
                     </div>
                   </Section>

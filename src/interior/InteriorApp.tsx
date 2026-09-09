@@ -8,15 +8,10 @@ import Dashboard from "./pages/Dashboard";
 import Projects from "./pages/Projects";
 import SubProjects from "./pages/SubProjects";
 import TemplateMaster from "./pages/TemplateMaster";
-import WardrobeConfigurator from "./pages/WardrobeConfigurator";
-import WardrobeRecords from "./pages/WardrobeRecords";
 import ItemsPricing from "./pages/ItemsPricing";
 import MaterialModels from "./pages/MaterialModels";
 import DimensionsEntry from "./pages/DimensionsEntry";
-import CutSheetOutput from "./pages/CutSheetOutput";
-import BOQ from "./pages/BOQ";
 import ProjectBOQ from "./pages/ProjectBOQ";
-import Quotation from "./pages/Quotation";
 import ProjectQuotation from "./pages/ProjectQuotation";
 
 import "./interior.css";
@@ -26,15 +21,10 @@ const PAGE_TITLES: Record<string, string> = {
   "/interior/projects": "Projects & Rooms",
   "/interior/sub-projects": "Projects & Rooms",
   "/interior/template-master": "Templates",
-  "/interior/wardrobe-configurator": "Configurator",
-  "/interior/wardrobe-records": "Saved Records",
   "/interior/items-pricing": "Items Pricing",
   "/interior/material-models": "Material Models",
   "/interior/dimensions-entry": "Dimensions Entry",
-  "/interior/cut-sheet-output": "Cut Sheet",
-  "/interior/boq": "BOQ",
   "/interior/project-boq": "Project BOQ",
-  "/interior/quotation": "Quotation",
   "/interior/project-quotation": "Project Quotation",
 };
 
@@ -129,15 +119,10 @@ const InteriorApp = () => {
               <Route path="projects" element={<Projects />} />
               <Route path="sub-projects" element={<SubProjects />} />
               <Route path="template-master" element={<TemplateMaster />} />
-              <Route path="wardrobe-configurator" element={<WardrobeConfigurator />} />
-              <Route path="wardrobe-records" element={<WardrobeRecords />} />
               <Route path="items-pricing" element={<ItemsPricing />} />
               <Route path="material-models" element={<MaterialModels />} />
               <Route path="dimensions-entry" element={<DimensionsEntry />} />
-              <Route path="cut-sheet-output" element={<CutSheetOutput />} />
-              <Route path="boq" element={<BOQ />} />
               <Route path="project-boq" element={<ProjectBOQ />} />
-              <Route path="quotation" element={<Quotation />} />
               <Route path="project-quotation" element={<ProjectQuotation />} />
             </Routes>
           </div>

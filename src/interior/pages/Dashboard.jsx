@@ -8,9 +8,6 @@ function Dashboard() {
     subProjects,
     dimensions,
     prices,
-    generatedParts,
-    configuredWardrobe,
-    wardrobeRecords,
     resetAllData,
     restoreSampleData,
   } = useAppData();
@@ -137,10 +134,6 @@ function Dashboard() {
           <p style={{ fontSize: "24px", marginBottom: 0 }}>{prices.length}</p>
         </div>
       
-      <div style={cardStyle}>
-         <h3 style={{ marginTop: 0 }}>Wardrobe Records</h3>
-         <p style={{ fontSize: "24px", marginBottom: 0 }}>{wardrobeRecords.length}</p>
-      </div>
       </div>
       
       <h3>Quick Actions</h3>
@@ -156,33 +149,6 @@ function Dashboard() {
         <Link to="/interior/projects" style={quickLinkStyle}>Go to Projects</Link>
         <Link to="/interior/sub-projects" style={quickLinkStyle}>Go to Sub Projects</Link>
         <Link to="/interior/template-master" style={quickLinkStyle}>Go to Template Master</Link>
-        <Link to="/interior/wardrobe-configurator" style={quickLinkStyle}>Go to Wardrobe Configurator</Link>
-        <Link to="/interior/cut-sheet-output" style={quickLinkStyle}>Go to Cut Sheet Output</Link>
-        <Link to="/interior/quotation" style={quickLinkStyle}>Go to Quotation</Link>
-      </div>
-
-      <div
-        style={{
-          border: "1px solid #d1d5db",
-          borderRadius: "12px",
-          padding: "16px",
-          background: "#ffffff",
-          marginBottom: "24px",
-        }}
-      >
-        <h3 style={{ marginTop: 0 }}>Generated Wardrobe Summary</h3>
-
-        {configuredWardrobe ? (
-          <>
-            <p><strong>Template:</strong> {configuredWardrobe.templateName}</p>
-            <p><strong>Width:</strong> {configuredWardrobe.widthMm} mm</p>
-            <p><strong>Height:</strong> {configuredWardrobe.heightMm} mm</p>
-            <p><strong>Depth:</strong> {configuredWardrobe.depthMm} mm</p>
-            <p><strong>Generated Parts Count:</strong> {generatedParts.length}</p>
-          </>
-        ) : (
-          <p>No wardrobe configuration saved yet.</p>
-        )}
       </div>
 
       <h3>Recent Dimension Entries</h3>
