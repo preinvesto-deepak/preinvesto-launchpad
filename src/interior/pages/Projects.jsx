@@ -1013,6 +1013,7 @@ function Projects() {
     const id = boxes.length ? Math.max(...boxes.map((b) => b.id)) + 1 : 1;
     const newBox = {
       id, name: `Box ${id}`,
+      includeInQuotation: true,
       boxType: "", frameType: "Framed", doorType: "",
       widthMm: "", heightMm: "", depthMm: "",
       matDoor: "", matDoorId: null, matCarcas: "", matCarcasId: null,
@@ -1034,6 +1035,7 @@ function Projects() {
     const newBoxes = tBoxes.map((tb, i) => ({
       id: i + 1,
       name: tb.boxName || `Box ${i + 1}`,
+      includeInQuotation: true,
       boxType: tb.boxType || "",
       frameType: "Framed",
       doorType: tb.doorType || "",
@@ -1657,17 +1659,20 @@ function Projects() {
                     }}>
                       {boxes.map((box) => {
                         const isActive = activeBox?.id === box.id || (!activeBoxId && boxes[0]?.id === box.id);
+                        const excluded = box.includeInQuotation === false;
                         return (
                           <button
                             key={box.id}
                             onClick={() => { setActiveBoxId(box.id); setEditingBoxName(false); }}
+                            title={excluded ? "Not included in Quotation" : undefined}
                             style={{
                               padding: "7px 16px",
                               border: "none",
                               borderBottom: isActive ? "3px solid #7c3aed" : "3px solid transparent",
                               background: "none",
-                              color: isActive ? "#7c3aed" : "#374151",
+                              color: isActive ? "#7c3aed" : excluded ? "#9ca3af" : "#374151",
                               fontWeight: isActive ? 700 : 400,
+                              fontStyle: excluded ? "italic" : "normal",
                               cursor: "pointer",
                               fontSize: 13,
                               marginBottom: -2,
@@ -1675,6 +1680,7 @@ function Projects() {
                             }}
                           >
                             {box.name}
+                            {excluded && <span style={{ marginLeft: 4, fontSize: 11 }}>🚫</span>}
                           </button>
                         );
                       })}
@@ -1786,6 +1792,15 @@ function Projects() {
                               <option value="Swing Door">Swing Door</option>
                             </select>
                           </div>
+                          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
+                            <input
+                              type="checkbox"
+                              checked={activeBox.includeInQuotation !== false}
+                              onChange={(e) => updateBox("includeInQuotation", e.target.checked)}
+                              style={{ width: 14, height: 14, cursor: "pointer" }}
+                            />
+                            Include in Quotation
+                          </label>
                         </div>
 
                         {/* ── Dimensions (compact inline) ── */}

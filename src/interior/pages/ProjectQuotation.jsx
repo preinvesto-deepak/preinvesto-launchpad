@@ -281,6 +281,20 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     [subProjects, selectedProject]
   );
 
+  // Every quotation section (Rooms table, MRP savings, Hardware & Consumables
+  // discount page, Cut List) reads from this instead of projectRooms — a box
+  // with its "Include in quotation" checkbox off (see Projects.jsx Section 1
+  // Inputs) is dropped from all of them, and its materials/cost are excluded
+  // from the room totals too, not just hidden as a row. Missing the field
+  // entirely (boxes saved before this existed) defaults to included.
+  const quotationRooms = useMemo(
+    () => projectRooms.map((room) => ({
+      ...room,
+      boxes: (room.boxes || []).filter((b) => b.includeInQuotation !== false),
+    })),
+    [projectRooms]
+  );
+
   // Persist every quotation-settings field on the project itself (like
   // materialModelRates / room extra-buffers elsewhere in the app) so nothing
   // is lost switching tabs, reloading, or coming back later — was previously
@@ -366,32 +380,32 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     });
 
   const lineItems = useMemo(
-    () => buildLineItems(projectRooms, selectedModel),
+    () => buildLineItems(quotationRooms, selectedModel),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectRooms, prices, selectedModel, selectedProjectObj, materialStockSettings, materialModelProfitPercent]
+    [quotationRooms, prices, selectedModel, selectedProjectObj, materialStockSettings, materialModelProfitPercent]
   );
 
   // MRP-vs-net savings across every room — items only, not model-adjusted
   // (see computeRoomMrpSavings above for why).
   const mrpSavings = useMemo(() => {
-    return projectRooms.reduce((acc, room) => {
+    return quotationRooms.reduce((acc, room) => {
       const s = computeRoomMrpSavings(room, prices, materialStockSettings);
       return { mrpTotal: acc.mrpTotal + s.mrpTotal, netTotal: acc.netTotal + s.netTotal, savings: acc.savings + s.savings };
     }, { mrpTotal: 0, netTotal: 0, savings: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectRooms, prices, materialStockSettings]);
+  }, [quotationRooms, prices, materialStockSettings]);
 
   // Itemized Hardware & Consumables MRP/Discount breakdown — feeds the
   // Quotation's dedicated savings page (see computeHardwareMrpSavingsItems).
   const hardwareMrpItems = useMemo(
-    () => computeHardwareMrpSavingsItems(projectRooms, prices),
-    [projectRooms, prices]
+    () => computeHardwareMrpSavingsItems(quotationRooms, prices),
+    [quotationRooms, prices]
   );
 
   // Flat cut-list rows across every room — feeds the Quotation's Cut List page.
   const cutListRows = useMemo(
-    () => buildProjectCutListRows(projectRooms, prices),
-    [projectRooms, prices]
+    () => buildProjectCutListRows(quotationRooms, prices),
+    [quotationRooms, prices]
   );
 
   const costTotal = lineItems.reduce((s, i) => s + i.costTotal, 0);
@@ -421,7 +435,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     "₹" + Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const buildVariant = (model) => {
-    const items = buildLineItems(projectRooms, model);
+    const items = buildLineItems(quotationRooms, model);
     const ct = items.reduce((s, i) => s + i.costTotal, 0);
     const mu = (ct * Number(markupPercent || 0)) / 100;
     const st = ct + mu;
