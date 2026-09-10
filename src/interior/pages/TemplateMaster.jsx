@@ -138,8 +138,38 @@ const emptyTemplate = (id, name) => ({
   id,
   templateName: name,
   description: "",
+  templateImage: "",
   boxes: [emptyBox(1)],
 });
+
+// Downscales/recompresses an uploaded photo client-side before it becomes
+// part of the template's JSON (templateImage is a data: URI stored inline —
+// the same JSON blob that gets autosaved on every edit — so an unshrunk
+// phone photo would balloon every save/load of this account's whole
+// workspace, not just this one template).
+const MAX_TEMPLATE_IMAGE_DIM = 480;
+function resizeImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error("Could not read the file."));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("That file doesn't look like a valid image."));
+      img.onload = () => {
+        const scale = Math.min(1, MAX_TEMPLATE_IMAGE_DIM / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 function ftLabel(mm) {
   return mm ? roundTo2(mmToFeet(Number(mm))) + " ft" : "—";
@@ -324,6 +354,7 @@ function TemplateMaster() {
   const [activeBoxId, setActiveBoxId] = useState(null);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
+  const [imageBusy, setImageBusy] = useState(false);
   const [confirmDeleteBoxId, setConfirmDeleteBoxId] = useState(null);
   const [matPicker, setMatPicker] = useState(null);
   const [hardwarePicker, setHardwarePicker] = useState(null); // { hwId }
@@ -580,6 +611,25 @@ function TemplateMaster() {
     setIsDirty(true);
   };
 
+  const handleTemplateImagePick = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow picking the same file again later
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Please choose an image file.");
+      return;
+    }
+    setImageBusy(true);
+    try {
+      const dataUri = await resizeImageFile(file);
+      updateDraft("templateImage", dataUri);
+    } catch (err) {
+      alert(err.message || "Could not load that image.");
+    } finally {
+      setImageBusy(false);
+    }
+  };
+
   const updateBox = (field, value) => {
     if (!activeBox) return;
     setDraft((prev) => ({
@@ -796,7 +846,17 @@ function TemplateMaster() {
                       onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#7c3aed"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(124,58,237,0.12)"; }}
                       onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#e5e7eb"; e.currentTarget.style.boxShadow = "0 1px 4px rgba(0,0,0,0.06)"; }}
                     >
-                      <div style={{ fontSize: 36, marginBottom: 10 }}>📐</div>
+                      {t.templateImage ? (
+                        <img
+                          src={t.templateImage}
+                          alt=""
+                          style={{ width: "100%", height: 120, objectFit: "cover", borderRadius: 8, marginBottom: 10, display: "block" }}
+                        />
+                      ) : (
+                        <div style={{ width: "100%", height: 120, borderRadius: 8, marginBottom: 10, background: "#f9fafb", border: "1px dashed #e5e7eb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, color: "#d1d5db" }}>
+                          📐
+                        </div>
+                      )}
                       <div style={{ fontWeight: 700, fontSize: 15, color: "#111827", marginBottom: 4 }}>{t.templateName}</div>
                       <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>
                         {boxCount} box{boxCount !== 1 ? "es" : ""}
@@ -836,6 +896,32 @@ function TemplateMaster() {
                   >
                     ← All Templates
                   </button>
+                <label
+                  title={draft.templateImage ? "Change photo" : "Add photo"}
+                  style={{
+                    width: 64, height: 64, borderRadius: 8, flexShrink: 0, cursor: imageBusy ? "default" : "pointer",
+                    background: draft.templateImage ? `url(${draft.templateImage}) center/cover` : "#f9fafb",
+                    border: draft.templateImage ? "1px solid #e5e7eb" : "1px dashed #d1d5db",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 20, color: "#9ca3af", position: "relative", overflow: "hidden",
+                  }}
+                >
+                  {!draft.templateImage && (imageBusy ? "⏳" : "📷")}
+                  {draft.templateImage && (
+                    <div
+                      style={{
+                        position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                        background: "rgba(0,0,0,0.45)", color: "#fff", fontSize: 11, fontWeight: 600,
+                        opacity: 0, transition: "opacity 0.15s",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.opacity = 1)}
+                      onMouseLeave={(e) => (e.currentTarget.style.opacity = 0)}
+                    >
+                      {imageBusy ? "⏳" : "Change"}
+                    </div>
+                  )}
+                  <input type="file" accept="image/*" onChange={handleTemplateImagePick} disabled={imageBusy} style={{ display: "none" }} />
+                </label>
                 <div>
                   {editingName ? (
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
