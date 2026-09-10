@@ -831,14 +831,12 @@ function TemplateMaster() {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 }}>
                 {filtered.map((t) => {
                   const boxCount = (t.boxes || []).length;
-                  const doorTypes = [...new Set((t.boxes || []).map((b) => b.doorType).filter(Boolean))];
-                  const hasMaterials = (t.boxes || []).some((b) => b.matDoor || b.matCarcas);
                   return (
                     <div
                       key={t.id}
                       onClick={() => { setSelectedId(t.id); setView("detail"); }}
                       style={{
-                        border: "1px solid #e5e7eb", borderRadius: 12, padding: "20px 18px",
+                        border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden",
                         cursor: "pointer", background: "#fff",
                         boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
                         transition: "box-shadow 0.15s, border-color 0.15s",
@@ -850,23 +848,17 @@ function TemplateMaster() {
                         <img
                           src={t.templateImage}
                           alt=""
-                          style={{ width: "100%", height: 120, objectFit: "cover", borderRadius: 8, marginBottom: 10, display: "block" }}
+                          style={{ width: "100%", height: 170, objectFit: "cover", display: "block" }}
                         />
                       ) : (
-                        <div style={{ width: "100%", height: 120, borderRadius: 8, marginBottom: 10, background: "#f9fafb", border: "1px dashed #e5e7eb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, color: "#d1d5db" }}>
+                        <div style={{ width: "100%", height: 170, background: "#f9fafb", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, color: "#d1d5db" }}>
                           📐
                         </div>
                       )}
-                      <div style={{ fontWeight: 700, fontSize: 15, color: "#111827", marginBottom: 4 }}>{t.templateName}</div>
-                      <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>
-                        {boxCount} box{boxCount !== 1 ? "es" : ""}
-                        {doorTypes.length > 0 && <span style={{ marginLeft: 8 }}>· {doorTypes.join(", ")}</span>}
+                      <div style={{ padding: "10px 14px 12px" }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>{t.templateName}</div>
+                        <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{boxCount} box{boxCount !== 1 ? "es" : ""}</div>
                       </div>
-                      {hasMaterials && (
-                        <div style={{ fontSize: 11, color: "#7c3aed", background: "#f5f3ff", borderRadius: 6, padding: "2px 8px", display: "inline-block" }}>
-                          Materials set
-                        </div>
-                      )}
                     </div>
                   );
                 })}
