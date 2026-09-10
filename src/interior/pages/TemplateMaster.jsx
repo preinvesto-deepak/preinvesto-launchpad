@@ -142,33 +142,141 @@ const emptyTemplate = (id, name) => ({
   boxes: [emptyBox(1)],
 });
 
-// Downscales/recompresses an uploaded photo client-side before it becomes
-// part of the template's JSON (templateImage is a data: URI stored inline —
-// the same JSON blob that gets autosaved on every edit — so an unshrunk
-// phone photo would balloon every save/load of this account's whole
+// Template card photos are cropped to this exact ratio at upload time (see
+// TemplateImageCropModal below) and the card renders them at the same ratio
+// — so what the user selects in the crop tool is exactly what's visible on
+// the card, with no further browser-side cropping (object-fit: cover) to
+// surprise them by hiding the top/bottom.
+const TEMPLATE_IMAGE_RATIO = 3 / 2;
+const CROP_FRAME_W = 420;
+const CROP_FRAME_H = Math.round(CROP_FRAME_W / TEMPLATE_IMAGE_RATIO);
+// Output resolution is 2x the on-screen crop frame for a crisp card image
+// without storing a full-resolution phone photo inline in the template's
+// JSON (templateImage is a data: URI in the same blob that autosaves on
+// every edit — a multi-MB photo would bloat every save/load of the whole
 // workspace, not just this one template).
-const MAX_TEMPLATE_IMAGE_DIM = 480;
-function resizeImageFile(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error || new Error("Could not read the file."));
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error("That file doesn't look like a valid image."));
-      img.onload = () => {
-        const scale = Math.min(1, MAX_TEMPLATE_IMAGE_DIM / Math.max(img.width, img.height));
-        const w = Math.round(img.width * scale);
-        const h = Math.round(img.height * scale);
-        const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
-        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL("image/jpeg", 0.82));
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
+const CROP_OUTPUT_W = CROP_FRAME_W * 2;
+const CROP_OUTPUT_H = CROP_FRAME_H * 2;
+
+/**
+ * Drag-to-reposition + zoom cropper. Lets the user pick exactly which part
+ * of an uploaded photo becomes the template's card image, instead of the
+ * browser silently cropping whatever doesn't fit via object-fit: cover.
+ */
+function TemplateImageCropModal({ src, onConfirm, onCancel }) {
+  const imgRef = useState(() => ({ current: null }))[0];
+  const [natSize, setNatSize] = useState(null); // { w, h } in natural pixels
+  const [zoom, setZoom] = useState(1); // multiplier over the "fills the frame" scale
+  const [offset, setOffset] = useState({ x: 0, y: 0 }); // top-left of the image, in frame px
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useState(() => ({ current: null }))[0];
+
+  const minScale = natSize ? Math.max(CROP_FRAME_W / natSize.w, CROP_FRAME_H / natSize.h) : 1;
+  const scale = minScale * zoom;
+  const scaledW = natSize ? natSize.w * scale : 0;
+  const scaledH = natSize ? natSize.h * scale : 0;
+
+  // Keeps the frame always fully covered by the image — offset can't drift
+  // past an edge and leave blank space inside the crop area.
+  const clamp = (value, scaledDim, frameDim) => Math.min(0, Math.max(frameDim - scaledDim, value));
+
+  const handleImgLoad = () => {
+    const el = imgRef.current;
+    const w = el.naturalWidth;
+    const h = el.naturalHeight;
+    setNatSize({ w, h });
+    const ms = Math.max(CROP_FRAME_W / w, CROP_FRAME_H / h);
+    setOffset({ x: (CROP_FRAME_W - w * ms) / 2, y: (CROP_FRAME_H - h * ms) / 2 });
+  };
+
+  const handlePointerDown = (e) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging(true);
+    dragStart.current = { x: e.clientX, y: e.clientY, offset };
+  };
+  const handlePointerMove = (e) => {
+    if (!dragStart.current) return;
+    const dx = e.clientX - dragStart.current.x;
+    const dy = e.clientY - dragStart.current.y;
+    setOffset({
+      x: clamp(dragStart.current.offset.x + dx, scaledW, CROP_FRAME_W),
+      y: clamp(dragStart.current.offset.y + dy, scaledH, CROP_FRAME_H),
+    });
+  };
+  const handlePointerUp = () => {
+    dragStart.current = null;
+    setDragging(false);
+  };
+
+  const handleZoomChange = (newZoom) => {
+    if (!natSize) return;
+    const sw = natSize.w * minScale * newZoom;
+    const sh = natSize.h * minScale * newZoom;
+    setZoom(newZoom);
+    setOffset((prev) => ({
+      x: clamp(prev.x, sw, CROP_FRAME_W),
+      y: clamp(prev.y, sh, CROP_FRAME_H),
+    }));
+  };
+
+  const handleConfirm = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = CROP_OUTPUT_W;
+    canvas.height = CROP_OUTPUT_H;
+    const ctx = canvas.getContext("2d");
+    // Map the visible frame back to natural-pixel coordinates in the source
+    // image, so the exported crop matches what was shown, 1:1.
+    const sx = -offset.x / scale;
+    const sy = -offset.y / scale;
+    const sW = CROP_FRAME_W / scale;
+    const sH = CROP_FRAME_H / scale;
+    ctx.drawImage(imgRef.current, sx, sy, sW, sH, 0, 0, CROP_OUTPUT_W, CROP_OUTPUT_H);
+    onConfirm(canvas.toDataURL("image/jpeg", 0.85));
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: CROP_FRAME_W + 48 }}>
+        <h3 style={{ margin: "0 0 4px", fontSize: 16 }}>Position photo</h3>
+        <p style={{ margin: "0 0 14px", fontSize: 12, color: "#6b7280" }}>
+          Drag to reposition, use the slider to zoom. This is exactly what will show on the template card.
+        </p>
+        <div
+          style={{
+            width: CROP_FRAME_W, height: CROP_FRAME_H, overflow: "hidden", position: "relative",
+            borderRadius: 8, background: "#f3f4f6", cursor: dragging ? "grabbing" : "grab",
+            touchAction: "none", userSelect: "none",
+          }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+        >
+          <img
+            ref={(el) => { imgRef.current = el; }}
+            src={src}
+            onLoad={handleImgLoad}
+            draggable={false}
+            alt=""
+            style={{ position: "absolute", left: offset.x, top: offset.y, width: scaledW || "auto", height: scaledH || "auto", maxWidth: "none" }}
+          />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
+          <span style={{ fontSize: 12, color: "#6b7280" }}>Zoom</span>
+          <input
+            type="range" min={1} max={3} step={0.01} value={zoom}
+            onChange={(e) => handleZoomChange(Number(e.target.value))}
+            disabled={!natSize}
+            style={{ flex: 1 }}
+          />
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 18, justifyContent: "flex-end" }}>
+          <button onClick={onCancel} style={{ background: "#6b7280", padding: "7px 16px", fontSize: 13 }}>Cancel</button>
+          <button onClick={handleConfirm} disabled={!natSize} style={{ background: "#2563eb", padding: "7px 16px", fontSize: 13 }}>Use This Photo</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function ftLabel(mm) {
@@ -354,7 +462,7 @@ function TemplateMaster() {
   const [activeBoxId, setActiveBoxId] = useState(null);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
-  const [imageBusy, setImageBusy] = useState(false);
+  const [cropSrc, setCropSrc] = useState(null); // data URL of a freshly-picked photo, awaiting crop
   const [confirmDeleteBoxId, setConfirmDeleteBoxId] = useState(null);
   const [matPicker, setMatPicker] = useState(null);
   const [hardwarePicker, setHardwarePicker] = useState(null); // { hwId }
@@ -611,7 +719,7 @@ function TemplateMaster() {
     setIsDirty(true);
   };
 
-  const handleTemplateImagePick = async (e) => {
+  const handleTemplateImagePick = (e) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // allow picking the same file again later
     if (!file) return;
@@ -619,15 +727,15 @@ function TemplateMaster() {
       alert("Please choose an image file.");
       return;
     }
-    setImageBusy(true);
-    try {
-      const dataUri = await resizeImageFile(file);
-      updateDraft("templateImage", dataUri);
-    } catch (err) {
-      alert(err.message || "Could not load that image.");
-    } finally {
-      setImageBusy(false);
-    }
+    const reader = new FileReader();
+    reader.onerror = () => alert("Could not read that file.");
+    reader.onload = () => setCropSrc(reader.result); // opens TemplateImageCropModal
+    reader.readAsDataURL(file);
+  };
+
+  const handleCropConfirm = (dataUri) => {
+    updateDraft("templateImage", dataUri);
+    setCropSrc(null);
   };
 
   const updateBox = (field, value) => {
@@ -848,10 +956,10 @@ function TemplateMaster() {
                         <img
                           src={t.templateImage}
                           alt=""
-                          style={{ width: "100%", height: 170, objectFit: "cover", display: "block" }}
+                          style={{ width: "100%", aspectRatio: TEMPLATE_IMAGE_RATIO, objectFit: "cover", display: "block" }}
                         />
                       ) : (
-                        <div style={{ width: "100%", height: 170, background: "#f9fafb", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, color: "#d1d5db" }}>
+                        <div style={{ width: "100%", aspectRatio: TEMPLATE_IMAGE_RATIO, background: "#f9fafb", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, color: "#d1d5db" }}>
                           📐
                         </div>
                       )}
@@ -891,14 +999,14 @@ function TemplateMaster() {
                 <label
                   title={draft.templateImage ? "Change photo" : "Add photo"}
                   style={{
-                    width: 64, height: 64, borderRadius: 8, flexShrink: 0, cursor: imageBusy ? "default" : "pointer",
+                    width: 64, height: 64, borderRadius: 8, flexShrink: 0, cursor: "pointer",
                     background: draft.templateImage ? `url(${draft.templateImage}) center/cover` : "#f9fafb",
                     border: draft.templateImage ? "1px solid #e5e7eb" : "1px dashed #d1d5db",
                     display: "flex", alignItems: "center", justifyContent: "center",
                     fontSize: 20, color: "#9ca3af", position: "relative", overflow: "hidden",
                   }}
                 >
-                  {!draft.templateImage && (imageBusy ? "⏳" : "📷")}
+                  {!draft.templateImage && "📷"}
                   {draft.templateImage && (
                     <div
                       style={{
@@ -909,10 +1017,10 @@ function TemplateMaster() {
                       onMouseEnter={(e) => (e.currentTarget.style.opacity = 1)}
                       onMouseLeave={(e) => (e.currentTarget.style.opacity = 0)}
                     >
-                      {imageBusy ? "⏳" : "Change"}
+                      Change
                     </div>
                   )}
-                  <input type="file" accept="image/*" onChange={handleTemplateImagePick} disabled={imageBusy} style={{ display: "none" }} />
+                  <input type="file" accept="image/*" onChange={handleTemplateImagePick} style={{ display: "none" }} />
                 </label>
                 <div>
                   {editingName ? (
@@ -2103,6 +2211,14 @@ function TemplateMaster() {
             setHardwarePicker(null);
           }}
           onClose={() => setHardwarePicker(null)}
+        />
+      )}
+
+      {cropSrc && (
+        <TemplateImageCropModal
+          src={cropSrc}
+          onConfirm={handleCropConfirm}
+          onCancel={() => setCropSrc(null)}
         />
       )}
     </div>
