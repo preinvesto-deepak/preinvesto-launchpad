@@ -1,4 +1,5 @@
 import { useState, useEffect, Fragment } from "react";
+import { useLocation } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
 import { mmToFeet, feetToMm, roundTo2, formatCurrency } from "../utils/unitConversions";
 import CutSheetOptimizer from "./CutSheetOptimizer";
@@ -458,6 +459,19 @@ function TemplateMaster() {
   const [view, setView] = useState("grid"); // "grid" | "detail"
   const [cutSheetOpen, setCutSheetOpen] = useState(false);
   const [allCutSheetOpen, setAllCutSheetOpen] = useState(false);
+
+  // Clicking "Templates" in the sidebar while already on this page doesn't
+  // remount the component (same route, so React Router leaves it alone) —
+  // without this, `view` stayed stuck on "detail" and the click looked like
+  // it did nothing, with "All Templates" the only way back. location.key
+  // changes on every navigation, including to the same path, but not on our
+  // own internal setView("detail") calls (no navigation involved) — so this
+  // fires exactly when the sidebar link is clicked, and only then.
+  const location = useLocation();
+  useEffect(() => {
+    setView("grid");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
 
   const [activeBoxId, setActiveBoxId] = useState(null);
   const [editingName, setEditingName] = useState(false);
