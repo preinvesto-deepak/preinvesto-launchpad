@@ -1,7 +1,7 @@
 import { Routes, Route, useLocation, Link } from "react-router-dom";
-import { ArrowLeft, LogOut, UserCog } from "lucide-react";
+import { ArrowLeft, LogOut, UserCog, TriangleAlert } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { AppDataProvider } from "./context/AppDataContext";
+import { AppDataProvider, useAppData } from "./context/AppDataContext";
 import Sidebar from "./components/Sidebar";
 
 import Dashboard from "./pages/Dashboard";
@@ -96,6 +96,39 @@ function InteriorTopBar() {
 }
 
 /**
+ * Tells the user, in plain terms, when their workspace didn't load from the
+ * server — and therefore that nothing they do right now is being saved.
+ * AppDataContext deliberately leaves autosave permanently off for the rest
+ * of the session when the initial load fails, rather than risk overwriting
+ * real saved data with blank/seed state — this banner is what makes that
+ * silent-but-safe failure visible instead of silent-and-confusing.
+ */
+function WorkspaceLoadBanner() {
+  const { loadError } = useAppData();
+  if (!loadError) return null;
+  return (
+    <div
+      className="no-print"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "8px 20px",
+        background: "#fef2f2",
+        borderBottom: "1px solid #fecaca",
+        color: "#b91c1c",
+        fontSize: 12,
+      }}
+    >
+      <TriangleAlert size={14} style={{ flexShrink: 0 }} />
+      <span>
+        Couldn't load your saved workspace ({loadError}). Nothing you do on this page will be saved — please refresh to try again.
+      </span>
+    </div>
+  );
+}
+
+/**
  * The Interior quotation tool, mounted at /interior/*.
  *
  * Everything is wrapped in .interior-app because this tool ships its own
@@ -110,6 +143,7 @@ const InteriorApp = () => {
     <AppDataProvider>
       <div className="interior-app">
         <InteriorTopBar />
+        <WorkspaceLoadBanner />
         <div className="app-layout">
           <Sidebar />
           <div className="main-content" style={noPadTop ? { paddingTop: 0 } : {}}>
