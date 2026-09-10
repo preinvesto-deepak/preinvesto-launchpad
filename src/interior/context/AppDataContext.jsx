@@ -3,6 +3,7 @@ import { projectList } from "../data/projectData";
 import { subProjectList } from "../data/subProjectData";
 import { dimensionEntries } from "../data/dimensionData";
 import { priceList } from "../data/priceData";
+import { templateList } from "../data/templateData";
 import { fetchState, saveState } from "../utils/api";
 
 const AppDataContext = createContext();
@@ -20,7 +21,10 @@ const defaultData = {
   // of each material's base rate in Material Models, so it flows into every
   // rate saved to the template (and from there into every project's Quotation).
   materialModelProfitPercent: { economy: 0, standard: 0, premium: 0 },
-  templates: [],
+  // "Master Bedroom" ships with every account so it's visible to all logins —
+  // see templateData.js. Structural only (box dims, formulas, material names),
+  // no pricing, so sharing it can't leak anyone's rates.
+  templates: templateList,
   selectedTemplateId: "",
   materialStockSettings: {},
   kerfWidth: 0,
@@ -47,6 +51,14 @@ function AppDataProvider({ children }) {
   // the save effect from firing on the initial default state — otherwise
   // every fresh page load would immediately overwrite the server's real
   // data with the seed/demo defaults above.
+  //
+  // isLoaded must ONLY become true after a load that actually succeeded (or
+  // legitimately found nothing, for isNew). If the GET fails, `projects` etc.
+  // are still sitting at their useState() seed defaults — arming autosave at
+  // that point would silently POST those seed defaults over the user's real
+  // saved workspace ~800ms later. So a failed load leaves isLoaded false for
+  // the rest of this session: autosave stays disabled and the user has to
+  // refresh (and get a successful load) rather than risk losing real data.
   const [isLoaded, setIsLoaded] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [saveError, setSaveError] = useState(null);
@@ -61,8 +73,12 @@ function AppDataProvider({ children }) {
 
         // A brand-new account has nothing saved — keep the seed/sample data
         // already in state so the tool opens with something to explore. The
-        // first edit persists it as that user's own workspace.
-        if (isNew) return;
+        // first edit persists it as that user's own workspace. Safe to arm
+        // autosave here: there is nothing real on the server yet to lose.
+        if (isNew) {
+          setIsLoaded(true);
+          return;
+        }
 
         // An existing account gets exactly what it saved, empty lists
         // included — otherwise deleting every project would silently bring
@@ -77,14 +93,15 @@ function AppDataProvider({ children }) {
         setSelectedTemplateId(data.selectedTemplateId || "");
         setMaterialStockSettings(data.materialStockSettings || {});
         setKerfWidth(data.kerfWidth ?? 0);
+        // Only now does state genuinely reflect the server — safe to arm autosave.
+        setIsLoaded(true);
       })
       .catch((err) => {
         if (cancelled) return;
         console.error("Failed to load app state from server:", err);
         setLoadError(err.message);
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoaded(true);
+        // Deliberately do NOT setIsLoaded(true) here — see comment above.
+        // Autosave stays disabled for the rest of this session on a failed load.
       });
     return () => { cancelled = true; };
   }, []);
