@@ -147,7 +147,7 @@ const emptyTemplate = (id, name) => ({
 // — so what the user selects in the crop tool is exactly what's visible on
 // the card, with no further browser-side cropping (object-fit: cover) to
 // surprise them by hiding the top/bottom.
-const TEMPLATE_IMAGE_RATIO = 3 / 2;
+const TEMPLATE_IMAGE_RATIO = 4 / 3;
 const CROP_FRAME_W = 420;
 const CROP_FRAME_H = Math.round(CROP_FRAME_W / TEMPLATE_IMAGE_RATIO);
 // Output resolution is 2x the on-screen crop frame for a crisp card image
@@ -963,9 +963,9 @@ function TemplateMaster() {
                           📐
                         </div>
                       )}
-                      <div style={{ padding: "10px 14px 12px" }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>{t.templateName}</div>
-                        <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{boxCount} box{boxCount !== 1 ? "es" : ""}</div>
+                      <div style={{ padding: "9px 14px", display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.templateName}</div>
+                        <div style={{ fontSize: 12, color: "#9ca3af", flexShrink: 0 }}>{boxCount} box{boxCount !== 1 ? "es" : ""}</div>
                       </div>
                     </div>
                   );
