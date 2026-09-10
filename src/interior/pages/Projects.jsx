@@ -894,6 +894,10 @@ function Projects() {
       alert("Project Name and Client Name are required.");
       return;
     }
+    if (pForm.contact !== "" && !/^[0-9]{10}$/.test(pForm.contact)) {
+      alert("Contact Number must be exactly 10 digits.");
+      return;
+    }
     if (editProjectId) {
       const oldName = projects.find((p) => p.id === editProjectId)?.name;
       const newName = pForm.name.trim();
@@ -2553,7 +2557,20 @@ function Projects() {
               </div>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Contact Number</label>
-                <input type="tel" value={pForm.contact} onChange={(e) => setPForm((f) => ({ ...f, contact: e.target.value }))} placeholder="+91 98765 43210" />
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  value={pForm.contact}
+                  // Strip non-digits and cap at 10 so the field can never hold
+                  // something saveProject would reject.
+                  onChange={(e) => setPForm((f) => ({ ...f, contact: e.target.value.replace(/[^0-9]/g, "").slice(0, 10) }))}
+                  placeholder="10-digit mobile number"
+                />
+                {pForm.contact !== "" && !/^[0-9]{10}$/.test(pForm.contact) && (
+                  <div style={{ color: "#dc2626", fontSize: 11, marginTop: 4 }}>
+                    Contact number must be exactly 10 digits.
+                  </div>
+                )}
               </div>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Email ID</label>
