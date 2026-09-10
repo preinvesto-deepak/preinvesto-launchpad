@@ -291,7 +291,10 @@ function MatField({ label, value, onChange, onSearch }) {
 }
 
 // ─── Project / Room modal ─────────────────────────────────────────────────────
-function FormModal({ title, fields, onSave, onClose, saveLabel = "Save" }) {
+// Red outline applied to a field the user needs to fix.
+const INVALID_FIELD = { borderColor: "#dc2626", background: "#fef2f2" };
+
+function FormModal({ title, fields, onSave, onClose, saveLabel = "Save", error }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1500, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ background: "#fff", borderRadius: 14, padding: 28, width: 580, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
@@ -299,6 +302,11 @@ function FormModal({ title, fields, onSave, onClose, saveLabel = "Save" }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px", marginBottom: 20 }}>
           {fields}
         </div>
+        {error && (
+          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", fontSize: 13, borderRadius: 8, padding: "9px 12px", marginBottom: 14 }}>
+            {error}
+          </div>
+        )}
         <div style={{ display: "flex", gap: 10 }}>
           <button onClick={onSave}>{saveLabel}</button>
           <button onClick={onClose} style={{ background: "#6b7280" }}>Cancel</button>
@@ -766,6 +774,10 @@ function Projects() {
   // Project modal
   const [projectModal, setProjectModal] = useState(false);
   const [editProjectId, setEditProjectId] = useState(null);
+  // Submit-time validation feedback for the project modal. submitAttempted
+  // keeps required-field highlighting off until the user actually tries to save.
+  const [projectError, setProjectError] = useState("");
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const emptyP = { name: "", client: "", contact: "", email: "", location: "", address: "" };
   const [pForm, setPForm] = useState(emptyP);
 
@@ -873,9 +885,16 @@ function Projects() {
   };
 
   // ── Project CRUD ────────────────────────────────────────────────────────────
+  const updatePForm = (patch) => {
+    setPForm((f) => ({ ...f, ...patch }));
+    setProjectError("");
+  };
+
   const openAddProject = () => {
     setEditProjectId(null);
     setPForm(emptyP);
+    setProjectError("");
+    setSubmitAttempted(false);
     setProjectModal(true);
   };
 
@@ -886,18 +905,31 @@ function Projects() {
       contact: p.contact || "", email: p.email || "",
       location: p.location || "", address: p.address || "",
     });
+    setProjectError("");
+    setSubmitAttempted(false);
     setProjectModal(true);
   };
 
   const saveProject = () => {
-    if (!pForm.name.trim() || !pForm.client.trim()) {
-      alert("Project Name and Client Name are required.");
+    setSubmitAttempted(true);
+
+    // Every field except Email ID is mandatory.
+    const missing = [];
+    if (!pForm.name.trim()) missing.push("Project Name");
+    if (!pForm.client.trim()) missing.push("Client Name");
+    if (!pForm.contact.trim()) missing.push("Contact Number");
+    if (!pForm.location.trim()) missing.push("City / Location");
+    if (!pForm.address.trim()) missing.push("Full Address");
+    if (missing.length > 0) {
+      setProjectError(`Please fill in: ${missing.join(", ")}.`);
       return;
     }
-    if (pForm.contact !== "" && !/^[0-9]{10}$/.test(pForm.contact)) {
-      alert("Contact Number must be exactly 10 digits.");
+    if (!/^[0-9]{10}$/.test(pForm.contact)) {
+      setProjectError("Contact Number must be exactly 10 digits.");
       return;
     }
+    setProjectError("");
+    setSubmitAttempted(false);
     if (editProjectId) {
       const oldName = projects.find((p) => p.id === editProjectId)?.name;
       const newName = pForm.name.trim();
@@ -2545,44 +2577,86 @@ function Projects() {
           saveLabel={editProjectId ? "Update Project" : "Create Project"}
           onSave={saveProject}
           onClose={() => setProjectModal(false)}
+          error={projectError}
           fields={
             <>
               <div style={{ gridColumn: "1 / -1" }}>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Project Name *</label>
-                <input autoFocus value={pForm.name} onChange={(e) => setPForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Villa Interior" />
+                <input
+                  autoFocus
+                  value={pForm.name}
+                  onChange={(e) => updatePForm({ name: e.target.value })}
+                  placeholder="e.g. Villa Interior"
+                  style={submitAttempted && !pForm.name.trim() ? INVALID_FIELD : undefined}
+                />
               </div>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Client Name *</label>
-                <input value={pForm.client} onChange={(e) => setPForm((f) => ({ ...f, client: e.target.value }))} placeholder="e.g. Ramesh Kumar" />
+                <input
+                  value={pForm.client}
+                  onChange={(e) => updatePForm({ client: e.target.value })}
+                  placeholder="e.g. Ramesh Kumar"
+                  style={submitAttempted && !pForm.client.trim() ? INVALID_FIELD : undefined}
+                />
               </div>
               <div>
-                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Contact Number</label>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Contact Number *</label>
                 <input
                   type="tel"
                   inputMode="numeric"
                   value={pForm.contact}
                   // Strip non-digits and cap at 10 so the field can never hold
                   // something saveProject would reject.
-                  onChange={(e) => setPForm((f) => ({ ...f, contact: e.target.value.replace(/[^0-9]/g, "").slice(0, 10) }))}
+                  onChange={(e) => updatePForm({ contact: e.target.value.replace(/[^0-9]/g, "").slice(0, 10) })}
                   placeholder="10-digit mobile number"
+                  style={
+                    (pForm.contact !== "" && !/^[0-9]{10}$/.test(pForm.contact)) || (submitAttempted && pForm.contact === "")
+                      ? INVALID_FIELD
+                      : undefined
+                  }
                 />
                 {pForm.contact !== "" && !/^[0-9]{10}$/.test(pForm.contact) && (
                   <div style={{ color: "#dc2626", fontSize: 11, marginTop: 4 }}>
                     Contact number must be exactly 10 digits.
                   </div>
                 )}
+                {submitAttempted && pForm.contact === "" && (
+                  <div style={{ color: "#dc2626", fontSize: 11, marginTop: 4 }}>
+                    Contact number is required.
+                  </div>
+                )}
               </div>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Email ID</label>
-                <input type="email" value={pForm.email} onChange={(e) => setPForm((f) => ({ ...f, email: e.target.value }))} placeholder="client@email.com" />
+                <input type="email" value={pForm.email} onChange={(e) => updatePForm({ email: e.target.value })} placeholder="client@email.com" />
               </div>
               <div>
-                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>City / Location</label>
-                <input value={pForm.location} onChange={(e) => setPForm((f) => ({ ...f, location: e.target.value }))} placeholder="e.g. Hyderabad" />
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>City / Location *</label>
+                <input
+                  value={pForm.location}
+                  onChange={(e) => updatePForm({ location: e.target.value })}
+                  placeholder="e.g. Hyderabad"
+                  style={submitAttempted && !pForm.location.trim() ? INVALID_FIELD : undefined}
+                />
+                {submitAttempted && !pForm.location.trim() && (
+                  <div style={{ color: "#dc2626", fontSize: 11, marginTop: 4 }}>
+                    City / Location is required.
+                  </div>
+                )}
               </div>
               <div style={{ gridColumn: "1 / -1" }}>
-                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Full Address</label>
-                <input value={pForm.address} onChange={(e) => setPForm((f) => ({ ...f, address: e.target.value }))} placeholder="e.g. Plot 12, Jubilee Hills, Hyderabad 500033" />
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Full Address *</label>
+                <input
+                  value={pForm.address}
+                  onChange={(e) => updatePForm({ address: e.target.value })}
+                  placeholder="e.g. Plot 12, Jubilee Hills, Hyderabad 500033"
+                  style={submitAttempted && !pForm.address.trim() ? INVALID_FIELD : undefined}
+                />
+                {submitAttempted && !pForm.address.trim() && (
+                  <div style={{ color: "#dc2626", fontSize: 11, marginTop: 4 }}>
+                    Full Address is required.
+                  </div>
+                )}
               </div>
             </>
           }
