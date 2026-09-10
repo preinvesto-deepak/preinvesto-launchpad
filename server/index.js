@@ -14,7 +14,12 @@ const app = express();
 const port = process.env.API_PORT || 3001;
 
 app.use(cors());
-app.use(express.json());
+// Default is 100kb, which the Interior tool's whole-workspace save
+// (projects + rooms + pricing + templates, all POSTed together as one JSON
+// blob) already exceeds for a real account — every autosave was failing
+// with 413 once saved data crossed that. Raised well past what a template
+// photo (resized client-side, see TemplateMaster.jsx) could add too.
+app.use(express.json({ limit: '20mb' }));
 
 // Serve uploaded images as static files in dev
 const uploadsDir = path.join(__dirname, '../public/uploads/properties');
