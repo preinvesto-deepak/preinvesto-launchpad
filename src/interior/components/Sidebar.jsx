@@ -107,7 +107,7 @@ function Sidebar() {
 
                 <li>
                   <div
-                    onClick={() => navigate("/interior/projects")}
+                    onClick={() => navigate("/interior/projects?new=1")}
                     style={{
                       display: "block",
                       padding: "5px 8px 5px 12px",

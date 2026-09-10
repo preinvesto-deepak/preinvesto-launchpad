@@ -722,7 +722,7 @@ function Projects() {
     templates,
   } = useAppData();
 
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Selection — initialise from ?id= URL param, fall back to first project
   const [selectedProjectId, setSelectedProjectId] = useState(() => {
@@ -736,6 +736,19 @@ function Projects() {
   const [activeRoomId, setActiveRoomId] = useState(null);
   const [editingBoxName, setEditingBoxName] = useState(false);
   const [boxNameDraft, setBoxNameDraft] = useState("");
+
+  // Sidebar's "+ New Project" link passes ?new=1 instead of a project id
+  // (there's nothing to select yet) — open the Add Project modal for it, then
+  // drop the param so refreshing the page doesn't reopen the modal.
+  useEffect(() => {
+    if (searchParams.get("new") === "1") {
+      openAddProject();
+      const next = new URLSearchParams(searchParams);
+      next.delete("new");
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // Sync when sidebar navigates to ?id=X
   useEffect(() => {
@@ -1418,6 +1431,9 @@ function Projects() {
                   )}
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button onClick={openAddProject} style={{ background: "#2563eb", padding: "6px 14px", fontSize: 13 }}>
+                    + New Project
+                  </button>
                   <button onClick={() => openEditProject(selectedProject)} style={{ background: "#6b7280", padding: "6px 14px", fontSize: 13 }}>
                     ✏ Edit Info
                   </button>
