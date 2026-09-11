@@ -203,20 +203,35 @@ function TemplatePickerModal({ templates = [], onSelect, onClose }) {
               <div
                 key={t.id}
                 onClick={() => { onSelect(t); onClose(); }}
-                style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: "16px 14px", cursor: "pointer", textAlign: "center", transition: "border-color 0.15s" }}
+                style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", cursor: "pointer", textAlign: "center", transition: "border-color 0.15s", background: "#fff" }}
                 onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#7c3aed")}
                 onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#e5e7eb")}
               >
-                <div style={{ fontSize: 36, marginBottom: 8 }}>📐</div>
-                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{t.templateName}</div>
-                <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>
-                  {boxCount} box{boxCount !== 1 ? "es" : ""}
-                </div>
-                {firstBox && (
-                  <div style={{ fontSize: 11, color: "#9ca3af" }}>
-                    {firstBox.widthMm || "—"} × {firstBox.heightMm || "—"} × {firstBox.depthMm || "—"} mm
+                {/* Same photo set on the template in Template Master — was
+                    hardcoded to a 📐 icon here regardless, so an uploaded
+                    photo never showed up while picking a template to apply. */}
+                {t.templateImage ? (
+                  <img
+                    src={t.templateImage}
+                    alt=""
+                    style={{ width: "100%", aspectRatio: 4 / 3, objectFit: "cover", display: "block" }}
+                  />
+                ) : (
+                  <div style={{ width: "100%", aspectRatio: 4 / 3, background: "#f9fafb", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, color: "#d1d5db" }}>
+                    📐
                   </div>
                 )}
+                <div style={{ padding: "10px 12px 12px" }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{t.templateName}</div>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>
+                    {boxCount} box{boxCount !== 1 ? "es" : ""}
+                  </div>
+                  {firstBox && (
+                    <div style={{ fontSize: 11, color: "#9ca3af" }}>
+                      {firstBox.widthMm || "—"} × {firstBox.heightMm || "—"} × {firstBox.depthMm || "—"} mm
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}
