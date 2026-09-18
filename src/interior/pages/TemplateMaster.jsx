@@ -919,7 +919,7 @@ function TemplateMaster() {
       {view === "grid" && (
         <div>
           {/* Header bar */}
-          <div style={{ padding: "18px 24px 14px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ padding: "12px 24px 8px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <div>
               <div style={{ fontWeight: 700, fontSize: 18 }}>Templates</div>
               <div style={{ fontSize: 13, color: "#6b7280", marginTop: 2 }}>{templates.length} template{templates.length !== 1 ? "s" : ""} defined</div>
@@ -942,7 +942,7 @@ function TemplateMaster() {
           </div>
 
           {/* Tile grid */}
-          <div style={{ padding: 24 }}>
+          <div style={{ padding: "16px 24px 24px" }}>
             {filtered.length === 0 ? (
               <div style={{ textAlign: "center", padding: 60, color: "#9ca3af" }}>
                 <div style={{ fontSize: 48, marginBottom: 12 }}>📐</div>
@@ -1001,7 +1001,7 @@ function TemplateMaster() {
           ) : (
           <>
             {/* Template Header */}
-            <div style={{ padding: "18px 24px 14px", borderBottom: "1px solid #e5e7eb" }}>
+            <div style={{ padding: "12px 24px 8px", borderBottom: "1px solid #e5e7eb" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                   <button
@@ -1113,7 +1113,7 @@ function TemplateMaster() {
                     key={box.id}
                     onClick={() => setActiveBoxId(box.id)}
                     style={{
-                      padding: "10px 18px",
+                      padding: "7px 16px",
                       border: "none",
                       borderBottom: isActive ? "3px solid #7c3aed" : "3px solid transparent",
                       background: "none",
@@ -1138,16 +1138,16 @@ function TemplateMaster() {
             </div>
 
             {/* Box Detail + Material Summary */}
-            <div style={{ padding: "20px 24px" }}>
+            <div style={{ padding: "12px 24px" }}>
               {boxes.length === 0 ? (
                 <div style={{ textAlign: "center", padding: 48, border: "2px dashed #e5e7eb", borderRadius: 12, color: "#6b7280" }}>
                   <p style={{ fontSize: 15, marginBottom: 16 }}>No boxes added yet.</p>
                   <button onClick={addBox}>+ Add First Box</button>
                 </div>
               ) : activeBox ? (
-                <div style={{ border: "1px solid #ede9fe", borderRadius: 10, padding: 16, background: "#faf5ff" }}>
+                <div style={{ border: "1px solid #ede9fe", borderRadius: 10, padding: "10px 16px 16px", background: "#faf5ff" }}>
                   {/* Box name + delete */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                     <input
                       type="text"
                       value={activeBox.boxName}
@@ -1520,12 +1520,12 @@ function TemplateMaster() {
                           style={{ background: "#2563eb", padding: "4px 14px", fontSize: 12 }}
                         >+ Add Part</button>
                       </div>
-                      <div style={{ overflowX: "auto" }}>
+                      <div style={{ overflow: "auto", maxHeight: "65vh" }}>
                         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 900 }}>
                           <thead>
                             <tr>
                               {["#", "Group", "Ply Name", "Req", "EB", "Side A", "Side B", "W (mm)", "H (mm)", "Qty", "Material", "Rotation", "Label", "Edge", "Remarks", ""].map((h) => (
-                                <th key={h} style={{ background: "#1e3a5f", color: "#fff", padding: "6px 8px", textAlign: h === "#" || h === "Req" || h === "EB" || h === "Qty" || h === "Rotation" || h === "Edge" ? "center" : "left", fontWeight: 600, whiteSpace: "nowrap" }} title={h === "EB" ? "Edge Beading required for this part" : undefined}>{h}</th>
+                                <th key={h} style={{ position: "sticky", top: 0, zIndex: 2, background: "#1e3a5f", color: "#fff", padding: "6px 8px", textAlign: h === "#" || h === "Req" || h === "EB" || h === "Qty" || h === "Rotation" || h === "Edge" ? "center" : "left", fontWeight: 600, whiteSpace: "nowrap" }} title={h === "EB" ? "Edge Beading required for this part" : undefined}>{h}</th>
                               ))}
                             </tr>
                           </thead>
@@ -1773,6 +1773,14 @@ function TemplateMaster() {
               {/* ══ SECTION 3: HARDWARE & CONSUMABLES — ALL BOXES ══ */}
               {draft && boxes.length > 0 && (() => {
                 const groupOf = (mat) => (prices || []).find((p) => p.materialName === mat)?.group || "Other";
+                // Every group present in Items Pricing shows up here automatically —
+                // including ones added after HARDWARE_GROUPS was written — except
+                // Wood/Laminate, whose quantities are finalized via Sheet Calculation
+                // & Cut List instead of this hardware table.
+                const dynamicGroups = Array.from(new Set([
+                  ...HARDWARE_GROUPS,
+                  ...(prices || []).map((p) => p.group || "").filter((g) => g && g !== "Wood" && g !== "Laminate"),
+                ]));
                 // Every box's rows — auto Edge Banding + auto Carpenter (same calc as
                 // before, now just listed per box instead of per active-box tab) plus
                 // its manually-added hardware/consumables — all tagged with their box.
@@ -1806,7 +1814,7 @@ function TemplateMaster() {
                   });
                 });
                 const rowsByGroup = {};
-                HARDWARE_GROUPS.forEach((g) => { rowsByGroup[g] = []; });
+                dynamicGroups.forEach((g) => { rowsByGroup[g] = []; });
                 const unassignedHwRows = [];
                 allRows.forEach((hw) => {
                   const g = hw.materialName ? groupOf(hw.materialName) : null;
@@ -1827,17 +1835,17 @@ function TemplateMaster() {
                         <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 8 }}>
                           Select items for any of the {boxes.length} box{boxes.length !== 1 ? "es" : ""} below — no need to switch box tabs.
                         </div>
-                        <div style={{ overflowX: "auto" }}>
+                        <div style={{ overflow: "auto", maxHeight: "65vh" }}>
                           <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%", minWidth: 760 }}>
                             <thead>
                               <tr>
                                 {["Group", "Box", "Item", "Units", "Qty", "Extra", "Final Qty", ""].map((h) => (
-                                  <th key={h} style={{ background: "#1e3a5f", color: "#fff", padding: "5px 10px", textAlign: ["Group", "Box", "Item"].includes(h) ? "left" : "center", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
+                                  <th key={h} style={{ position: "sticky", top: 0, zIndex: 2, background: "#1e3a5f", color: "#fff", padding: "5px 10px", textAlign: ["Group", "Box", "Item"].includes(h) ? "left" : "center", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
                                 ))}
                               </tr>
                             </thead>
                             <tbody>
-                              {HARDWARE_GROUPS.map((group) => {
+                              {dynamicGroups.map((group) => {
                                 const rows = rowsByGroup[group];
                                 return (
                                   <Fragment key={group}>

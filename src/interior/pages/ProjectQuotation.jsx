@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { useAppData } from "../context/AppDataContext";
 import { roundTo2, formatCurrency, mmToFeet } from "../utils/unitConversions";
-import { buildRoomRows, buildRoomEdgeBanding, buildRoomHardware, buildRoomCarpenter } from "../utils/projectRows";
+import { buildRoomRows, buildRoomEdgeBanding, buildRoomHardware, buildRoomCarpenter, buildBoxRows, buildBoxEdgeBanding, buildBoxCarpenterRow } from "../utils/projectRows";
 import { computeSheetCounts } from "../utils/binPack";
 
 const QUOT_MODELS = ["economy", "standard", "premium"];
@@ -64,6 +64,14 @@ function withRoomRowSpans(items) {
   });
 }
 
+// Stock sheet size for a material (falls back to a standard 2440×1220 sheet
+// when the account hasn't configured one) — shared by every sheet-nesting
+// calculation below.
+function getStockSizeFor(materialStockSettings, mat) {
+  const s = materialStockSettings?.[mat];
+  return { sheetW: s?.sheetW || 2440, sheetH: s?.sheetH || 1220, sheetTexture: s?.sheetTexture ?? 1 };
+}
+
 // Real nested sheet count + edge banding + hardware for a room's actual
 // boxes/parts, priced via the project's Material Models rates (falling back
 // to global Items Pricing) — including Transportation and Carpenter, both
@@ -71,18 +79,18 @@ function withRoomRowSpans(items) {
 function computeRoomCost(room, model, projectObj, prices, materialStockSettings, globalProfitPercent) {
   const rate = (mat) => rateFor(mat, model, projectObj, prices, globalProfitPercent);
   const rows = buildRoomRows(room, prices);
-  const getStockSize = (mat) => {
-    const s = materialStockSettings?.[mat];
-    return { sheetW: s?.sheetW || 2440, sheetH: s?.sheetH || 1220, sheetTexture: s?.sheetTexture ?? 1 };
-  };
+  const getStockSize = (mat) => getStockSizeFor(materialStockSettings, mat);
   const sheetCounts = computeSheetCounts(
     rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty })),
     getStockSize
   );
   const materials = [...new Set(rows.map((r) => r.material))];
   const areaSqMm = rows.reduce((s, r) => s + r.w * r.h * r.qty, 0);
-  const woodAmount = materials.reduce((total, mat) =>
-    total + (sheetCounts[mat] || 0) * rate(mat), 0);
+  // Per-material breakdown (not just the room's blended total) — feeds the
+  // project-wide equal wastage split in buildLineItems below.
+  const woodByMaterial = {};
+  materials.forEach((mat) => { woodByMaterial[mat] = (sheetCounts[mat] || 0) * rate(mat); });
+  const woodAmount = Object.values(woodByMaterial).reduce((s, v) => s + v, 0);
 
   const edgeTotals = buildRoomEdgeBanding(room, prices);
   const edgeAmount = Object.entries(edgeTotals).reduce((total, [mat, lengthMm]) => {
@@ -113,7 +121,43 @@ function computeRoomCost(room, model, projectObj, prices, materialStockSettings,
   const laborAmount = carpenterAmount;
 
   const totalAmount = woodAmount + edgeAmount + hardwareAmount + transportationAmount + laborAmount;
-  return { woodAmount, edgeAmount, hardwareAmount, transportationAmount, laborAmount, totalAmount, areaSqMm };
+  return { woodAmount, woodByMaterial, edgeAmount, hardwareAmount, transportationAmount, laborAmount, totalAmount, areaSqMm };
+}
+
+// A box's own material need, computed as if it were the only box in the
+// room — used purely as a WEIGHT for splitting the room's real (nested)
+// cost across its boxes, not as a charged amount itself. This is what makes
+// a "Box" row (many panels) cost more per sqft than a "Frame" row (few
+// panels) instead of both rows always showing the room's flat average rate.
+//
+// Wood/laminate is deliberately NOT computed here — it's priced directly
+// per box in buildLineItems (each box's raw area × its material's per-mm
+// rate, plus an equal share of that material's project-wide wastage; see
+// the comment there). Edge banding/hardware/carpenter have no such
+// base-vs-wastage split, so their own amounts are used directly as weights.
+function computeBoxOwnCost(box, room, model, projectObj, prices, materialStockSettings, globalProfitPercent) {
+  const rate = (mat) => rateFor(mat, model, projectObj, prices, globalProfitPercent);
+
+  const { material: edgeMat, lengthMm } = buildBoxEdgeBanding(box, prices);
+  const edgeAmount = edgeMat && lengthMm ? (Math.round((lengthMm / 1000) * 100) / 100) * rate(edgeMat) : 0;
+
+  const priceGroupOf = (mat) => prices.find((p) => p.materialName === mat)?.group;
+  let hardwareAmount = 0, transportationAmount = 0, manualCarpenterAmount = 0;
+  (box.hardwareItems || []).forEach((item) => {
+    if (!item.materialName) return;
+    const qty = (Number(item.qty) || 0) + (Number(item.extra) || 0);
+    if (!qty) return;
+    const amt = qty * rate(item.materialName);
+    const g = priceGroupOf(item.materialName);
+    if (g === "Transportation") transportationAmount += amt;
+    else if (g === "Carpenter") manualCarpenterAmount += amt;
+    else hardwareAmount += amt;
+  });
+
+  const carpRow = buildBoxCarpenterRow(box, Number(room.carpenterExtraSft) || 0);
+  const laborAmount = (carpRow ? carpRow.qty * rate(carpRow.material) : 0) + manualCarpenterAmount;
+
+  return { edgeAmount, hardwareAmount, transportationAmount, laborAmount };
 }
 
 // MRP-vs-net-rate savings for a room, counting only materials whose Items
@@ -166,7 +210,13 @@ function computeRoomMrpSavings(room, prices, materialStockSettings) {
 // checkbox in Items Pricing — not by whether MRP/Discount happen to be
 // filled in, so unchecking is the only way to hide an item here; one with
 // no MRP set just shows 0 discount instead of being silently dropped.
-function computeHardwareMrpSavingsItems(projectRooms, prices) {
+//
+// "Your Rate" uses the SAME model-aware rate lookup as every other amount
+// in the quotation (Material Models override for this model, falling back
+// to Items Pricing + that model's Profit %) — so Economy/Standard/Premium
+// genuinely show different savings, matching what that tier actually
+// charges, instead of all three collapsing to Items Pricing's flat base rate.
+function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj, globalProfitPercent) {
   const byMaterial = {};
   projectRooms.forEach((room) => {
     const edgeTotals = buildRoomEdgeBanding(room, prices);
@@ -189,7 +239,7 @@ function computeHardwareMrpSavingsItems(projectRooms, prices) {
       const p = prices.find((pr) => pr.materialName === material);
       if (!p || p.showInQuotation === false || !qty) return null;
       const mrp = Number(p.mrp) || 0;
-      const rate = Number(p.rate) || 0;
+      const rate = rateFor(material, model, projectObj, prices, globalProfitPercent);
       const gstMult = 1 + (Number(p.gst) || 0) / 100;
       const netAmount = qty * rate * gstMult;
       // No MRP set on this item → nothing to compare against, so show it
@@ -232,7 +282,13 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
   useEffect(() => {
     if (lockProject && initialProjectName) setSelectedProject(initialProjectName);
   }, [lockProject, initialProjectName]);
-  const [selectedModel, setSelectedModel] = useState(""); // "" = default cost
+  // Always one of QUOT_MODELS now — picked via the checkmark above each
+  // column in Compare Pricing Models rather than a "Default (Cost Rates)"
+  // dropdown option, so it drives which model's Quotation/Hardware
+  // savings/Cut List is shown below the comparison, and which one Print
+  // Preview/Download PDF act on.
+  const [selectedModel, setSelectedModel] = useState("standard");
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [companyName, setCompanyName] = useState("Interior App");
   const [companyMobile, setCompanyMobile] = useState("");
@@ -257,6 +313,16 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
   const [termsText, setTermsText] = useState(
     "Final site measurements and finish selection to be reconfirmed before production."
   );
+
+  // Whether the Hardware & Consumables discount table / Cut List pages are
+  // part of the actual quotation (Print Preview, Print, PDF) — unlike the
+  // Settings/Compare panels' open state, these two are also billing-relevant
+  // toggles, so they're persisted on the project alongside the other
+  // quotation settings, not just local UI state.
+  const [includeHardwareDiscount, setIncludeHardwareDiscount] = useState(true);
+  const [includeCutList, setIncludeCutList] = useState(true);
+  const [hardwareDiscountOpen, setHardwareDiscountOpen] = useState(true);
+  const [cutListOpen, setCutListOpen] = useState(true);
 
   // In-page print/preview modal — an <iframe srcDoc> instead of window.open(),
   // so it isn't at the mercy of the browser's popup blocker (which silently
@@ -301,7 +367,9 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
   // local-only state that reset on every unmount.
   useEffect(() => {
     const saved = selectedProjectObj?.quotationSettings || {};
-    setSelectedModel(saved.selectedModel ?? "");
+    // Older saves may have "" (the removed "Default (Cost Rates)" option) —
+    // fall back to Standard since the UI only offers the three tiers now.
+    setSelectedModel(saved.selectedModel || "standard");
     setCompanyName(saved.companyName ?? "Interior App");
     setCompanyMobile(saved.companyMobile ?? "");
     setCompanyEmail(saved.companyEmail ?? "");
@@ -321,6 +389,8 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     setScopeIncluded(saved.scopeIncluded ?? "Material supply, fabrication, delivery, and installation for listed items.");
     setScopeExcluded(saved.scopeExcluded ?? "Civil, electrical shifting, plumbing, painting, and site rectification unless specified.");
     setTermsText(saved.termsText ?? "Final site measurements and finish selection to be reconfirmed before production.");
+    setIncludeHardwareDiscount(saved.includeHardwareDiscount ?? true);
+    setIncludeCutList(saved.includeCutList ?? true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProject]);
 
@@ -339,11 +409,79 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
   // "Frame" boxes shows 3 separate rows. Sheet-nesting/edge-banding/hardware
   // costs are still computed once for the whole room (nesting boxes together
   // is what makes material usage efficient), then each box's row gets its
-  // proportional share of that room total by its own Area (sq ft), so the
-  // rows still add up to exactly the room's real cost.
-  const buildLineItems = (rooms, model) =>
-    rooms.flatMap((room) => {
-      const cost = computeRoomCost(room, model, selectedProjectObj, prices, materialStockSettings, materialModelProfitPercent);
+  // share of that room total weighted by its own actual material need per
+  // category (computeBoxOwnCost) — not by floor area — so a "Box" (many
+  // panels) correctly costs more per sqft than a "Frame" (few panels)
+  // instead of both always showing the room's flat average rate. Shares are
+  // normalized per category, so the rows still add up to exactly the room's
+  // real (nested) cost.
+  //
+  // Wood/laminate is the one exception, handled separately below: every
+  // room's real cost (computeRoomCost) always rounds up to whole sheets —
+  // that rounding "wastage" isn't proportional to any one box's size, so
+  // splitting it by area/own-need like the other categories unfairly
+  // penalizes small boxes. Instead, each box is charged its own raw area at
+  // that material's per-mm rate (no rounding), and every box using that
+  // material ANYWHERE IN THE PROJECT — not just this room — splits the
+  // material's total wastage equally between them. The project-wide totals
+  // still land exactly on the real (nested) cost; only which box carries how
+  // much of the wastage changes.
+  const buildLineItems = (rooms, model) => {
+    const rate = (mat) => rateFor(mat, model, selectedProjectObj, prices, materialModelProfitPercent);
+    const roomCosts = rooms.map((room) =>
+      computeRoomCost(room, model, selectedProjectObj, prices, materialStockSettings, materialModelProfitPercent)
+    );
+
+    const projectWoodByMaterial = {}; // real cost, summed across every room's own nesting
+    roomCosts.forEach((c) => {
+      Object.entries(c.woodByMaterial).forEach(([mat, amt]) => {
+        projectWoodByMaterial[mat] = (projectWoodByMaterial[mat] || 0) + amt;
+      });
+    });
+
+    // Every box's own raw cut area per material, project-wide.
+    const boxWoodAreaByMaterial = new Map(); // box -> { [material]: areaMm }
+    rooms.forEach((room) => {
+      (room.boxes || []).forEach((box) => {
+        const byMat = {};
+        buildBoxRows(box, prices).forEach((r) => {
+          byMat[r.material] = (byMat[r.material] || 0) + r.w * r.h * r.qty;
+        });
+        boxWoodAreaByMaterial.set(box, byMat);
+      });
+    });
+
+    const projectRawAreaByMaterial = {};
+    const boxesUsingMaterial = {};
+    boxWoodAreaByMaterial.forEach((byMat) => {
+      Object.entries(byMat).forEach(([mat, areaMm]) => {
+        if (!areaMm) return;
+        projectRawAreaByMaterial[mat] = (projectRawAreaByMaterial[mat] || 0) + areaMm;
+        boxesUsingMaterial[mat] = (boxesUsingMaterial[mat] || 0) + 1;
+      });
+    });
+
+    const ratePerMm = {};
+    const wastePerBox = {};
+    Object.keys(projectWoodByMaterial).forEach((mat) => {
+      const { sheetW, sheetH } = getStockSizeFor(materialStockSettings, mat);
+      ratePerMm[mat] = rate(mat) / (sheetW * sheetH);
+      const baseCost = (projectRawAreaByMaterial[mat] || 0) * ratePerMm[mat];
+      const wasteCost = Math.max(0, projectWoodByMaterial[mat] - baseCost);
+      const n = boxesUsingMaterial[mat] || 0;
+      wastePerBox[mat] = n > 0 ? wasteCost / n : 0;
+    });
+
+    const boxWoodAmount = (box) => {
+      const byMat = boxWoodAreaByMaterial.get(box) || {};
+      return Object.entries(byMat).reduce((total, [mat, areaMm]) => {
+        if (!areaMm) return total;
+        return total + areaMm * (ratePerMm[mat] || 0) + (wastePerBox[mat] || 0);
+      }, 0);
+    };
+
+    return rooms.flatMap((room, ri) => {
+      const cost = roomCosts[ri];
       const roomName = room.subProject || room.name;
       const boxes = room.boxes || [];
       if (boxes.length === 0) {
@@ -351,6 +489,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
           id: room.id,
           roomName,
           boxCount: 0,
+          boxName: "—",
           typeOfWork: "—",
           areaSqFt: 0,
           costTotal: 0,
@@ -358,26 +497,41 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
         }];
       }
       const roomTotalArea = roomAreaSft(room);
+      const boxOwnCosts = boxes.map((box) =>
+        computeBoxOwnCost(box, room, model, selectedProjectObj, prices, materialStockSettings, materialModelProfitPercent)
+      );
+      const CATS = ["edgeAmount", "hardwareAmount", "transportationAmount", "laborAmount"];
+      const catSums = {};
+      CATS.forEach((k) => { catSums[k] = boxOwnCosts.reduce((s, c) => s + c[k], 0); });
+
       return boxes.map((box, idx) => {
         const boxArea = boxAreaSftQ(box);
-        const share = roomTotalArea > 0 ? boxArea / roomTotalArea : 1 / boxes.length;
+        const areaShare = roomTotalArea > 0 ? boxArea / roomTotalArea : 1 / boxes.length;
+        const own = boxOwnCosts[idx];
+        // Falls back to the area split only for a category with zero material
+        // need across every box in the room (nothing meaningful to weight by).
+        const shareFor = (k) => catSums[k] > 0 ? own[k] / catSums[k] : areaShare;
+        const woodAmount = boxWoodAmount(box);
+        const edgeAmount = cost.edgeAmount * shareFor("edgeAmount");
+        const hardwareAmount = cost.hardwareAmount * shareFor("hardwareAmount");
+        const transportationAmount = cost.transportationAmount * shareFor("transportationAmount");
+        const laborAmount = cost.laborAmount * shareFor("laborAmount");
+        const totalAmount = woodAmount + edgeAmount + hardwareAmount + transportationAmount + laborAmount;
         return {
           id: `${room.id}-${idx}`,
           roomName,
           boxCount: 1,
+          boxName: box.name || `Box ${idx + 1}`,
           typeOfWork: box.boxType || "—",
           areaSqFt: boxArea,
-          costTotal: cost.totalAmount * share,
-          woodAmount: cost.woodAmount * share,
-          edgeAmount: cost.edgeAmount * share,
-          hardwareAmount: cost.hardwareAmount * share,
-          transportationAmount: cost.transportationAmount * share,
-          laborAmount: cost.laborAmount * share,
-          totalAmount: cost.totalAmount * share,
-          areaSqMm: cost.areaSqMm * share,
+          costTotal: totalAmount,
+          woodAmount, edgeAmount, hardwareAmount, transportationAmount, laborAmount,
+          totalAmount,
+          areaSqMm: cost.areaSqMm * areaShare,
         };
       });
     });
+  };
 
   const lineItems = useMemo(
     () => buildLineItems(quotationRooms, selectedModel),
@@ -398,9 +552,11 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
   // Itemized Hardware & Consumables MRP/Discount breakdown — feeds the
   // Quotation's dedicated savings page (see computeHardwareMrpSavingsItems).
   const hardwareMrpItems = useMemo(
-    () => computeHardwareMrpSavingsItems(quotationRooms, prices),
-    [quotationRooms, prices]
+    () => computeHardwareMrpSavingsItems(quotationRooms, prices, selectedModel, selectedProjectObj, materialModelProfitPercent),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [quotationRooms, prices, selectedModel, selectedProjectObj, materialModelProfitPercent]
   );
+  const hardwareSavingsTotal = hardwareMrpItems.reduce((s, r) => s + r.savings, 0);
 
   // Flat cut-list rows across every room — feeds the Quotation's Cut List page.
   const cutListRows = useMemo(
@@ -449,8 +605,18 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
       const prop = ct > 0 ? item.costTotal / ct : 0;
       return { ...item, sellingAmount: gt * prop };
     });
-    return { model, items: withSelling, ct, st, net, gst, gt, adv };
+    const hardwareItems = computeHardwareMrpSavingsItems(quotationRooms, prices, model, selectedProjectObj, materialModelProfitPercent);
+    return { model, items: withSelling, ct, st, net, gst, gt, adv, hardwareItems };
   };
+
+  // Economy/Standard/Premium computed side by side, purely for the on-screen
+  // comparison table below — independent of `selectedModel` (which still
+  // controls what actually prints/downloads as the customer-facing quotation).
+  const compareVariants = useMemo(
+    () => QUOT_MODELS.map((m) => buildVariant(m)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [quotationRooms, prices, selectedProjectObj, materialStockSettings, materialModelProfitPercent, markupPercent, discountAmount, gstPercent, advancePercent]
+  );
 
   const variantPageHTML = (v, pageBreakBefore) => {
     const modelLabel = v.model ? `${QUOT_MODEL_LABELS[v.model]} Variant` : "Default (Cost Rates)";
@@ -476,7 +642,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
         <h3>Rooms</h3>
         <table border="1" cellpadding="7" cellspacing="0" width="100%" style="margin-bottom:16px;font-size:13px">
           <thead style="background:#f9fafb">
-            <tr><th>#</th><th>Room</th><th>Type of Work</th><th>Area (sq ft)</th><th>Cost/Sft</th><th>Amount (Incl. GST)</th></tr>
+            <tr><th>#</th><th>Room</th><th>Box Name</th><th>Type of Work</th><th>Area (sq ft)</th><th>Cost/Sft</th><th>Amount (Incl. GST)</th></tr>
           </thead>
           <tbody>
             ${withRoomRowSpans(v.items)
@@ -485,6 +651,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
               <tr>
                 <td>${i + 1}</td>
                 ${item.roomSpan > 0 ? `<td rowspan="${item.roomSpan}">${item.roomName}</td>` : ""}
+                <td>${item.boxName}</td>
                 <td>${item.typeOfWork}</td>
                 <td>${item.areaSqFt}</td>
                 <td style="text-align:right">${item.areaSqFt > 0 ? `${fmtCurrency(item.sellingAmount / item.areaSqFt)}/sqft` : "—"}</td>
@@ -521,7 +688,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
           <div style="width:45%;text-align:right"><p><strong>Authorized Signatory</strong></p><div style="border-top:1px solid #000;margin-top:50px"/></div>
         </div>
       </div>
-      ${hardwareMrpItems.length > 0 ? `
+      ${includeHardwareDiscount && v.hardwareItems.length > 0 ? `
       <div style="page-break-before:always;padding:30px;font-family:sans-serif">
         <h2 style="margin:0 0 4px">${companyName}</h2>
         <p style="margin:0 0 16px;color:#6b7280">Hardware &amp; Consumables — Your Discount <span style="color:${modelColor};font-weight:700">(${modelLabel})</span></p>
@@ -534,7 +701,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
             </tr>
           </thead>
           <tbody>
-            ${hardwareMrpItems
+            ${v.hardwareItems
               .map(
                 (row) => `
               <tr>
@@ -555,14 +722,14 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
           <tfoot>
             <tr style="background:#ecfdf5;font-weight:700">
               <td colspan="7" style="text-align:right">Total You Save on Hardware &amp; Consumables</td>
-              <td style="text-align:right">${fmtCurrency(hardwareMrpItems.reduce((s, r) => s + r.mrpAmount, 0))}</td>
-              <td style="text-align:right">${fmtCurrency(hardwareMrpItems.reduce((s, r) => s + r.netAmount, 0))}</td>
-              <td style="text-align:right;color:#059669">${fmtCurrency(hardwareMrpItems.reduce((s, r) => s + r.savings, 0))}</td>
+              <td style="text-align:right">${fmtCurrency(v.hardwareItems.reduce((s, r) => s + r.mrpAmount, 0))}</td>
+              <td style="text-align:right">${fmtCurrency(v.hardwareItems.reduce((s, r) => s + r.netAmount, 0))}</td>
+              <td style="text-align:right;color:#059669">${fmtCurrency(v.hardwareItems.reduce((s, r) => s + r.savings, 0))}</td>
             </tr>
           </tfoot>
         </table>
       </div>` : ""}
-      ${cutListRows.length > 0 ? `
+      ${includeCutList && cutListRows.length > 0 ? `
       <div style="page-break-before:always;padding:30px;font-family:sans-serif">
         <h2 style="margin:0 0 4px">${companyName}</h2>
         <p style="margin:0 0 16px;color:#6b7280">Cut List <span style="color:${modelColor};font-weight:700">(${modelLabel})</span></p>
@@ -599,19 +766,6 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
   // autoPrint=true fires the iframe's print dialog once its content loads.
   const showPreview = (bodyHTML, title, autoPrint) => {
     setPreviewDoc({ title, html: bodyHTML, autoPrint });
-  };
-
-  const printAllVariants = () => {
-    const html = QUOT_MODELS.map((m, vi) => variantPageHTML(buildVariant(m), vi > 0)).join("");
-    showPreview(html, "Project Quotation — All 3 Variants", true);
-  };
-
-  // Print Preview — shows the currently selected pricing model's quotation
-  // in the in-page preview modal (no page chrome), print dialog included so
-  // the browser's native preview pane shows before anything actually prints.
-  const openPrintPreview = () => {
-    const html = variantPageHTML(buildVariant(selectedModel), false);
-    showPreview(html, "Project Quotation — Print Preview", true);
   };
 
   // One-click PDF download — writes real PDF bytes with jsPDF and triggers a
@@ -655,12 +809,12 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     autoTable(doc, {
       startY: y,
       margin: { left: margin, right: margin },
-      head: [["#", "Room", "Type of Work", "Area (sqft)", "Cost/Sft", "Amount (Incl. GST)"]],
+      head: [["#", "Room", "Box Name", "Type of Work", "Area (sqft)", "Cost/Sft", "Amount (Incl. GST)"]],
       body: withRoomRowSpans(v.items).map((item, i) => {
         const row = [i + 1];
         if (item.roomSpan > 0) row.push({ content: item.roomName, rowSpan: item.roomSpan });
         row.push(
-          item.typeOfWork, item.areaSqFt,
+          item.boxName, item.typeOfWork, item.areaSqFt,
           item.areaSqFt > 0 ? `${fmtPdf(item.sellingAmount / item.areaSqFt)}/sqft` : "-",
           fmtPdf(item.sellingAmount),
         );
@@ -720,7 +874,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     doc.text("Authorized Signatory", pageW - margin - 70, y);
     doc.line(pageW - margin - 70, y + 14, pageW - margin, y + 14);
 
-    if (hardwareMrpItems.length > 0) {
+    if (includeHardwareDiscount && v.hardwareItems.length > 0) {
       doc.addPage();
       doc.setFontSize(14);
       doc.text("Hardware & Consumables - Your Discount", margin, 16);
@@ -728,14 +882,14 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
         startY: 22,
         margin: { left: margin, right: margin },
         head: [["Group", "Item", "Qty", "Unit", "MRP", "Your Rate", "Disc %", "MRP Amt", "Your Amt", "You Save"]],
-        body: hardwareMrpItems.map((r) => [
+        body: v.hardwareItems.map((r) => [
           r.group, r.material, r.qty, r.unit,
           r.mrp > 0 ? fmtPdf(r.mrp) : "-", fmtPdf(r.rate),
           r.mrp > 0 ? `${r.discountPercent}%` : "-",
           r.mrp > 0 ? fmtPdf(r.mrpAmount) : "-", fmtPdf(r.netAmount),
           r.mrp > 0 ? fmtPdf(r.savings) : "-",
         ]),
-        foot: [["", "", "", "", "", "", "Total", fmtPdf(hardwareMrpItems.reduce((s, r) => s + r.mrpAmount, 0)), fmtPdf(hardwareMrpItems.reduce((s, r) => s + r.netAmount, 0)), fmtPdf(hardwareMrpItems.reduce((s, r) => s + r.savings, 0))]],
+        foot: [["", "", "", "", "", "", "Total", fmtPdf(v.hardwareItems.reduce((s, r) => s + r.mrpAmount, 0)), fmtPdf(v.hardwareItems.reduce((s, r) => s + r.netAmount, 0)), fmtPdf(v.hardwareItems.reduce((s, r) => s + r.savings, 0))]],
         styles: { fontSize: 7 },
         headStyles: { fillColor: [30, 58, 95] },
         footStyles: { fillColor: [236, 253, 245], textColor: [5, 150, 105], fontStyle: "bold" },
@@ -743,7 +897,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
       });
     }
 
-    if (cutListRows.length > 0) {
+    if (includeCutList && cutListRows.length > 0) {
       doc.addPage();
       doc.setFontSize(14);
       doc.text("Cut List", margin, 16);
@@ -778,10 +932,18 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
 
   return (
     <div className="page-card">
-      <div className="no-print" style={{ marginBottom: 24 }}>
-        <h3 style={{ marginTop: 0 }}>Project Quotation Settings</h3>
+      <div className="no-print" style={{ marginBottom: 24, border: "1px solid #e5e7eb", borderRadius: 8 }}>
+        <div
+          onClick={() => setSettingsOpen((o) => !o)}
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", cursor: "pointer", userSelect: "none", background: "#f9fafb", borderRadius: settingsOpen ? "8px 8px 0 0" : 8 }}
+        >
+          <h3 style={{ margin: 0 }}>Project Quotation Settings</h3>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#6b7280", transition: "transform 0.15s", display: "inline-block", transform: settingsOpen ? "rotate(90deg)" : "none" }}>▶</span>
+        </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
+        {settingsOpen && (
+        <div style={{ padding: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(260px, 1fr))", gap: 16 }}>
           <div>
             <h4 style={{ margin: "0 0 10px" }}>Project</h4>
             <div style={inputRow}>
@@ -795,15 +957,6 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                   ))}
                 </select>
               )}
-            </div>
-            <div style={inputRow}>
-              <span style={labelStyle}>Pricing Model</span>
-              <select value={selectedModel} onChange={(e) => { setSelectedModel(e.target.value); persistField("selectedModel", e.target.value); }}>
-                <option value="">Default (Cost Rates)</option>
-                {QUOT_MODELS.map((m) => (
-                  <option key={m} value={m}>{QUOT_MODEL_LABELS[m]}</option>
-                ))}
-              </select>
             </div>
           </div>
 
@@ -842,39 +995,140 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
             <div style={inputRow}><span style={labelStyle}>Delivery (days)</span><input type="number" value={deliveryDays} onChange={(e) => { setDeliveryDays(e.target.value); persistField("deliveryDays", e.target.value); }} /></div>
           </div>
 
-          <div>
-            <h4 style={{ margin: "0 0 10px" }}>Scope & Terms Text</h4>
-            <textarea placeholder="Included Scope" value={scopeIncluded} onChange={(e) => { setScopeIncluded(e.target.value); persistField("scopeIncluded", e.target.value); }} rows="2" style={{ width: "100%", marginBottom: 8 }} />
-            <textarea placeholder="Excluded Scope" value={scopeExcluded} onChange={(e) => { setScopeExcluded(e.target.value); persistField("scopeExcluded", e.target.value); }} rows="2" style={{ width: "100%", marginBottom: 8 }} />
-            <textarea placeholder="Terms Text" value={termsText} onChange={(e) => { setTermsText(e.target.value); persistField("termsText", e.target.value); }} rows="2" style={{ width: "100%" }} />
-          </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-          <button
-            onClick={() => showPreview(variantPageHTML(buildVariant(selectedModel), false), "Project Quotation — Print Preview", false)}
-            style={{ background: "#0891b2" }}
-            title="Shows a clean preview of just this quotation — no print dialog"
-          >
-            👁 Print Preview{activeModel ? ` — ${QUOT_MODEL_LABELS[activeModel]} Variant` : ""}
-          </button>
-          <button onClick={openPrintPreview} style={{ background: "#2563eb" }}>
-            🖨 {activeModel ? `Print — ${QUOT_MODEL_LABELS[activeModel]} Variant` : "Print / Save as PDF"}
-          </button>
-          <button
-            onClick={downloadQuotationPDF}
-            style={{ background: "#059669" }}
-            title="Generates and downloads a PDF file in one click — no print dialog"
-          >
-            ⬇ Download PDF{activeModel ? ` — ${QUOT_MODEL_LABELS[activeModel]} Variant` : ""}
-          </button>
-          <button
-            onClick={printAllVariants}
-            style={{ background: "#7c3aed" }}
-            title="Opens Economy, Standard and Premium quotations in one print dialog"
-          >
-            ⬇ Print All 3 Variants (Economy / Standard / Premium)
-          </button>
+        <div style={{ marginTop: 16 }}>
+          <h4 style={{ margin: "0 0 10px" }}>Scope & Terms Text</h4>
+          <textarea placeholder="Included Scope" value={scopeIncluded} onChange={(e) => { setScopeIncluded(e.target.value); persistField("scopeIncluded", e.target.value); }} rows="2" style={{ width: "100%", marginBottom: 8 }} />
+          <textarea placeholder="Excluded Scope" value={scopeExcluded} onChange={(e) => { setScopeExcluded(e.target.value); persistField("scopeExcluded", e.target.value); }} rows="2" style={{ width: "100%", marginBottom: 8 }} />
+          <textarea placeholder="Terms Text" value={termsText} onChange={(e) => { setTermsText(e.target.value); persistField("termsText", e.target.value); }} rows="2" style={{ width: "100%" }} />
+        </div>
+        </div>
+        )}
+      </div>
+
+      {/* ─── Compare Pricing Models — checkmark above each column picks the
+          model whose Quotation/Hardware savings/Cut List renders below, and
+          which model Print Preview / Download PDF act on. ─── */}
+      <div className="no-print" style={{ marginBottom: 24 }}>
+        <h3>Compare Pricing Models (Economy / Standard / Premium)</h3>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 700 }}>
+            <thead>
+              <tr>
+                <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Room</th>
+                <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Box Name</th>
+                <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Type of Work</th>
+                <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Area (sq ft)</th>
+                {QUOT_MODELS.map((m) => (
+                  <th key={m} colSpan={2} style={{ background: QUOT_MODEL_COLORS[m], color: "#fff", padding: "6px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.3)" }}>{QUOT_MODEL_LABELS[m]}</th>
+                ))}
+              </tr>
+              <tr>
+                {QUOT_MODELS.map((m) => (
+                  <th key={m} colSpan={2} style={{ background: QUOT_MODEL_COLORS[m], padding: "6px 14px", textAlign: "center", borderLeft: "2px solid rgba(255,255,255,0.3)", borderTop: "1px solid rgba(255,255,255,0.25)" }}>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", color: "#fff", fontSize: 11, fontWeight: 700 }} title={`Use ${QUOT_MODEL_LABELS[m]} for the Quotation/Hardware savings/Cut List below, and for Print Preview / Download PDF`}>
+                      <input
+                        type="checkbox"
+                        checked={selectedModel === m}
+                        onChange={() => { setSelectedModel(m); persistField("selectedModel", m); }}
+                        style={{ width: 14, height: 14, cursor: "pointer" }}
+                      />
+                      Selected
+                    </label>
+                    <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 4 }}>
+                      <button
+                        type="button"
+                        disabled={selectedModel !== m}
+                        onClick={() => showPreview(variantPageHTML(buildVariant(m), false), "Project Quotation — Print Preview", false)}
+                        title={selectedModel === m ? `Print Preview — ${QUOT_MODEL_LABELS[m]} Variant` : `Check "Selected" above to enable`}
+                        style={{ background: selectedModel === m ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.08)", color: selectedModel === m ? "#fff" : "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 5, width: 26, height: 26, fontSize: 13, cursor: selectedModel === m ? "pointer" : "not-allowed", padding: 0 }}
+                      >👁</button>
+                      <button
+                        type="button"
+                        disabled={selectedModel !== m}
+                        onClick={() => downloadQuotationPDF()}
+                        title={selectedModel === m ? `Download PDF — ${QUOT_MODEL_LABELS[m]} Variant` : `Check "Selected" above to enable`}
+                        style={{ background: selectedModel === m ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.08)", color: selectedModel === m ? "#fff" : "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 5, width: 26, height: 26, fontSize: 13, cursor: selectedModel === m ? "pointer" : "not-allowed", padding: 0 }}
+                      >⬇</button>
+                    </div>
+                  </th>
+                ))}
+              </tr>
+              <tr>
+                {QUOT_MODELS.map((m) => (
+                  <Fragment key={m}>
+                    <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.15)" }}>Sft Rate</th>
+                    <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Amount</th>
+                  </Fragment>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {withRoomRowSpans(compareVariants[0].items).map((item, i) => (
+                <tr key={item.id} style={{ background: i % 2 === 0 ? "#f8fafc" : "#fff" }}>
+                  {item.roomSpan > 0 && (
+                    <td rowSpan={item.roomSpan} style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", borderRight: "1px solid #e5e7eb", color: "#374151", verticalAlign: "top", background: "#fff", fontWeight: 600 }}>{item.roomName}</td>
+                  )}
+                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", color: "#6b7280" }}>{item.boxName}</td>
+                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", color: "#6b7280" }}>{item.typeOfWork}</td>
+                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280" }}>{item.areaSqFt}</td>
+                  {compareVariants.map((v) => (
+                    <Fragment key={v.model}>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", borderLeft: "1px solid #e5e7eb", textAlign: "center", color: QUOT_MODEL_COLORS[v.model] }}>
+                        {item.areaSqFt > 0 ? `${formatCurrency(v.items[i].sellingAmount / item.areaSqFt)}/sqft` : <span style={{ color: "#d1d5db" }}>—</span>}
+                      </td>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: "center", fontWeight: 600, color: "#111827" }}>
+                        {formatCurrency(v.items[i].sellingAmount)}
+                      </td>
+                    </Fragment>
+                  ))}
+                </tr>
+              ))}
+              <tr style={{ background: "#1e3a5f" }}>
+                <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Sub Total</td>
+                {compareVariants.map((v) => (
+                  <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 12, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>{formatCurrency(v.st)}</td>
+                ))}
+              </tr>
+              {Number(discountAmount) > 0 && (
+                <tr style={{ background: "#f1f5f9" }}>
+                  <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 600, color: "#374151", fontSize: 12 }}>Discount</td>
+                  {compareVariants.map((v) => (
+                    <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", color: "#374151", fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>- {formatCurrency(discountAmount)}</td>
+                  ))}
+                </tr>
+              )}
+              <tr style={{ background: "#f1f5f9" }}>
+                <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 600, color: "#374151", fontSize: 12 }}>GST {gstPercent}%</td>
+                {compareVariants.map((v) => (
+                  <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", color: "#374151", fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>{formatCurrency(v.gst)}</td>
+                ))}
+              </tr>
+              <tr style={{ background: "#334e68" }}>
+                <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Grand Total</td>
+                {compareVariants.map((v) => (
+                  <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 13, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>{formatCurrency(v.gt)}</td>
+                ))}
+              </tr>
+              <tr style={{ background: "#f1f5f9" }}>
+                <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 600, color: "#374151", fontSize: 12 }}>Advance {advancePercent}%</td>
+                {compareVariants.map((v) => (
+                  <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", color: "#374151", fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>{formatCurrency(v.adv)}</td>
+                ))}
+              </tr>
+              {hardwareSavingsTotal > 0 && (
+                <tr style={{ background: "#ecfdf5" }}>
+                  <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 700, color: "#065f46", fontSize: 12 }}>You Save (Hardware &amp; Consumables)</td>
+                  {compareVariants.map((v) => (
+                    <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#059669", fontSize: 13, borderLeft: "1px solid #d1fae5" }}>
+                      {formatCurrency(v.hardwareItems.reduce((s, r) => s + r.savings, 0))}
+                    </td>
+                  ))}
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -915,6 +1169,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                 <tr>
                   <th>#</th>
                   <th>Room</th>
+                  <th>Box Name</th>
                   <th>Type of Work</th>
                   <th>Area (sq ft)</th>
                   <th>Cost/Sft</th>
@@ -926,6 +1181,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                   <tr key={item.id}>
                     <td>{i + 1}</td>
                     {item.roomSpan > 0 && <td rowSpan={item.roomSpan}>{item.roomName}</td>}
+                    <td>{item.boxName}</td>
                     <td>{item.typeOfWork}</td>
                     <td>{item.areaSqFt}</td>
                     <td>{item.areaSqFt > 0 ? `${formatCurrency(item.sellingAmount / item.areaSqFt)}/sqft` : "—"}</td>
@@ -972,8 +1228,30 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
             </div>
 
             {hardwareMrpItems.length > 0 && (
-              <div style={{ marginBottom: 24, pageBreakBefore: "always" }}>
-                <h3>Hardware &amp; Consumables — Your Discount</h3>
+              <div className="hardware-discount-section" style={{ marginBottom: 24 }}>
+                <div
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: hardwareDiscountOpen ? "8px 8px 0 0" : 8 }}
+                >
+                  <div onClick={() => setHardwareDiscountOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flex: 1 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#6b7280", transition: "transform 0.15s", display: "inline-block", transform: hardwareDiscountOpen ? "rotate(90deg)" : "none" }}>▶</span>
+                    <h3 style={{ margin: 0 }}>Hardware &amp; Consumables — Your Discount</h3>
+                  </div>
+                  <label className="no-print" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
+                    <input
+                      type="checkbox"
+                      checked={includeHardwareDiscount}
+                      onChange={(e) => { setIncludeHardwareDiscount(e.target.checked); persistField("includeHardwareDiscount", e.target.checked); }}
+                    />
+                    Include in Quotation
+                  </label>
+                </div>
+                {hardwareDiscountOpen && (
+                <div style={{ border: "1px solid #e5e7eb", borderTop: "none", borderRadius: "0 0 8px 8px", padding: 14, pageBreakBefore: "always" }}>
+                {!includeHardwareDiscount && (
+                  <div className="no-print" style={{ fontSize: 12, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "6px 10px", marginBottom: 10 }}>
+                    Not included in Print Preview / Print / Download PDF — check "Include in Quotation" above to add it.
+                  </div>
+                )}
                 <table border="1" cellPadding="7" cellSpacing="0" width="100%" style={{ fontSize: 12 }}>
                   <thead>
                     <tr>
@@ -1007,12 +1285,36 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                     </tr>
                   </tfoot>
                 </table>
+                </div>
+                )}
               </div>
             )}
 
             {cutListRows.length > 0 && (
-              <div style={{ marginBottom: 24, pageBreakBefore: "always" }}>
-                <h3>Cut List</h3>
+              <div className="cut-list-section" style={{ marginBottom: 24 }}>
+                <div
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: cutListOpen ? "8px 8px 0 0" : 8 }}
+                >
+                  <div onClick={() => setCutListOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flex: 1 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#6b7280", transition: "transform 0.15s", display: "inline-block", transform: cutListOpen ? "rotate(90deg)" : "none" }}>▶</span>
+                    <h3 style={{ margin: 0 }}>Cut List</h3>
+                  </div>
+                  <label className="no-print" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
+                    <input
+                      type="checkbox"
+                      checked={includeCutList}
+                      onChange={(e) => { setIncludeCutList(e.target.checked); persistField("includeCutList", e.target.checked); }}
+                    />
+                    Include in Quotation
+                  </label>
+                </div>
+                {cutListOpen && (
+                <div style={{ border: "1px solid #e5e7eb", borderTop: "none", borderRadius: "0 0 8px 8px", padding: 14, pageBreakBefore: "always" }}>
+                {!includeCutList && (
+                  <div className="no-print" style={{ fontSize: 12, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "6px 10px", marginBottom: 10 }}>
+                    Not included in Print Preview / Print / Download PDF — check "Include in Quotation" above to add it.
+                  </div>
+                )}
                 <table border="1" cellPadding="6" cellSpacing="0" width="100%" style={{ fontSize: 11 }}>
                   <thead>
                     <tr>
@@ -1035,6 +1337,8 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                     ))}
                   </tbody>
                 </table>
+                </div>
+                )}
               </div>
             )}
 
