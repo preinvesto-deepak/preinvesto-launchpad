@@ -135,6 +135,9 @@ function Sidebar() {
           <GroupLabel label="Output" />
           <li><NavLink to="/interior/project-boq">Project BOQ</NavLink></li>
           <li><NavLink to="/interior/project-quotation">Project Quotation</NavLink></li>
+
+          <GroupLabel label="Account" />
+          <li><NavLink to="/interior/profile">Your Profile</NavLink></li>
         </ul>
       </nav>
     </div>

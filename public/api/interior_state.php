@@ -27,6 +27,7 @@ $DEFAULTS = [
     'selectedTemplateId'         => '',
     'materialStockSettings'      => new stdClass(),
     'kerfWidth'                  => 0,
+    'companyProfile'             => new stdClass(),
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {

@@ -30,6 +30,10 @@ const INTERIOR_DEFAULTS = {
   selectedTemplateId: '',
   materialStockSettings: {},
   kerfWidth: 0,
+  // Account-wide business identity (name, logo, contact) shown on printed
+  // quotations — separate from the per-project Company fields already in
+  // Project Quotation Settings, which can still override it per quotation.
+  companyProfile: {},
 };
 
 export default function registerAuthRoutes(app, pool) {

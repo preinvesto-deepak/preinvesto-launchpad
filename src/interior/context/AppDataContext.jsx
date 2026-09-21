@@ -28,6 +28,10 @@ const defaultData = {
   selectedTemplateId: "",
   materialStockSettings: {},
   kerfWidth: 0,
+  // Account-wide business identity (name, logo, contact) — shown on printed
+  // quotations. Separate from the per-project Company fields in Project
+  // Quotation Settings, which can still override it for one quotation.
+  companyProfile: {},
 };
 
 // Debounce writes to the API so fast typing (a text input, a number field)
@@ -46,6 +50,7 @@ function AppDataProvider({ children }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState(defaultData.selectedTemplateId);
   const [materialStockSettings, setMaterialStockSettings] = useState(defaultData.materialStockSettings);
   const [kerfWidth, setKerfWidth] = useState(defaultData.kerfWidth);
+  const [companyProfile, setCompanyProfile] = useState(defaultData.companyProfile);
 
   // Gates the very first render (before the API has responded) and stops
   // the save effect from firing on the initial default state — otherwise
@@ -93,6 +98,7 @@ function AppDataProvider({ children }) {
         setSelectedTemplateId(data.selectedTemplateId || "");
         setMaterialStockSettings(data.materialStockSettings || {});
         setKerfWidth(data.kerfWidth ?? 0);
+        setCompanyProfile(data.companyProfile || {});
         // Only now does state genuinely reflect the server — safe to arm autosave.
         setIsLoaded(true);
       })
@@ -123,6 +129,7 @@ function AppDataProvider({ children }) {
         selectedTemplateId,
         materialStockSettings,
         kerfWidth,
+        companyProfile,
       };
       saveState(dataToSave)
         .then(() => setSaveError(null))
@@ -145,6 +152,7 @@ function AppDataProvider({ children }) {
     selectedTemplateId,
     materialStockSettings,
     kerfWidth,
+    companyProfile,
   ]);
 
   // Update a price entry and link any unlinked parts that reference it by name.
@@ -234,6 +242,8 @@ function AppDataProvider({ children }) {
         setMaterialStockSettings,
         kerfWidth,
         setKerfWidth,
+        companyProfile,
+        setCompanyProfile,
         renamePrice,
         resetAllData,
         restoreSampleData,

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { useAppData } from "../context/AppDataContext";
@@ -187,7 +188,9 @@ function computeRoomMrpSavings(room, prices, materialStockSettings) {
     const p = prices.find((pr) => pr.materialName === mat);
     if (!p || !(Number(p.mrp) > 0) || p.showInQuotation === false || !qty) return;
     const gstMult = 1 + (Number(p.gst) || 0) / 100;
-    mrpTotal += qty * Number(p.mrp) * gstMult;
+    // MRP is already GST-inclusive (that's what MRP means) — only the net
+    // rate (stored without GST) needs gstMult applied to compare like for like.
+    mrpTotal += qty * Number(p.mrp);
     netTotal += qty * Number(p.rate || 0) * gstMult;
   };
 
@@ -242,10 +245,13 @@ function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj,
       const rate = rateFor(material, model, projectObj, prices, globalProfitPercent);
       const gstMult = 1 + (Number(p.gst) || 0) / 100;
       const netAmount = qty * rate * gstMult;
-      // No MRP set on this item → nothing to compare against, so show it
-      // with zero discount rather than a misleading negative "savings".
-      const mrpAmount = mrp > 0 ? qty * mrp * gstMult : netAmount;
-      const discountPercent = mrp > 0 ? ((mrp - rate) / mrp) * 100 : 0;
+      // MRP is already GST-inclusive (that's what MRP means), so no gstMult
+      // here — only the net rate (stored without GST) needs it, to compare
+      // like for like. No MRP set on this item → nothing to compare
+      // against, so show it with zero discount rather than a misleading
+      // negative "savings".
+      const mrpAmount = mrp > 0 ? qty * mrp : netAmount;
+      const discountPercent = mrp > 0 ? ((mrp - rate * gstMult) / mrp) * 100 : 0;
       return {
         material, group: p.group || "Other", unit: p.unit || "",
         qty: roundTo2(qty), mrp, rate, discountPercent: roundTo2(discountPercent),
@@ -272,7 +278,7 @@ function buildProjectCutListRows(projectRooms, prices) {
 }
 
 function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
-  const { projects, setProjects, subProjects, prices, materialStockSettings, materialModelProfitPercent } = useAppData();
+  const { projects, setProjects, subProjects, prices, materialStockSettings, materialModelProfitPercent, companyProfile } = useAppData();
 
   const [selectedProject, setSelectedProject] = useState(initialProjectName || projects[0]?.name || "");
 
@@ -370,9 +376,12 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     // Older saves may have "" (the removed "Default (Cost Rates)" option) —
     // fall back to Standard since the UI only offers the three tiers now.
     setSelectedModel(saved.selectedModel || "standard");
-    setCompanyName(saved.companyName ?? "Interior App");
-    setCompanyMobile(saved.companyMobile ?? "");
-    setCompanyEmail(saved.companyEmail ?? "");
+    // Company Name/Mobile/Email default to the account-wide Company Details
+    // (set once on Your Profile) but each project can still override them —
+    // an explicit per-project save always wins over the account default.
+    setCompanyName(saved.companyName ?? companyProfile.name ?? "Interior App");
+    setCompanyMobile(saved.companyMobile ?? companyProfile.mobile ?? "");
+    setCompanyEmail(saved.companyEmail ?? companyProfile.email ?? "");
     setQuotationNo(saved.quotationNo ?? "PRJ-QTN-001");
     // Always today's date on open — a quotation date should reflect when
     // it's actually being generated, not freeze at whatever date it was
@@ -391,8 +400,12 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     setTermsText(saved.termsText ?? "Final site measurements and finish selection to be reconfirmed before production.");
     setIncludeHardwareDiscount(saved.includeHardwareDiscount ?? true);
     setIncludeCutList(saved.includeCutList ?? true);
+    // companyProfile is in the deps below (not just selectedProject) because
+    // it loads asynchronously — on a direct page load this effect can fire
+    // before that load resolves, and would otherwise never re-apply the
+    // Company Details default once the real value arrives.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProject]);
+  }, [selectedProject, companyProfile]);
 
   // Write-through: every field's onChange calls this alongside its own
   // setState, so the project record always reflects the latest edit.
@@ -625,11 +638,14 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     return `
       <div style="page-break-before:${pageBreakBefore ? "always" : "avoid"};padding:30px;font-family:sans-serif">
         <div style="display:flex;justify-content:space-between;margin-bottom:20px">
-          <div>
-            <h2 style="margin:0">${companyName}</h2>
-            <p style="margin:4px 0;color:#6b7280">Project Quotation — <span style="color:${modelColor};font-weight:700">${modelLabel}</span></p>
-            ${companyMobile ? `<p style="margin:4px 0"><strong>Mobile:</strong> ${companyMobile}</p>` : ""}
-            ${companyEmail ? `<p style="margin:4px 0"><strong>Email:</strong> ${companyEmail}</p>` : ""}
+          <div style="display:flex;gap:14px;align-items:flex-start">
+            ${companyProfile.logo ? `<img src="${companyProfile.logo}" alt="" style="width:112px;height:112px;object-fit:contain;flex-shrink:0" />` : ""}
+            <div>
+              <h2 style="margin:0">${companyName}</h2>
+              <p style="margin:4px 0;color:#6b7280">Project Quotation — <span style="color:${modelColor};font-weight:700">${modelLabel}</span></p>
+              ${companyMobile ? `<p style="margin:4px 0"><strong>Mobile:</strong> ${companyMobile}</p>` : ""}
+              ${companyEmail ? `<p style="margin:4px 0"><strong>Email:</strong> ${companyEmail}</p>` : ""}
+            </div>
           </div>
           <div style="text-align:right">
             <p style="margin:4px 0"><strong>Quotation No:</strong> ${quotationNo}${qtnSuffix}</p>
@@ -690,7 +706,10 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
       </div>
       ${includeHardwareDiscount && v.hardwareItems.length > 0 ? `
       <div style="page-break-before:always;padding:30px;font-family:sans-serif">
-        <h2 style="margin:0 0 4px">${companyName}</h2>
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:4px">
+          ${companyProfile.logo ? `<img src="${companyProfile.logo}" alt="" style="width:72px;height:72px;object-fit:contain;flex-shrink:0" />` : ""}
+          <h2 style="margin:0">${companyName}</h2>
+        </div>
         <p style="margin:0 0 16px;color:#6b7280">Hardware &amp; Consumables — Your Discount <span style="color:${modelColor};font-weight:700">(${modelLabel})</span></p>
         <table border="1" cellpadding="7" cellspacing="0" width="100%" style="font-size:12px">
           <thead>
@@ -731,7 +750,10 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
       </div>` : ""}
       ${includeCutList && cutListRows.length > 0 ? `
       <div style="page-break-before:always;padding:30px;font-family:sans-serif">
-        <h2 style="margin:0 0 4px">${companyName}</h2>
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:4px">
+          ${companyProfile.logo ? `<img src="${companyProfile.logo}" alt="" style="width:72px;height:72px;object-fit:contain;flex-shrink:0" />` : ""}
+          <h2 style="margin:0">${companyName}</h2>
+        </div>
         <p style="margin:0 0 16px;color:#6b7280">Cut List <span style="color:${modelColor};font-weight:700">(${modelLabel})</span></p>
         <table border="1" cellpadding="6" cellspacing="0" width="100%" style="font-size:11px">
           <thead>
@@ -785,11 +807,25 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     const margin = 14;
     let y = 16;
 
+    // Only a data: URI (an uploaded file) can be embedded synchronously —
+    // a pasted external URL would need an async cross-origin fetch that
+    // could fail/CORS-block mid-export, so it's skipped here (the HTML
+    // Print Preview/Print paths still show it fine either way).
+    let textX = margin;
+    if (companyProfile.logo && companyProfile.logo.startsWith("data:")) {
+      try {
+        const mime = companyProfile.logo.slice(5, companyProfile.logo.indexOf(";"));
+        const format = mime.includes("png") ? "PNG" : "JPEG";
+        doc.addImage(companyProfile.logo, format, margin, y - 10, 32, 32);
+        textX = margin + 36;
+      } catch { /* malformed logo data — fall back to text-only header */ }
+    }
+
     doc.setFontSize(16);
-    doc.text(companyName || "Interior App", margin, y);
+    doc.text(companyName || "Interior App", textX, y);
     doc.setFontSize(10);
     doc.setTextColor(107, 114, 128);
-    doc.text(`Project Quotation - ${modelLabel}`, margin, y + 6);
+    doc.text(`Project Quotation - ${modelLabel}`, textX, y + 6);
     doc.setTextColor(0);
 
     let ry = 16;
@@ -965,6 +1001,9 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
             <div style={inputRow}><span style={labelStyle}>Company Name</span><input type="text" value={companyName} onChange={(e) => { setCompanyName(e.target.value); persistField("companyName", e.target.value); }} /></div>
             <div style={inputRow}><span style={labelStyle}>Mobile</span><input type="text" value={companyMobile} onChange={(e) => { setCompanyMobile(e.target.value); persistField("companyMobile", e.target.value); }} /></div>
             <div style={inputRow}><span style={labelStyle}>Email</span><input type="text" value={companyEmail} onChange={(e) => { setCompanyEmail(e.target.value); persistField("companyEmail", e.target.value); }} /></div>
+            <p style={{ fontSize: 11, color: "#9ca3af", marginTop: 6 }}>
+              Defaults from your account's <Link to="/interior/profile" style={{ color: "#2563eb" }}>Company Details</Link>{companyProfile.logo ? " (logo shown on the printed quotation too)" : " — add a logo there to show it on the printed quotation"}. Override above for just this project.
+            </p>
           </div>
 
           <div>
@@ -1135,16 +1174,21 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
       {/* ─── Printable Quotation ─── */}
       <div className="quotation-print-area" style={{ background: "#fff", padding: 30, border: "1px solid #d1d5db", borderRadius: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
-          <div>
-            <h2 style={{ margin: 0 }}>{companyName}</h2>
-            <p style={{ margin: "4px 0", color: "#6b7280" }}>
-              Project Quotation
-              {activeModel && (
-                <span style={{ marginLeft: 8, color: modelColor, fontWeight: 700 }}>— {QUOT_MODEL_LABELS[activeModel]} Variant</span>
-              )}
-            </p>
-            {companyMobile && <p style={{ margin: "4px 0" }}><strong>Mobile:</strong> {companyMobile}</p>}
-            {companyEmail && <p style={{ margin: "4px 0" }}><strong>Email:</strong> {companyEmail}</p>}
+          <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+            {companyProfile.logo && (
+              <img src={companyProfile.logo} alt="" style={{ width: 112, height: 112, objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+            )}
+            <div>
+              <h2 style={{ margin: 0 }}>{companyName}</h2>
+              <p style={{ margin: "4px 0", color: "#6b7280" }}>
+                Project Quotation
+                {activeModel && (
+                  <span style={{ marginLeft: 8, color: modelColor, fontWeight: 700 }}>— {QUOT_MODEL_LABELS[activeModel]} Variant</span>
+                )}
+              </p>
+              {companyMobile && <p style={{ margin: "4px 0" }}><strong>Mobile:</strong> {companyMobile}</p>}
+              {companyEmail && <p style={{ margin: "4px 0" }}><strong>Email:</strong> {companyEmail}</p>}
+            </div>
           </div>
           <div style={{ textAlign: "right" }}>
             <p style={{ margin: "4px 0" }}><strong>Quotation No:</strong> {quotationNo}{activeModel ? `-${activeModel[0].toUpperCase()}` : ""}</p>

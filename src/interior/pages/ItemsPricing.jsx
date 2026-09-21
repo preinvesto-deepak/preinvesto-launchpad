@@ -138,11 +138,14 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
   // Total sqft for the Wood sheet size (W ft × H ft) — default 4×8 = 32 sqft.
   const woodSqFt = () => (Number(form.woodDimW) || 0) * (Number(form.woodDimH) || 0);
 
-  // When Rate (without GST) is edited directly and an MRP is already set,
-  // back-solve the discount% so the two stay consistent (e.g. rate dropped
-  // to match a new supplier quote → discount% updates to match).
-  const discountFromRate = (rate, mrp) =>
-    rate !== "" && Number(mrp) > 0 ? Math.max(0, (1 - Number(rate) / Number(mrp)) * 100).toFixed(2) : "";
+  // MRP is a GST-inclusive figure (that's what "MRP" means) — so discount%
+  // is only ever meaningful against a GST-inclusive rate. When Rate (with or
+  // without GST) is edited directly and an MRP is already set, back-solve
+  // the discount% by comparing Rate WITH GST against MRP, not Rate without
+  // GST — otherwise a GST-exclusive rate would look artificially cheaper
+  // against MRP than it actually is.
+  const discountFromRateWithGst = (rateWithGst, mrp) =>
+    rateWithGst !== "" && Number(mrp) > 0 ? Math.max(0, (1 - Number(rateWithGst) / Number(mrp)) * 100).toFixed(2) : "";
 
   const handleRate = (e) => {
     const rate = e.target.value;
@@ -152,7 +155,7 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
     const sftRate = form.group === "Wood" && rate !== "" && sqft ? (Number(rate) / sqft).toFixed(2) : form.sftRate;
     setForm((f) => ({
       ...f, rate, rateWithGst: withGst, sftRate: f.group === "Wood" ? sftRate : f.sftRate,
-      discountPercent: discountFromRate(rate, f.mrp),
+      discountPercent: discountFromRateWithGst(withGst, f.mrp),
     }));
   };
 
@@ -164,18 +167,21 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
     const sftRate = form.group === "Wood" && without !== "" && sqft ? (Number(without) / sqft).toFixed(2) : form.sftRate;
     setForm((f) => ({
       ...f, rateWithGst, rate: without, sftRate: f.group === "Wood" ? sftRate : f.sftRate,
-      discountPercent: discountFromRate(without, f.mrp),
+      discountPercent: discountFromRateWithGst(rateWithGst, f.mrp),
     }));
   };
 
-  // MRP + Discount% → Rate without GST (and cascades to Rate with GST). MRP
-  // is the supplier's list price; discount% is what the supplier knocks off
-  // it — the app computes the actual net rate from the two.
+  // MRP + Discount% → Rate WITH GST (MRP already includes GST, so the
+  // discount comes straight off it) → Rate without GST is then back-derived
+  // by removing GST from that discounted, GST-inclusive figure. Previously
+  // the discount was applied to compute Rate without GST directly and GST
+  // was added back on top afterward, which double-counted GST on top of a
+  // figure (MRP) that already included it.
   const recalcFromMrp = (mrp, discountPercent) => {
     if (mrp === "" || discountPercent === "") return null;
-    const rate = (Number(mrp) * (1 - Number(discountPercent) / 100)).toFixed(2);
     const gst = Number(form.gst) || 0;
-    const withGst = (Number(rate) * (1 + gst / 100)).toFixed(2);
+    const withGst = (Number(mrp) * (1 - Number(discountPercent) / 100)).toFixed(2);
+    const rate = (Number(withGst) / (1 + gst / 100)).toFixed(2);
     return { rate, withGst };
   };
 
@@ -249,16 +255,35 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
     setNameSuggestions([]);
   };
 
+  // When MRP is set, Rate with GST is the anchor (it's what was discounted
+  // off the GST-inclusive MRP) — so a GST% change recomputes Rate without
+  // GST from it, instead of recomputing Rate with GST from Rate without
+  // GST, which would silently drift the selling price away from MRP.
   const handleGst = (e) => {
     const gst = e.target.value;
-    const rate = Number(form.rate) || 0;
-    const withGst = form.rate !== "" ? (rate * (1 + Number(gst) / 100)).toFixed(2) : "";
-    setForm((f) => ({ ...f, gst, rateWithGst: withGst }));
+    const g = Number(gst) || 0;
+    setForm((f) => {
+      if (Number(f.mrp) > 0 && f.rateWithGst !== "") {
+        const rate = (Number(f.rateWithGst) / (1 + g / 100)).toFixed(2);
+        return { ...f, gst, rate };
+      }
+      const rate = Number(f.rate) || 0;
+      const withGst = f.rate !== "" ? (rate * (1 + g / 100)).toFixed(2) : "";
+      return { ...f, gst, rateWithGst: withGst };
+    });
   };
+
+  // MRP is the ceiling on what the customer is actually charged — Rate with
+  // GST (the real, tax-inclusive selling price) must never sit above it.
+  const rateExceedsMrp = Number(form.mrp) > 0 && form.rateWithGst !== "" && Number(form.rateWithGst) > Number(form.mrp) + 0.01;
 
   const save = () => {
     if (!form.group || !form.materialName || !form.unit) {
       alert("Group, Name and Unit are required.");
+      return;
+    }
+    if (rateExceedsMrp) {
+      alert("Rate with GST can't be more than MRP.");
       return;
     }
     onSave({
@@ -481,15 +506,23 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
                 </div>
                 <div>
                   <label style={lbl}>Rate with GST (₹)</label>
-                  <input style={{ ...inp, background: form.rateWithGst !== "" ? "#fffbeb" : "#fff" }} type="number" placeholder="0.00" value={form.rateWithGst} onChange={handleRateWithGst} />
+                  <input
+                    style={{ ...inp, background: rateExceedsMrp ? "#fef2f2" : form.rateWithGst !== "" ? "#fffbeb" : "#fff", borderColor: rateExceedsMrp ? "#ef4444" : undefined }}
+                    type="number" placeholder="0.00" value={form.rateWithGst} onChange={handleRateWithGst}
+                  />
                 </div>
               </div>
 
               {Number(form.mrp) > 0 && (
-                <div style={{ marginTop: 10, fontSize: 12, color: "#059669", fontWeight: 600 }}>
-                  Customer saves ₹{(Number(form.mrp) - Number(form.rate || 0)).toLocaleString("en-IN", { maximumFractionDigits: 2 })} per {form.unit || "unit"} vs MRP
-                  {form.gst ? ` (₹${((Number(form.mrp) - Number(form.rate || 0)) * (1 + Number(form.gst) / 100)).toLocaleString("en-IN", { maximumFractionDigits: 2 })} incl. GST)` : ""}
-                </div>
+                rateExceedsMrp ? (
+                  <div style={{ marginTop: 10, fontSize: 12, color: "#dc2626", fontWeight: 600 }}>
+                    Rate with GST (₹{Number(form.rateWithGst).toLocaleString("en-IN")}) is above MRP (₹{Number(form.mrp).toLocaleString("en-IN")}) — the selling price can't exceed MRP.
+                  </div>
+                ) : (
+                  <div style={{ marginTop: 10, fontSize: 12, color: "#059669", fontWeight: 600 }}>
+                    Customer saves ₹{(Number(form.mrp) - Number(form.rateWithGst || 0)).toLocaleString("en-IN", { maximumFractionDigits: 2 })} per {form.unit || "unit"} vs MRP (incl. GST)
+                  </div>
+                )
               )}
 
               <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, color: "#374151", cursor: "pointer" }}>
@@ -585,7 +618,7 @@ function ItemDetailModal({ item, onClose, onEdit }) {
           {item.mrp > 0 && row("Supplier Discount", `${item.discountPercent ?? 0}%`)}
           {item.rate > 0 && row("Rate (excl. GST)", `₹${Number(item.rate).toLocaleString("en-IN")}`)}
           {rateWithGst > 0 && row("Rate (incl. GST)", `₹${rateWithGst.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`)}
-          {item.mrp > 0 && row("You Save", `₹${(Number(item.mrp) - Number(item.rate || 0)).toLocaleString("en-IN", { maximumFractionDigits: 2 })} vs MRP`)}
+          {item.mrp > 0 && row("You Save", `₹${(Number(item.mrp) - rateWithGst).toLocaleString("en-IN", { maximumFractionDigits: 2 })} vs MRP (incl. GST)`)}
           {item.mrp > 0 && row("In Quotation", item.showInQuotation !== false ? "✓ Shown" : "✕ Hidden")}
         </div>
 

@@ -33,7 +33,6 @@ const Login = lazy(() => import("./pages/Login"));
 const Signup = lazy(() => import("./pages/Signup"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
-const Profile = lazy(() => import("./pages/Profile"));
 // Lazy so the Interior tool's bundle (and jsPDF/xlsx) only loads for the
 // people who actually open it, not every visitor to the marketing site.
 const InteriorApp = lazy(() => import("./interior/InteriorApp"));
@@ -107,10 +106,8 @@ const App = () => (
             <Route path="/signup" element={<Signup />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
-            <Route
-              path="/profile"
-              element={<RequireAuth><Profile /></RequireAuth>}
-            />
+            {/* Now lives inside the Interior tool's own layout (sidebar visible). */}
+            <Route path="/profile" element={<Navigate to="/interior/profile" replace />} />
             <Route
               path="/interior/*"
               element={<RequireAuth><InteriorApp /></RequireAuth>}

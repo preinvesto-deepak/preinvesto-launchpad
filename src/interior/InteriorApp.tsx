@@ -13,6 +13,7 @@ import MaterialModels from "./pages/MaterialModels";
 import DimensionsEntry from "./pages/DimensionsEntry";
 import ProjectBOQ from "./pages/ProjectBOQ";
 import ProjectQuotation from "./pages/ProjectQuotation";
+import Profile from "./pages/Profile";
 
 import "./interior.css";
 
@@ -26,6 +27,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/interior/dimensions-entry": "Dimensions Entry",
   "/interior/project-boq": "Project BOQ",
   "/interior/project-quotation": "Project Quotation",
+  "/interior/profile": "Your Profile",
 };
 
 // These two pages render their own heading, so the shared bar is suppressed.
@@ -68,7 +70,7 @@ function InteriorTopBar() {
 
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <Link
-          to="/profile"
+          to="/interior/profile"
           style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--stone-700)", textDecoration: "none" }}
           title="Your profile"
         >
@@ -158,6 +160,7 @@ const InteriorApp = () => {
               <Route path="dimensions-entry" element={<DimensionsEntry />} />
               <Route path="project-boq" element={<ProjectBOQ />} />
               <Route path="project-quotation" element={<ProjectQuotation />} />
+              <Route path="profile" element={<Profile />} />
             </Routes>
           </div>
         </div>
