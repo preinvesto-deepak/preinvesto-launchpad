@@ -45,10 +45,13 @@ function roomAreaSft(room) {
 
 // Same per-box formula/rounding roomAreaSft sums over — kept as its own
 // function so a room's boxes can be priced/displayed as separate rows while
-// still adding back up to exactly roomAreaSft(room).
+// still adding back up to exactly roomAreaSft(room). Reads the
+// quotationHeightMm/quotationWidthMm fields (set below Box Name) when
+// present, falling back to Section 1's H/W for boxes that predate them —
+// same fallback as boxAreaSft in projectRows.js.
 function boxAreaSftQ(box) {
-  const hMm = Number(box.heightMm) || 0;
-  const wMm = Number(box.widthMm) || 0;
+  const hMm = Number(box.quotationHeightMm) || Number(box.heightMm) || 0;
+  const wMm = Number(box.quotationWidthMm) || Number(box.widthMm) || 0;
   return hMm && wMm ? Math.ceil(mmToFeet(hMm) * mmToFeet(wMm)) : 0;
 }
 
@@ -535,7 +538,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
           roomName,
           boxCount: 1,
           boxName: box.name || `Box ${idx + 1}`,
-          typeOfWork: box.boxType || "—",
+          typeOfWork: box.quotationBoxType || box.boxType || "—",
           areaSqFt: boxArea,
           costTotal: totalAmount,
           woodAmount, edgeAmount, hardwareAmount, transportationAmount, laborAmount,

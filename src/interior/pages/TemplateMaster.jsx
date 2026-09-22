@@ -62,6 +62,63 @@ const BOX_VARS = (box) => {
   return result;
 };
 
+// A Sub Sheet Calculation (e.g. "Draw") — a full peer of the box's own
+// Sheet Calculation ("1."), numbered "1.1", "1.2", ... under the same
+// collapsible. Mirrors every field a box itself has for Section 1: its own
+// Box Type/Door Type, own H/W/D, own materials, own fields/refs, and own
+// parts — fully independent of the box and of every other sub-sheet.
+const newSubSheet = (id) => ({
+  id,
+  name: `Sub Sheet ${id}`,
+  shortName: "",
+  boxType: "", doorType: "", includeInMaterialCalc: true,
+  heightMm: "", widthMm: "", depthMm: "",
+  matDoor: "", matDoorId: null,
+  matCarcas: "", matCarcasId: null,
+  matOutsideLaminate: "", matOutsideLaminateId: null,
+  matInsideLaminate: "", matInsideLaminateId: null,
+  matEdgeBeading: "", matEdgeBeadingId: null,
+  customMaterials: [],
+  materialLabels: {},
+  fieldLabels: {},
+  doorsH: 2, doorsV: 1, backParts: 1, partitions: 0, shelves: 2,
+  customFields: [],
+  refs: { ...DEFAULT_REFS },
+  parts: [],
+});
+
+// A box's own cut-list parts ("1.") plus every Sub Sheet Calculation's parts
+// ("1.1", "1.2", ... e.g. a "Draw" living inside a Wardrobe box) — each
+// sheet is a full peer with its own H/W/D-derived vars and its own Edge
+// Beading material, so cut-list/edge-banding totals can walk one flat list
+// without caring whether a part came from the box itself or one of its
+// sub-sheets. `sheet` is the box or sub-sheet object itself, for reading its
+// own matEdgeBeading/matEdgeBeadingId. A sheet with its "Include in Material
+// Calculation" checkbox off contributes no parts here at all — the single
+// point where that opt-out is enforced for every consumer (Cut Sheet
+// Optimizer, Hardware & Consumables' auto edge banding, Material Summary,
+// BOQ).
+const boxPartGroups = (box) => {
+  const groupOf = (sheet, label) => ({
+    label, vars: BOX_VARS(sheet), sheet,
+    parts: sheet.includeInMaterialCalc === false ? [] : (sheet.parts || []),
+  });
+  const groups = [groupOf(box, box.shortName || box.boxName || box.name || "")];
+  (box.subSheets || []).forEach((sub) => {
+    groups.push(groupOf(sub, sub.shortName || sub.name || ""));
+  });
+  return groups;
+};
+
+// H × W in sq ft from the fields shown below Box Name — independent of
+// {Sft} above, which always stays on Section 1's H/W for cut-list formulas.
+// Falls back to Section 1's H/W for boxes that predate the new fields.
+const quotationAreaSft = (box) => {
+  const hMm = Number(box.quotationHeightMm) || Number(box.heightMm) || 0;
+  const wMm = Number(box.quotationWidthMm) || Number(box.widthMm) || 0;
+  return hMm && wMm ? Math.ceil(mmToFeet(hMm) * mmToFeet(wMm)) : 0;
+};
+
 function resolveFormula(expr, vars) {
   if (expr === "" || expr === null || expr === undefined) return "";
   const str = String(expr).trim();
@@ -85,6 +142,24 @@ const MATERIAL_FIELDS = [
   ["Outside Laminate", "matOutsideLaminate"],
   ["Inside Laminate",  "matInsideLaminate"],
   ["Edge Beading",     "matEdgeBeading"],
+];
+
+// Everything a "Sheet Calculation and Cut List" entry (the box's own "1." or
+// a Sub Sheet Calculation "1.1", "1.2", ...) owns — copied wholesale by the
+// Copy/Paste buttons on each sheet's header. Deliberately excludes id/name
+// (each sheet keeps its own identity) and box-only fields (hardwareItems,
+// templateId, quotationBoxType, subSheets, ...) that aren't part of a sheet.
+const SHEET_COPY_FIELDS = [
+  "boxType", "doorType", "includeInMaterialCalc",
+  "heightMm", "widthMm", "depthMm",
+  "shortName",
+  "matDoor", "matDoorId", "matCarcas", "matCarcasId",
+  "matOutsideLaminate", "matOutsideLaminateId",
+  "matInsideLaminate", "matInsideLaminateId",
+  "matEdgeBeading", "matEdgeBeadingId",
+  "customMaterials", "materialLabels", "fieldLabels",
+  "doorsH", "doorsV", "backParts", "partitions", "shelves",
+  "customFields", "refs", "parts",
 ];
 
 const emptyPart = (id) => ({
@@ -114,9 +189,15 @@ const emptyBox = (id) => ({
   shortName: "",
   boxType: "",
   doorType: "",
+  includeInMaterialCalc: true,
   heightMm: "",
   widthMm: "",
   depthMm: "",
+  // Shown below Box Name, independent of the Sheet Calculation H/W/D
+  // above — these drive the Quotation's Type of Work/Area/Carpenter
+  // cost instead (see boxAreaSft/buildBoxCarpenterRow in projectRows.js).
+  quotationBoxType: "", quotationDoorType: "",
+  quotationWidthMm: "", quotationHeightMm: "", quotationDepthMm: "",
   matDoor: "",        matDoorId: null,
   matCarcas: "",      matCarcasId: null,
   matOutsideLaminate: "", matOutsideLaminateId: null,
@@ -133,6 +214,7 @@ const emptyBox = (id) => ({
   shelves: 2,
   refs: { ...DEFAULT_REFS },
   parts: [],
+  subSheets: [],
 });
 
 const emptyTemplate = (id, name) => ({
@@ -483,8 +565,11 @@ function TemplateMaster() {
   const [expandedEdgeId, setExpandedEdgeId] = useState(null);
   const [dimUnit, setDimUnit] = useState("mm"); // "mm" or "ft"
 
-  // Collapsible section state
-  const [openSections, setOpenSections] = useState({ inputs: false, sheets: false, hardware: false, summary: false });
+  // Collapsible section state. Each Sub Sheet Calculation gets its own key
+  // ("sheet_<id>"), toggled the same way as "sheets"/"hardware"/"summary".
+  const [openSections, setOpenSections] = useState({ sheets: false, hardware: false, summary: false });
+  // One-slot clipboard for the Copy/Paste buttons on each Sheet Calculation.
+  const [copiedSheet, setCopiedSheet] = useState(null);
   // Extra length added to each edge band product's calculated meterage before
   // rounding, to cover cutting wastage/offcuts — editable, defaults to 2m.
   const [edgeExtraMtr, setEdgeExtraMtr] = useState(0);
@@ -539,31 +624,33 @@ function TemplateMaster() {
   const computeBoxEdgeBandingMm = (box) => {
     const totals = {};
     const rmat = (name, id) => id != null ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name) : name;
-    const vars = BOX_VARS(box);
-    (box.parts || []).forEach((part) => {
-      if (part.req === false) return;
-      if (part.group !== "Ply") return; // only the core board carries a real edge to band
-      if (part.edgeReq === false) return; // "EB" checkbox off — this row gets no edge banding at all
-      const w = resolveFormula(part.widthMm, vars);
-      const h = resolveFormula(part.heightMm, vars);
-      const qty = resolveFormula(part.qty, vars);
-      if (!w || !h || w === "?" || h === "?" || !qty || qty === "?") return;
-      let perPiece = 0;
-      if (part.edgeTopReq    !== false) perPiece += w;
-      if (part.edgeBottomReq !== false) perPiece += w;
-      if (part.edgeLeftReq   !== false) perPiece += h;
-      if (part.edgeRightReq  !== false) perPiece += h;
-      if (!perPiece) return;
-      const lengthMm = perPiece * qty;
+    boxPartGroups(box).forEach(({ vars, parts, sheet }) => {
+      (parts || []).forEach((part) => {
+        if (part.req === false) return;
+        if (part.group !== "Ply") return; // only the core board carries a real edge to band
+        if (part.edgeReq === false) return; // "EB" checkbox off — this row gets no edge banding at all
+        const w = resolveFormula(part.widthMm, vars);
+        const h = resolveFormula(part.heightMm, vars);
+        const qty = resolveFormula(part.qty, vars);
+        if (!w || !h || w === "?" || h === "?" || !qty || qty === "?") return;
+        let perPiece = 0;
+        if (part.edgeTopReq    !== false) perPiece += w;
+        if (part.edgeBottomReq !== false) perPiece += w;
+        if (part.edgeLeftReq   !== false) perPiece += h;
+        if (part.edgeRightReq  !== false) perPiece += h;
+        if (!perPiece) return;
+        const lengthMm = perPiece * qty;
 
-      const plyName = rmat(part.material, part.materialId);
-      const plyThickness = (prices || []).find((p) => p.materialName === plyName)?.plyThickness;
-      const matched = plyThickness
-        ? (prices || []).find((p) => p.group === "Edge Beading" && (p.suitableThickness || []).includes(Number(plyThickness)))
-        : null;
-      const edgeBandName = matched?.materialName || rmat(box.matEdgeBeading, box.matEdgeBeadingId) || "Edge Band";
+        const plyName = rmat(part.material, part.materialId);
+        const plyThickness = (prices || []).find((p) => p.materialName === plyName)?.plyThickness;
+        const matched = plyThickness
+          ? (prices || []).find((p) => p.group === "Edge Beading" && (p.suitableThickness || []).includes(Number(plyThickness)))
+          : null;
+        // Each sheet (box or sub-sheet) has its own Edge Beading selection now.
+        const edgeBandName = matched?.materialName || rmat(sheet.matEdgeBeading, sheet.matEdgeBeadingId) || "Edge Band";
 
-      totals[edgeBandName] = (totals[edgeBandName] || 0) + lengthMm;
+        totals[edgeBandName] = (totals[edgeBandName] || 0) + lengthMm;
+      });
     });
     return totals;
   };
@@ -586,10 +673,11 @@ function TemplateMaster() {
   // Items Pricing), auto-filled with the item of the same name and qty from
   // that box's Area Sft ({Sft}). e.g. Box Type "Frame" → Carpenter "Frame" row.
   const computeBoxCarpenterRows = (box) => {
-    if (!box.boxType) return [];
+    const boxType = box.quotationBoxType || box.boxType;
+    if (!boxType) return [];
     const extra = Math.max(0, Number(carpenterExtraSft) || 0);
-    const base = Number(BOX_VARS(box).Sft) || 0;
-    return [{ material: box.boxType, base, extra, qty: Math.round((base + extra) * 100) / 100 }];
+    const base = quotationAreaSft(box);
+    return [{ material: boxType, base, extra, qty: Math.round((base + extra) * 100) / 100 }];
   };
 
   // ── Material Summary across ALL boxes ────────────────────────────────────────
@@ -672,45 +760,17 @@ function TemplateMaster() {
   // ── Cut Sheet Generator ───────────────────────────────────────────────────────
   const generateCutSheet = () => {
     if (!activeBox) return [];
-    const vars = BOX_VARS(activeBox);
     const rmat = (name, id) => id != null ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name) : name;
     const rows = [];
-    (activeBox.parts || []).forEach((part, idx) => {
-      if (part.req === false) return;
-      const rowNum = idx + 1;
-      const w   = resolveFormula(part.widthMm,  vars);
-      const h   = resolveFormula(part.heightMm, vars);
-      const qty = resolveFormula(part.qty,       vars);
-      const label    = `${activeBox.shortName || ""} ${part.partName}`.trim();
-      const rotation = part.rotation || 1;
-      const edgeData = {
-        top:    part.edgeTopReq    !== false ? (part.edgeTop    ?? 0) : 0,
-        bottom: part.edgeBottomReq !== false ? (part.edgeBottom ?? 0) : 0,
-        left:   part.edgeLeftReq   !== false ? (part.edgeLeft   ?? 0) : 0,
-        right:  part.edgeRightReq  !== false ? (part.edgeRight  ?? 0) : 0,
-      };
-      if (part.material || part.materialId) rows.push({ rowNum, w, h, qty, material: rmat(part.material, part.materialId), rotation, label, ...edgeData });
-      if (part.sideA    || part.sideAId)   rows.push({ rowNum, w, h, qty, material: rmat(part.sideA,    part.sideAId),    rotation, label, ...edgeData });
-      if (part.sideB    || part.sideBId)   rows.push({ rowNum, w, h, qty, material: rmat(part.sideB,    part.sideBId),    rotation, label, ...edgeData });
-    });
-    rows.sort((a, b) => a.rowNum - b.rowNum || (a.material || "").localeCompare(b.material || ""));
-    return rows;
-  };
-
-  // ── Cut Sheet for ALL boxes ───────────────────────────────────────────────────
-  const generateAllBoxesCutSheet = () => {
-    if (!draft) return [];
-    const rows = [];
-    (draft.boxes || []).forEach((box) => {
-      const vars = BOX_VARS(box);
-      const rmat = (name, id) => id != null ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name) : name;
-      (box.parts || []).forEach((part, idx) => {
+    let rowNum = 0;
+    boxPartGroups(activeBox).forEach(({ vars, parts, label: groupLabel }) => {
+      (parts || []).forEach((part) => {
         if (part.req === false) return;
-        const rowNum = idx + 1;
+        rowNum += 1;
         const w   = resolveFormula(part.widthMm,  vars);
         const h   = resolveFormula(part.heightMm, vars);
         const qty = resolveFormula(part.qty,       vars);
-        const label    = `${box.shortName || box.boxName || ""} ${part.partName}`.trim();
+        const label    = `${groupLabel} ${part.partName}`.trim();
         const rotation = part.rotation || 1;
         const edgeData = {
           top:    part.edgeTopReq    !== false ? (part.edgeTop    ?? 0) : 0,
@@ -721,6 +781,38 @@ function TemplateMaster() {
         if (part.material || part.materialId) rows.push({ rowNum, w, h, qty, material: rmat(part.material, part.materialId), rotation, label, ...edgeData });
         if (part.sideA    || part.sideAId)   rows.push({ rowNum, w, h, qty, material: rmat(part.sideA,    part.sideAId),    rotation, label, ...edgeData });
         if (part.sideB    || part.sideBId)   rows.push({ rowNum, w, h, qty, material: rmat(part.sideB,    part.sideBId),    rotation, label, ...edgeData });
+      });
+    });
+    rows.sort((a, b) => a.rowNum - b.rowNum || (a.material || "").localeCompare(b.material || ""));
+    return rows;
+  };
+
+  // ── Cut Sheet for ALL boxes ───────────────────────────────────────────────────
+  const generateAllBoxesCutSheet = () => {
+    if (!draft) return [];
+    const rows = [];
+    const rmat = (name, id) => id != null ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name) : name;
+    (draft.boxes || []).forEach((box) => {
+      let rowNum = 0;
+      boxPartGroups(box).forEach(({ vars, parts, label: groupLabel }) => {
+        (parts || []).forEach((part) => {
+          if (part.req === false) return;
+          rowNum += 1;
+          const w   = resolveFormula(part.widthMm,  vars);
+          const h   = resolveFormula(part.heightMm, vars);
+          const qty = resolveFormula(part.qty,       vars);
+          const label    = `${groupLabel} ${part.partName}`.trim();
+          const rotation = part.rotation || 1;
+          const edgeData = {
+            top:    part.edgeTopReq    !== false ? (part.edgeTop    ?? 0) : 0,
+            bottom: part.edgeBottomReq !== false ? (part.edgeBottom ?? 0) : 0,
+            left:   part.edgeLeftReq   !== false ? (part.edgeLeft   ?? 0) : 0,
+            right:  part.edgeRightReq  !== false ? (part.edgeRight  ?? 0) : 0,
+          };
+          if (part.material || part.materialId) rows.push({ rowNum, w, h, qty, material: rmat(part.material, part.materialId), rotation, label, ...edgeData });
+          if (part.sideA    || part.sideAId)   rows.push({ rowNum, w, h, qty, material: rmat(part.sideA,    part.sideAId),    rotation, label, ...edgeData });
+          if (part.sideB    || part.sideBId)   rows.push({ rowNum, w, h, qty, material: rmat(part.sideB,    part.sideBId),    rotation, label, ...edgeData });
+        });
       });
     });
     rows.sort((a, b) => (a.material || "").localeCompare(b.material || "") || a.rowNum - b.rowNum);
@@ -807,57 +899,156 @@ function TemplateMaster() {
   };
 
   // ── Parts CRUD (operates on activeBox within draft) ───────────────────────────
+  // Every fn takes an optional trailing subSheetId: omitted (undefined), it acts
+  // on the box's own parts as before; given, it acts on that Sub Sheet
+  // Calculation's parts instead (see Sub Sheet Calculations UI below Section 1).
   const activeParts = activeBox?.parts || [];
 
-  const addPart = () => {
+  const addPart = (subSheetId) => {
     if (!activeBox) return;
-    const newId = activeParts.length ? Math.max(...activeParts.map((p) => p.id)) + 1 : 1;
     setDraft((prev) => ({
       ...prev,
-      boxes: prev.boxes.map((b) =>
-        b.id === activeBox.id ? { ...b, parts: [...(b.parts || []), emptyPart(newId)] } : b
-      ),
+      boxes: prev.boxes.map((b) => {
+        if (b.id !== activeBox.id) return b;
+        if (subSheetId == null) {
+          const parts = b.parts || [];
+          const newId = parts.length ? Math.max(...parts.map((p) => p.id)) + 1 : 1;
+          return { ...b, parts: [...parts, emptyPart(newId)] };
+        }
+        return {
+          ...b,
+          subSheets: (b.subSheets || []).map((s) => {
+            if (s.id !== subSheetId) return s;
+            const parts = s.parts || [];
+            const newId = parts.length ? Math.max(...parts.map((p) => p.id)) + 1 : 1;
+            return { ...s, parts: [...parts, emptyPart(newId)] };
+          }),
+        };
+      }),
     }));
     setIsDirty(true);
   };
 
-  const updatePart = (partId, field, value) => {
+  const updatePart = (partId, field, value, subSheetId) => {
     if (!activeBox) return;
     setDraft((prev) => ({
       ...prev,
-      boxes: prev.boxes.map((b) =>
-        b.id === activeBox.id
-          ? { ...b, parts: (b.parts || []).map((p) => p.id === partId ? { ...p, [field]: value } : p) }
-          : b
-      ),
+      boxes: prev.boxes.map((b) => {
+        if (b.id !== activeBox.id) return b;
+        if (subSheetId == null) {
+          return { ...b, parts: (b.parts || []).map((p) => p.id === partId ? { ...p, [field]: value } : p) };
+        }
+        return {
+          ...b,
+          subSheets: (b.subSheets || []).map((s) =>
+            s.id === subSheetId ? { ...s, parts: (s.parts || []).map((p) => p.id === partId ? { ...p, [field]: value } : p) } : s
+          ),
+        };
+      }),
     }));
     setIsDirty(true);
   };
 
-  const updatePartFields = (partId, fields) => {
+  const updatePartFields = (partId, fields, subSheetId) => {
     if (!activeBox) return;
     setDraft((prev) => ({
       ...prev,
-      boxes: prev.boxes.map((b) =>
-        b.id === activeBox.id
-          ? { ...b, parts: (b.parts || []).map((p) => p.id === partId ? { ...p, ...fields } : p) }
-          : b
-      ),
+      boxes: prev.boxes.map((b) => {
+        if (b.id !== activeBox.id) return b;
+        if (subSheetId == null) {
+          return { ...b, parts: (b.parts || []).map((p) => p.id === partId ? { ...p, ...fields } : p) };
+        }
+        return {
+          ...b,
+          subSheets: (b.subSheets || []).map((s) =>
+            s.id === subSheetId ? { ...s, parts: (s.parts || []).map((p) => p.id === partId ? { ...p, ...fields } : p) } : s
+          ),
+        };
+      }),
     }));
     setIsDirty(true);
   };
 
-  const deletePart = (partId) => {
+  const deletePart = (partId, subSheetId) => {
     if (!activeBox) return;
     setDraft((prev) => ({
       ...prev,
-      boxes: prev.boxes.map((b) =>
-        b.id === activeBox.id
-          ? { ...b, parts: (b.parts || []).filter((p) => p.id !== partId) }
-          : b
-      ),
+      boxes: prev.boxes.map((b) => {
+        if (b.id !== activeBox.id) return b;
+        if (subSheetId == null) {
+          return { ...b, parts: (b.parts || []).filter((p) => p.id !== partId) };
+        }
+        return {
+          ...b,
+          subSheets: (b.subSheets || []).map((s) =>
+            s.id === subSheetId ? { ...s, parts: (s.parts || []).filter((p) => p.id !== partId) } : s
+          ),
+        };
+      }),
     }));
     setIsDirty(true);
+  };
+
+  // ── Sub Sheet Calculation CRUD (nested cut-lists under a box, e.g. drawers
+  // inside a Wardrobe) ──────────────────────────────────────────────────────────
+  const addSubSheet = () => {
+    if (!activeBox) return;
+    const subs = activeBox.subSheets || [];
+    const id = subs.length ? Math.max(...subs.map((s) => s.id)) + 1 : 1;
+    updateBox("subSheets", [...subs, newSubSheet(id)]);
+  };
+
+  const updateSubSheet = (subSheetId, field, value) => {
+    if (!activeBox) return;
+    updateBox("subSheets", (activeBox.subSheets || []).map((s) => s.id === subSheetId ? { ...s, [field]: value } : s));
+  };
+
+  // Sets several fields on a sub-sheet in one update (e.g. a material name +
+  // its id together) — calling updateSubSheet twice in a row would have the
+  // second call overwrite the first, since both read the same stale
+  // activeBox.subSheets snapshot.
+  const updateSubSheetFields = (subSheetId, fields) => {
+    if (!activeBox) return;
+    updateBox("subSheets", (activeBox.subSheets || []).map((s) => s.id === subSheetId ? { ...s, ...fields } : s));
+  };
+
+  const deleteSubSheet = (subSheetId) => {
+    if (!activeBox) return;
+    updateBox("subSheets", (activeBox.subSheets || []).filter((s) => s.id !== subSheetId));
+  };
+
+  // Copy the full Materials/Fields/Parts config off one sheet (box's own "1."
+  // or a Sub Sheet Calculation), so it can be Pasted onto another sheet in
+  // the same box — a one-slot clipboard, not per-sheet state, so Copy on one
+  // sheet and Paste on another is the whole interaction.
+  const copySheetData = (subSheetId) => {
+    if (!activeBox) return;
+    const sheet = subSheetId == null ? activeBox : (activeBox.subSheets || []).find((s) => s.id === subSheetId);
+    if (!sheet) return;
+    const fields = {};
+    SHEET_COPY_FIELDS.forEach((f) => {
+      const v = sheet[f];
+      fields[f] = v === undefined ? v : JSON.parse(JSON.stringify(v));
+    });
+    setCopiedSheet({ fields, sourceLabel: subSheetId == null ? (activeBox.boxName || "1.") : (sheet.name || "Sub Sheet") });
+  };
+
+  const pasteSheetData = (subSheetId) => {
+    if (!activeBox || !copiedSheet) return;
+    const fields = {};
+    SHEET_COPY_FIELDS.forEach((f) => {
+      const v = copiedSheet.fields[f];
+      fields[f] = v === undefined ? v : JSON.parse(JSON.stringify(v));
+    });
+    if (subSheetId == null) {
+      setDraft((prev) => ({
+        ...prev,
+        boxes: prev.boxes.map((b) => b.id === activeBox.id ? { ...b, ...fields } : b),
+      }));
+      setIsDirty(true);
+    } else {
+      updateBox("subSheets", (activeBox.subSheets || []).map((s) => s.id === subSheetId ? { ...s, ...fields } : s));
+    }
   };
 
   // ── Hardware & Consumables CRUD (operates on any box within draft, given its
@@ -1168,609 +1359,739 @@ function TemplateMaster() {
                     </div>
                   </div>
 
-                  {/* ══ SECTION 1: INPUTS ══ */}
-                  <SectionHeader
-                    title="1. Inputs"
-                    open={openSections.inputs}
-                    onToggle={() => toggleSection("inputs")}
-                    style={{ marginTop: 0 }}
-                  />
-                  {openSections.inputs && (
-                    <div style={{ border: "1px solid #ede9fe", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "12px 12px 4px", background: "#fff" }}>
-                      {/* Box Type / Door Type */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <label style={{ fontSize: 12, fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>Box Type</label>
-                          <select value={activeBox.boxType || ""} onChange={(e) => updateBox("boxType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 120 }}>
-                            <option value="">— Select —</option>
-                            {/* Same list as the Carpenter group in Items Pricing — whichever
-                                one is picked here gets auto-filled with Area Sft in Section 3. */}
-                            {(prices || []).filter((p) => p.group === "Carpenter").map((p) => (
-                              <option key={p.id} value={p.materialName}>{p.materialName}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <label style={{ fontSize: 12, fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>Door Type</label>
-                          <select value={activeBox.doorType || ""} onChange={(e) => updateBox("doorType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 140 }}>
-                            <option value="">— Select —</option>
-                            {DOOR_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                          </select>
-                        </div>
+                  {/* ── Quotation Inputs — always visible, independent of Section 1's
+                      H/W/D/Type of Work used for Sheet Calculation. These drive what
+                      the Project Quotation shows (Type of Work, Area, Carpenter cost). ── */}
+                  <div style={{ border: "1px solid #ede9fe", borderRadius: 8, background: "#fff", padding: "10px 12px", marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#7c3aed", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
+                      Quotation Details
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>Box Type</label>
+                        <select value={activeBox.quotationBoxType || ""} onChange={(e) => updateBox("quotationBoxType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 120 }}>
+                          <option value="">— Select —</option>
+                          {(prices || []).filter((p) => p.group === "Carpenter").map((p) => (
+                            <option key={p.id} value={p.materialName}>{p.materialName}</option>
+                          ))}
+                        </select>
                       </div>
-
-                      {/* Dimensions */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
-                        {(() => {
-                          const allRefs = { ...DEFAULT_REFS, ...(activeBox.refs || {}) };
-                          const refValues = [
-                            ...Object.values(allRefs),
-                            ...(activeBox.customFields || []).map((f) => f.ref),
-                          ].filter(Boolean);
-                          const dupSet = new Set(refValues.filter((v, _, a) => a.filter(x => x === v).length > 1));
-                          return [["H", "heightMm"], ["W", "widthMm"], ["D", "depthMm"]].map(([lbl, key]) => {
-                          const mmVal = activeBox[key] ?? "";
-                          const ftVal = mmVal !== "" ? roundTo2(mmToFeet(Number(mmVal))) : "";
-                          const refName = allRefs[key] ?? DEFAULT_REFS[key];
-                          const isDup = dupSet.has(refName);
-                          return (
-                            <div key={key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                              <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>{lbl}</span>
-                              <input
-                                type="number"
-                                value={dimUnit === "mm" ? mmVal : ftVal}
-                                onChange={(e) => {
-                                  if (dimUnit === "mm") {
-                                    updateBox(key, e.target.value);
-                                  } else {
-                                    const ft = Number(e.target.value);
-                                    if (!isNaN(ft)) updateBox(key, String(Math.round(feetToMm(ft))));
-                                  }
-                                }}
-                                placeholder={dimUnit}
-                                style={{ width: 72, fontSize: 12, padding: "3px 6px" }}
-                              />
-                              <span style={{ fontSize: 11, color: "#9ca3af" }}>
-                                {dimUnit === "mm" ? (ftVal ? ftVal + " ft" : "") : (mmVal ? mmVal + " mm" : "")}
-                              </span>
-                              <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`{`}</span>
-                              <input
-                                type="text"
-                                value={refName}
-                                onChange={(e) => updateBox("refs", { ...(activeBox.refs || DEFAULT_REFS), [key]: e.target.value })}
-                                title={isDup ? `"${refName}" is used by multiple fields — each ref must be unique` : ""}
-                                style={{ width: 40, fontSize: 10, padding: "1px 4px", fontFamily: "monospace", color: isDup ? "#dc2626" : "#7c3aed", background: isDup ? "#fee2e2" : "#ede9fe", border: `1px solid ${isDup ? "#fca5a5" : "#ddd6fe"}`, borderRadius: 4, textAlign: "center" }}
-                              />
-                              <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`}`}</span>
-                            </div>
-                          );
-                        });})()}
-                        <button
-                          onClick={() => setDimUnit(dimUnit === "mm" ? "ft" : "mm")}
-                          style={{ fontSize: 11, padding: "3px 10px", background: "#ede9fe", color: "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 6 }}
-                        >
-                          {dimUnit === "mm" ? "→ ft" : "→ mm"}
-                        </button>
-                        {(() => {
-                          const hMm = Number(activeBox.heightMm) || 0;
-                          const wMm = Number(activeBox.widthMm) || 0;
-                          const areaSqFt = hMm && wMm ? Math.ceil(mmToFeet(hMm) * mmToFeet(wMm)) : 0;
-                          return (
-                            <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
-                              <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>Area Sft</span>
-                              <input
-                                type="text"
-                                readOnly
-                                value={areaSqFt || ""}
-                                placeholder="—"
-                                title="Auto-calculated: H × W in sq ft"
-                                style={{ width: 72, fontSize: 12, padding: "3px 6px", background: "#f3f4f6", color: "#374151", fontWeight: 600, cursor: "default" }}
-                              />
-                              <span style={{ fontSize: 11, color: "#9ca3af" }}>sq ft</span>
-                              <span style={{ fontSize: 10, color: "#7c3aed", fontFamily: "monospace" }} title="Reference this in any formula">{`{Sft}`}</span>
-                            </div>
-                          );
-                        })()}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>Door Type</label>
+                        <select value={activeBox.quotationDoorType || ""} onChange={(e) => updateBox("quotationDoorType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 140 }}>
+                          <option value="">— Select —</option>
+                          <option value="Sliding Door">Sliding Door</option>
+                          <option value="Swing Door">Swing Door</option>
+                        </select>
                       </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      {[["H", "quotationHeightMm"], ["W", "quotationWidthMm"], ["D", "quotationDepthMm"]].map(([lbl, key]) => {
+                        const mmVal = activeBox[key] ?? "";
+                        const ftVal = mmVal !== "" ? roundTo2(mmToFeet(Number(mmVal))) : "";
+                        return (
+                          <div key={key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>{lbl}</span>
+                            <input
+                              type="number"
+                              value={dimUnit === "mm" ? mmVal : ftVal}
+                              onChange={(e) => {
+                                if (dimUnit === "mm") {
+                                  updateBox(key, e.target.value);
+                                } else {
+                                  const ft = Number(e.target.value);
+                                  if (!isNaN(ft)) updateBox(key, String(Math.round(feetToMm(ft))));
+                                }
+                              }}
+                              placeholder={dimUnit}
+                              style={{ width: 72, fontSize: 12, padding: "3px 6px" }}
+                            />
+                            <span style={{ fontSize: 11, color: "#9ca3af" }}>
+                              {dimUnit === "mm" ? (ftVal ? ftVal + " ft" : "") : (mmVal ? mmVal + " mm" : "")}
+                            </span>
+                          </div>
+                        );
+                      })}
+                      <button
+                        onClick={() => setDimUnit(dimUnit === "mm" ? "ft" : "mm")}
+                        style={{ fontSize: 11, padding: "3px 10px", background: "#ede9fe", color: "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 6 }}
+                      >{dimUnit === "mm" ? "→ ft" : "→ mm"}</button>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>Area Sft</span>
+                        <input
+                          type="text"
+                          readOnly
+                          value={quotationAreaSft(activeBox) || ""}
+                          placeholder="—"
+                          title="Auto-calculated: H × W in sq ft — used for Quotation"
+                          style={{ width: 72, fontSize: 12, padding: "3px 6px", background: "#f3f4f6", color: "#374151", fontWeight: 600, cursor: "default" }}
+                        />
+                        <span style={{ fontSize: 11, color: "#9ca3af" }}>sq ft</span>
+                      </div>
+                    </div>
+                  </div>
 
-                      {/* Materials + Box Configuration side by side */}
-                      <div style={{ marginTop: 8, borderTop: "1px solid #ede9fe", paddingTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
+                  {/* ══ SECTION 1: SHEET CALCULATION AND CUT LIST — each numbered
+                      entry (1., 1.1, 1.2, ...) is its own top-level collapsible,
+                      same as Sections 2/3 below. ══ */}
+                  {(() => {
+                      const priceNames = new Set((prices || []).map((pr) => pr.materialName));
+                      const resolveMat = (name, id) => {
+                        if (id != null) return (prices || []).find((pr) => pr.id === id)?.materialName ?? name;
+                        return priceNames.has(name) ? name : "";
+                      };
+                      const numCell = { padding: "3px 4px", borderBottom: "1px solid #ede9fe", textAlign: "center" };
+                      const txtCell = { padding: "3px 4px", borderBottom: "1px solid #ede9fe" };
 
-                        {/* Materials */}
-                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                          <thead>
-                            <tr>
-                              <th style={{ background: "#1e3a5f", color: "#fff", padding: "7px 10px", textAlign: "left", fontWeight: 600, fontSize: 12 }}>Material</th>
-                              <th style={{ background: "#1e3a5f", color: "#fff", padding: "7px 10px", textAlign: "left", fontWeight: 600, fontSize: 12 }}>Selection</th>
-                              <th style={{ background: "#1e3a5f", color: "#fff", padding: "7px 6px", width: 32 }}></th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {MATERIAL_FIELDS.map(([label, field], i) => {
-                              const idField = `${field}Id`;
-                              const itemId = activeBox[idField];
-                              const resolved = itemId != null
-                                ? (prices || []).find((p) => p.id === itemId)?.materialName ?? activeBox[field]
-                                : activeBox[field];
-                              const stale = itemId != null && resolved !== activeBox[field] && activeBox[field];
-                              return (
-                                <tr key={field} style={{ background: i % 2 === 0 ? "#f5f3ff" : "#fff" }}>
-                                  <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
-                                    <input
-                                      type="text"
-                                      value={activeBox.materialLabels?.[field] ?? label}
-                                      onChange={(e) => updateBox("materialLabels", { ...(activeBox.materialLabels || {}), [field]: e.target.value })}
-                                      style={{ width: "100%", fontSize: 12, padding: "3px 6px", fontWeight: 600, color: "#374151", background: "#fff" }}
-                                    />
-                                  </td>
-                                  <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
-                                    <input
-                                      type="text"
-                                      value={resolved || ""}
-                                      onChange={(e) => {
-                                        setDraft((prev) => ({
-                                          ...prev,
-                                          boxes: prev.boxes.map((b) =>
-                                            b.id === activeBox.id ? { ...b, [field]: e.target.value, [idField]: null } : b
-                                          ),
-                                        }));
-                                        setIsDirty(true);
-                                      }}
-                                      placeholder="Select..."
-                                      style={{ width: "100%", fontSize: 12, padding: "3px 6px", borderColor: stale ? "#f59e0b" : undefined }}
-                                    />
-                                  </td>
-                                  <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
-                                    <button
-                                      onClick={() => setMatPicker({ field, label })}
-                                      title="Browse item list"
-                                      style={{ background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", padding: "3px 7px", fontSize: 13 }}
-                                    >🔍</button>
-                                  </td>
+                      // subSheetId omitted/null: acts on the box itself. Given: acts on that
+                      // Sub Sheet Calculation instead. Mirrors updateBox's single-field form
+                      // plus a multi-field form (for setting a material + its id together).
+                      const updateSheetFields = (subSheetId, fields) => {
+                        if (subSheetId == null) {
+                          setDraft((prev) => ({
+                            ...prev,
+                            boxes: prev.boxes.map((b) => b.id === activeBox.id ? { ...b, ...fields } : b),
+                          }));
+                          setIsDirty(true);
+                        } else {
+                          updateSubSheetFields(subSheetId, fields);
+                        }
+                      };
+                      const updateSheetField = (subSheetId, field, value) => updateSheetFields(subSheetId, { [field]: value });
+
+                      // Renders one cut-list table — shared by every sheet below.
+                      const renderPartsTable = ({ parts, vars, refsMap, sheet, subSheetId, labelPrefix, matOptions, laminateOptions, extraButtons }) => (
+                        <div style={{ border: "1px solid #ede9fe", borderRadius: "0 0 8px 8px", padding: "10px 10px 6px", background: "#fff" }}>
+                          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginBottom: 8, gap: 8 }}>
+                            {extraButtons}
+                            <button onClick={() => addPart(subSheetId)} style={{ background: "#2563eb", padding: "4px 14px", fontSize: 12 }}>+ Add Part</button>
+                          </div>
+                          <div style={{ overflow: "auto", maxHeight: "65vh" }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 900 }}>
+                              <thead>
+                                <tr>
+                                  {["#", "Group", "Ply Name", "Req", "EB", "Side A", "Side B", "W (mm)", "H (mm)", "Qty", "Material", "Rotation", "Label", "Edge", "Remarks", ""].map((h) => (
+                                    <th key={h} style={{ position: "sticky", top: 0, zIndex: 2, background: "#1e3a5f", color: "#fff", padding: "6px 8px", textAlign: h === "#" || h === "Req" || h === "EB" || h === "Qty" || h === "Rotation" || h === "Edge" ? "center" : "left", fontWeight: 600, whiteSpace: "nowrap" }} title={h === "EB" ? "Edge Beading required for this part" : undefined}>{h}</th>
+                                  ))}
                                 </tr>
-                              );
-                            })}
-                            {(activeBox.customMaterials || []).map((cm) => (
-                              <tr key={cm.id} style={{ background: "#fffbeb" }}>
-                                <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
-                                  <input
-                                    type="text"
-                                    value={cm.label || ""}
-                                    onChange={(e) => updateBox("customMaterials", (activeBox.customMaterials || []).map((m) => m.id === cm.id ? { ...m, label: e.target.value } : m))}
-                                    placeholder="Label..."
-                                    style={{ width: "100%", fontSize: 12, padding: "3px 6px" }}
-                                  />
-                                </td>
-                                <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
-                                  <input
-                                    type="text"
-                                    value={cm.value || ""}
-                                    onChange={(e) => updateBox("customMaterials", (activeBox.customMaterials || []).map((m) => m.id === cm.id ? { ...m, value: e.target.value, itemId: null } : m))}
-                                    placeholder="Select..."
-                                    style={{ width: "100%", fontSize: 12, padding: "3px 6px" }}
-                                  />
-                                </td>
-                                <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe", textAlign: "center", display: "flex", gap: 4 }}>
-                                  <button
-                                    onClick={() => setMatPicker({ field: `customMat_${cm.id}`, label: cm.label || "Material", customMatId: cm.id })}
-                                    title="Browse item list"
-                                    style={{ background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", padding: "3px 7px", fontSize: 13 }}
-                                  >🔍</button>
-                                  <button
-                                    onClick={() => updateBox("customMaterials", (activeBox.customMaterials || []).filter((m) => m.id !== cm.id))}
-                                    style={{ background: "#dc2626", padding: "3px 7px", fontSize: 12 }}
-                                    title="Remove"
-                                  >✕</button>
-                                </td>
-                              </tr>
-                            ))}
-                            <tr>
-                              <td colSpan={3} style={{ padding: "5px 8px" }}>
-                                <button
-                                  onClick={() => updateBox("customMaterials", [...(activeBox.customMaterials || []), { id: Date.now(), label: "", value: "", itemId: null }])}
-                                  style={{ background: "#e0f2fe", color: "#0369a1", border: "1px solid #bae6fd", fontSize: 12, padding: "3px 14px", borderRadius: 6, cursor: "pointer" }}
-                                >+ Add Material</button>
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-
-                        {/* Box Configuration */}
-                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                          <thead>
-                            <tr>
-                              <th style={{ background: "#1e3a5f", color: "#fff", padding: "7px 10px", textAlign: "left", fontWeight: 600, fontSize: 12 }}>Field</th>
-                              <th style={{ background: "#1e3a5f", color: "#fff", padding: "7px 10px", textAlign: "left", fontWeight: 600, fontSize: 12 }}>Value</th>
-                              <th style={{ background: "#1e3a5f", color: "#fff", padding: "7px 8px", textAlign: "left", fontWeight: 600, fontSize: 12 }}>Ref</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(() => {
-                              const allRefs = { ...DEFAULT_REFS, ...(activeBox.refs || {}) };
-                              const refValues = [
-                                ...Object.values(allRefs),
-                                ...(activeBox.customFields || []).map((f) => f.ref),
-                              ].filter(Boolean);
-                              const dupSet = new Set(refValues.filter((v, _, a) => a.filter(x => x === v).length > 1));
-                              return [
-                                ["Short Name",           "shortName",  "text",   null],
-                                ["Doors Horizontal",     "doorsH",     "number", "doorsH"],
-                                ["Doors Vertical",       "doorsV",     "number", "doorsV"],
-                                ["Back Ply Parts",       "backParts",  "number", "backParts"],
-                                ["Vertical Panels (VP)", "partitions", "number", "partitions"],
-                                ["Shelf Planks Qty",     "shelves",    "number", "shelves"],
-                              ].map(([label, field, type, refKey], i) => {
-                                const refName = refKey ? (allRefs[refKey] ?? DEFAULT_REFS[refKey]) : null;
-                                const isDup = refName != null && dupSet.has(refName);
-                                return (
-                                <tr key={field} style={{ background: i % 2 === 0 ? "#f5f3ff" : "#fff" }}>
-                                  <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
-                                    <input
-                                      type="text"
-                                      value={activeBox.fieldLabels?.[field] ?? label}
-                                      onChange={(e) => updateBox("fieldLabels", { ...(activeBox.fieldLabels || {}), [field]: e.target.value })}
-                                      style={{ width: "100%", fontSize: 12, padding: "3px 6px", fontWeight: 600, color: "#374151", background: "#fff" }}
-                                    />
-                                  </td>
-                                  <td style={{ padding: "4px 10px", borderBottom: "1px solid #ede9fe" }}>
+                              </thead>
+                              <tbody>
+                                {parts.length === 0 ? (
+                                  <tr>
+                                    <td colSpan={16} style={{ textAlign: "center", padding: "16px", color: "#9ca3af", fontStyle: "italic" }}>
+                                      No parts defined. Click "+ Add Part" to start building the cut list.
+                                    </td>
+                                  </tr>
+                                ) : parts.map((p, i) => {
+                                  const autoLabel = `${labelPrefix} ${p.partName}`.trim();
+                                  const inp = (field, type = "text", width = "100%", min) => (
                                     <input
                                       type={type}
-                                      value={activeBox[field] ?? ""}
-                                      onChange={(e) => updateBox(field, type === "number" ? Number(e.target.value) : e.target.value)}
-                                      style={{ width: "100%", fontSize: 13, padding: "3px 8px" }}
-                                      placeholder={type === "text" ? "e.g. MBR" : "0"}
-                                      min={type === "number" ? 0 : undefined}
+                                      value={p[field] ?? ""}
+                                      onChange={(e) => updatePart(p.id, field, type === "number" ? Number(e.target.value) : e.target.value, subSheetId)}
+                                      style={{ width, fontSize: 12, padding: "2px 5px", minWidth: type === "number" ? 44 : 60 }}
+                                      min={min}
                                     />
-                                  </td>
-                                  <td style={{ padding: "4px 8px", borderBottom: "1px solid #ede9fe", whiteSpace: "nowrap" }}>
-                                    {refName != null && (
-                                      <span style={{ display: "inline-flex", alignItems: "center", gap: 1 }}>
-                                        <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`{`}</span>
+                                  );
+                                  const formulaInp = (field) => {
+                                    const raw = String(p[field] ?? "");
+                                    const isFormula = raw.includes("{");
+                                    const resolved = isFormula ? resolveFormula(raw, vars) : null;
+                                    const usedVars = isFormula
+                                      ? [...new Set([...raw.matchAll(/\{(\w+)\}/g)].map((m) => m[1]))]
+                                      : [];
+                                    const VAR_TO_FIELD = Object.fromEntries(
+                                      Object.entries(refsMap).filter(([, varName]) => varName).map(([field, varName]) => [varName, field])
+                                    );
+                                    return (
+                                      <div style={{ minWidth: 64 }}>
                                         <input
                                           type="text"
-                                          value={refName}
-                                          onChange={(e) => updateBox("refs", { ...(activeBox.refs || DEFAULT_REFS), [refKey]: e.target.value })}
-                                          title={isDup ? `"${refName}" is used by multiple fields — each ref must be unique` : ""}
-                                          style={{ width: 72, fontSize: 10, padding: "1px 4px", fontFamily: "monospace", color: isDup ? "#dc2626" : "#7c3aed", background: isDup ? "#fee2e2" : "#ede9fe", border: `1px solid ${isDup ? "#fca5a5" : "#ddd6fe"}`, borderRadius: 4, textAlign: "center" }}
+                                          value={raw}
+                                          onChange={(e) => updatePart(p.id, field, e.target.value, subSheetId)}
+                                          placeholder="mm or {H}"
+                                          style={{
+                                            width: "100%", fontSize: 12, padding: "2px 5px",
+                                            fontFamily: isFormula ? "monospace" : "inherit",
+                                            borderColor: isFormula ? "#7c3aed" : undefined,
+                                            color: isFormula ? "#4c1d95" : undefined,
+                                          }}
                                         />
-                                        <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`}`}</span>
-                                      </span>
-                                    )}
-                                  </td>
-                                </tr>
-                                );
-                              });
-                            })()}
-                            {(activeBox.customFields || []).map((cf) => {
-                              const allRefs2 = { ...DEFAULT_REFS, ...(activeBox.refs || {}) };
-                              const rv2 = [...Object.values(allRefs2), ...(activeBox.customFields || []).map((f) => f.ref)].filter(Boolean);
-                              const dup2 = new Set(rv2.filter((v, _, a) => a.filter(x => x === v).length > 1));
-                              const isDup = cf.ref && dup2.has(cf.ref);
-                              return (
-                                <tr key={cf.id} style={{ background: "#fffbeb" }}>
-                                  <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
-                                    <input
-                                      type="text"
-                                      value={cf.label || ""}
-                                      onChange={(e) => updateBox("customFields", (activeBox.customFields || []).map((f) => f.id === cf.id ? { ...f, label: e.target.value } : f))}
-                                      placeholder="Field label..."
-                                      style={{ width: "100%", fontSize: 12, padding: "3px 6px" }}
-                                    />
-                                  </td>
-                                  <td style={{ padding: "4px 10px", borderBottom: "1px solid #ede9fe" }}>
+                                        {isFormula && (
+                                          <div style={{ marginTop: 2, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+                                            <span style={{ fontSize: 10, color: resolved === "?" ? "#dc2626" : "#059669", fontWeight: 600 }}>= {resolved}</span>
+                                            {usedVars.map((v) => {
+                                              const fld = VAR_TO_FIELD[v];
+                                              if (!fld) return null;
+                                              return (
+                                                <span key={v} style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+                                                  <span style={{ fontSize: 10, color: "#7c3aed", fontFamily: "monospace" }}>{`{${v}}`}=</span>
+                                                  <input
+                                                    type="number"
+                                                    value={sheet[fld] ?? ""}
+                                                    onChange={(e) => updateSheetField(subSheetId, fld, e.target.value)}
+                                                    style={{ width: 46, fontSize: 10, padding: "1px 3px" }}
+                                                  />
+                                                </span>
+                                              );
+                                            })}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  };
+                                  const isReq = p.req !== false;
+                                  const rowBg = isReq
+                                    ? (PART_GROUP_COLORS[p.group] ?? (i % 2 === 0 ? "#f5f3ff" : "#fff"))
+                                    : "#f3f4f6";
+                                  const edgeKey = `${subSheetId ?? "main"}_${p.id}`;
+                                  const edgeOpen = expandedEdgeId === edgeKey;
+                                  return (
+                                    <tr key={p.id} style={{ background: rowBg, verticalAlign: "top", opacity: isReq ? 1 : 0.45 }}>
+                                      <td style={{ ...numCell, color: "#6b7280", fontWeight: 600, paddingTop: 6 }}>{i + 1}</td>
+                                      <td style={txtCell}>
+                                        <select
+                                          value={p.group || "Ply"}
+                                          onChange={(e) => updatePart(p.id, "group", e.target.value, subSheetId)}
+                                          style={{ fontSize: 11, padding: "2px 3px", width: "100%", minWidth: 90, background: PART_GROUP_COLORS[p.group] || "#fff" }}
+                                        >
+                                          {PART_GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
+                                        </select>
+                                      </td>
+                                      <td style={{ ...txtCell, textDecoration: isReq ? "none" : "line-through" }}>{inp("partName")}</td>
+                                      <td style={{ ...numCell, textAlign: "center" }}>
+                                        <input
+                                          type="checkbox"
+                                          checked={isReq}
+                                          onChange={(e) => updatePart(p.id, "req", e.target.checked, subSheetId)}
+                                          style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#7c3aed" }}
+                                          title={isReq ? "Included in calculation" : "Excluded from calculation"}
+                                        />
+                                      </td>
+                                      <td style={{ ...numCell, textAlign: "center" }}>
+                                        <input
+                                          type="checkbox"
+                                          checked={p.edgeReq !== false}
+                                          onChange={(e) => updatePart(p.id, "edgeReq", e.target.checked, subSheetId)}
+                                          style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#059669" }}
+                                          title={p.edgeReq !== false ? "Edge beading applied" : "No edge beading"}
+                                        />
+                                      </td>
+                                      <td style={txtCell}>
+                                        <select
+                                          value={resolveMat(p.sideA, p.sideAId) || ""}
+                                          onChange={(e) => { const name = e.target.value; const pi = (prices || []).find((pr) => pr.materialName === name); updatePartFields(p.id, { sideA: name, sideAId: pi?.id ?? null }, subSheetId); }}
+                                          style={{ fontSize: 11, padding: "2px 3px", width: "100%", minWidth: 110, background: (p.sideA || p.sideAId) ? "#fef3c7" : "#fff" }}
+                                        >
+                                          <option value="">— None —</option>
+                                          {laminateOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+                                        </select>
+                                      </td>
+                                      <td style={txtCell}>
+                                        <select
+                                          value={resolveMat(p.sideB, p.sideBId) || ""}
+                                          onChange={(e) => { const name = e.target.value; const pi = (prices || []).find((pr) => pr.materialName === name); updatePartFields(p.id, { sideB: name, sideBId: pi?.id ?? null }, subSheetId); }}
+                                          style={{ fontSize: 11, padding: "2px 3px", width: "100%", minWidth: 110, background: (p.sideB || p.sideBId) ? "#dcfce7" : "#fff" }}
+                                        >
+                                          <option value="">— None —</option>
+                                          {laminateOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+                                        </select>
+                                      </td>
+                                      <td style={{ ...numCell, padding: "3px 4px" }}>{formulaInp("widthMm")}</td>
+                                      <td style={{ ...numCell, padding: "3px 4px" }}>{formulaInp("heightMm")}</td>
+                                      <td style={{ ...numCell, padding: "3px 4px" }}>{formulaInp("qty")}</td>
+                                      <td style={txtCell}>
+                                        <select
+                                          value={resolveMat(p.material, p.materialId) || ""}
+                                          onChange={(e) => { const name = e.target.value; const pi = (prices || []).find((pr) => pr.materialName === name); updatePartFields(p.id, { material: name, materialId: pi?.id ?? null }, subSheetId); }}
+                                          style={{ fontSize: 12, padding: "2px 4px", width: "100%" }}
+                                        >
+                                          <option value="">— Select —</option>
+                                          {[...new Set(matOptions)].filter(Boolean).map((m) => (
+                                            <option key={m} value={m}>{m}</option>
+                                          ))}
+                                        </select>
+                                      </td>
+                                      <td style={numCell}>{inp("rotation", "number", 44, 1)}</td>
+                                      <td style={txtCell}>
+                                        <input
+                                          type="text"
+                                          readOnly
+                                          value={autoLabel}
+                                          style={{ fontSize: 12, padding: "2px 5px", width: "100%", minWidth: 80, background: "#f3f4f6", color: "#374151", cursor: "default" }}
+                                        />
+                                      </td>
+                                      <td style={{ ...numCell, textAlign: "center", minWidth: 70, opacity: p.edgeReq !== false ? 1 : 0.35 }}>
+                                        {edgeOpen && p.edgeReq !== false ? (
+                                          <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "stretch", minWidth: 130 }}>
+                                            {[["T", "edgeTop", "edgeTopReq"], ["B", "edgeBottom", "edgeBottomReq"], ["L", "edgeLeft", "edgeLeftReq"], ["R", "edgeRight", "edgeRightReq"]].map(([lbl, fld, reqFld]) => {
+                                              const isEdgeReq = p[reqFld] !== false;
+                                              return (
+                                                <div key={fld} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={isEdgeReq}
+                                                    onChange={(e) => updatePart(p.id, reqFld, e.target.checked, subSheetId)}
+                                                    style={{ width: 13, height: 13, cursor: "pointer", accentColor: "#7c3aed", flexShrink: 0 }}
+                                                    title={isEdgeReq ? `${lbl} edge required` : `${lbl} edge not required`}
+                                                  />
+                                                  <span style={{ fontSize: 10, fontWeight: 700, color: isEdgeReq ? "#374151" : "#9ca3af", width: 10 }}>{lbl}</span>
+                                                  <input
+                                                    type="number"
+                                                    value={p[fld] ?? 0}
+                                                    onChange={(e) => updatePart(p.id, fld, Number(e.target.value), subSheetId)}
+                                                    disabled={!isEdgeReq}
+                                                    style={{ width: 42, fontSize: 11, padding: "1px 3px", opacity: isEdgeReq ? 1 : 0.35 }}
+                                                    min={0}
+                                                  />
+                                                </div>
+                                              );
+                                            })}
+                                            <button onClick={() => setExpandedEdgeId(null)} style={{ fontSize: 10, padding: "1px 4px", background: "#e5e7eb", border: "1px solid #d1d5db", borderRadius: 4, cursor: "pointer", marginTop: 2 }}>Done</button>
+                                          </div>
+                                        ) : (
+                                          <button
+                                            onClick={() => setExpandedEdgeId(edgeOpen ? null : edgeKey)}
+                                            title="Edit edge beading"
+                                            style={{ fontSize: 10, padding: "2px 6px", background: "#ede9fe", color: "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
+                                          >
+                                            {[["T", "edgeTopReq"], ["B", "edgeBottomReq"], ["L", "edgeLeftReq"], ["R", "edgeRightReq"]].map(([lbl, rf]) => (
+                                              <span key={lbl} style={{ color: p[rf] !== false ? "#7c3aed" : "#d1d5db", marginRight: 1 }}>{lbl}</span>
+                                            ))}
+                                          </button>
+                                        )}
+                                      </td>
+                                      <td style={txtCell}>
+                                        <input
+                                          type="text"
+                                          value={p.remarks || ""}
+                                          onChange={(e) => updatePart(p.id, "remarks", e.target.value, subSheetId)}
+                                          placeholder="Notes..."
+                                          style={{ fontSize: 12, padding: "2px 5px", width: "100%", minWidth: 100 }}
+                                        />
+                                      </td>
+                                      <td style={{ ...numCell, textAlign: "center" }}>
+                                        <button
+                                          onClick={() => deletePart(p.id, subSheetId)}
+                                          style={{ background: "#dc2626", padding: "2px 7px", fontSize: 11 }}
+                                          title="Delete part"
+                                        >✕</button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+
+                      // Renders one full sheet ("1." or "1.1", "1.2", ...): its own Box
+                      // Type/Door Type row, H/W/D + Area, the Materials/Box Configuration
+                      // grid, and the parts table above — a full peer of the box's own
+                      // Sheet Calculation.
+                      const renderSheetBlock = ({ subSheetId, sheet, numbering }) => {
+                        const vars = BOX_VARS(sheet);
+                        const sheetParts = sheet.parts || [];
+                        const refsMap = { ...DEFAULT_REFS, ...(sheet.refs || {}) };
+                        const priceLaminates = (prices || [])
+                          .filter((pr) => (pr.group || "").toLowerCase() === "laminate" && pr.materialName)
+                          .map((pr) => pr.materialName);
+                        const sheetLaminates = [sheet.matInsideLaminate, sheet.matOutsideLaminate].filter(Boolean);
+                        const existingSides = [...new Set(sheetParts.flatMap((pt) => [resolveMat(pt.sideA, pt.sideAId), resolveMat(pt.sideB, pt.sideBId)]).filter(Boolean))];
+                        const laminateOptions = [...new Set([...(priceLaminates.length > 0 ? priceLaminates : sheetLaminates), ...existingSides])];
+                        const matOptions = [
+                          ...MATERIAL_FIELDS.map(([lbl, fld]) => {
+                            const idf = `${fld}Id`;
+                            const iid = sheet[idf];
+                            const res = iid != null
+                              ? (prices || []).find((pr) => pr.id === iid)?.materialName ?? sheet[fld]
+                              : sheet[fld];
+                            return res || lbl;
+                          }),
+                          ...(sheet.customMaterials || []).map((cm) => cm.value || cm.label).filter(Boolean),
+                          ...[...new Set(sheetParts.map((pt) => resolveMat(pt.material, pt.materialId)).filter(Boolean))],
+                        ];
+                        const labelPrefix = sheet.shortName || sheet.name || (subSheetId == null ? (activeBox.boxName || activeBox.name || "") : "");
+                        const refValues = [...Object.values(refsMap), ...(sheet.customFields || []).map((f) => f.ref)].filter(Boolean);
+                        const dupSet = new Set(refValues.filter((v, _, a) => a.filter(x => x === v).length > 1));
+
+                        return (
+                          <div key={subSheetId ?? "main"} style={{ border: "1px solid #ede9fe", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "12px 12px 4px", background: "#fff" }}>
+                            {subSheetId != null && (
+                              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+                                <label style={{ fontSize: 12, fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>Name</label>
+                                <input
+                                  type="text"
+                                  value={sheet.name || ""}
+                                  onChange={(e) => updateSheetField(subSheetId, "name", e.target.value)}
+                                  placeholder="Name (e.g. Draw)"
+                                  style={{ fontWeight: 700, fontSize: 13, color: "#4c1d95", border: "1px solid #ddd6fe", borderRadius: 6, padding: "4px 10px", background: "#faf5ff", width: 180 }}
+                                />
+                              </div>
+                            )}
+
+                            {/* Box Type / Door Type */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <label style={{ fontSize: 12, fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>Box Type</label>
+                                <select value={sheet.boxType || ""} onChange={(e) => updateSheetField(subSheetId, "boxType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 120 }}>
+                                  <option value="">— Select —</option>
+                                  {(prices || []).filter((p) => p.group === "Carpenter").map((p) => (
+                                    <option key={p.id} value={p.materialName}>{p.materialName}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <label style={{ fontSize: 12, fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>Door Type</label>
+                                <select value={sheet.doorType || ""} onChange={(e) => updateSheetField(subSheetId, "doorType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 140 }}>
+                                  <option value="">— Select —</option>
+                                  {DOOR_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                                </select>
+                              </div>
+                              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }} title="Uncheck to stop this sheet's parts from being counted in Hardware & Consumables, Material Summary, and the Cut Sheet Optimizer.">
+                                <input
+                                  type="checkbox"
+                                  checked={sheet.includeInMaterialCalc !== false}
+                                  onChange={(e) => updateSheetField(subSheetId, "includeInMaterialCalc", e.target.checked)}
+                                  style={{ width: 14, height: 14, cursor: "pointer" }}
+                                />
+                                Include in Material Calculation
+                              </label>
+                            </div>
+
+                            {/* Dimensions */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+                              {[["H", "heightMm"], ["W", "widthMm"], ["D", "depthMm"]].map(([lbl, key]) => {
+                                const mmVal = sheet[key] ?? "";
+                                const ftVal = mmVal !== "" ? roundTo2(mmToFeet(Number(mmVal))) : "";
+                                const refName = refsMap[key] ?? DEFAULT_REFS[key];
+                                const isDup = dupSet.has(refName);
+                                return (
+                                  <div key={key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                    <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>{lbl}</span>
                                     <input
                                       type="number"
-                                      value={cf.value ?? ""}
-                                      onChange={(e) => updateBox("customFields", (activeBox.customFields || []).map((f) => f.id === cf.id ? { ...f, value: Number(e.target.value) } : f))}
-                                      placeholder="0"
-                                      style={{ width: "100%", fontSize: 13, padding: "3px 8px" }}
+                                      value={dimUnit === "mm" ? mmVal : ftVal}
+                                      onChange={(e) => {
+                                        if (dimUnit === "mm") {
+                                          updateSheetField(subSheetId, key, e.target.value);
+                                        } else {
+                                          const ft = Number(e.target.value);
+                                          if (!isNaN(ft)) updateSheetField(subSheetId, key, String(Math.round(feetToMm(ft))));
+                                        }
+                                      }}
+                                      placeholder={dimUnit}
+                                      style={{ width: 72, fontSize: 12, padding: "3px 6px" }}
                                     />
-                                  </td>
-                                  <td style={{ padding: "4px 8px", borderBottom: "1px solid #ede9fe", whiteSpace: "nowrap" }}>
-                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                                      <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`{`}</span>
-                                      <input
-                                        type="text"
-                                        value={cf.ref || ""}
-                                        onChange={(e) => updateBox("customFields", (activeBox.customFields || []).map((f) => f.id === cf.id ? { ...f, ref: e.target.value } : f))}
-                                        title={isDup ? `"${cf.ref}" is used by multiple fields — each ref must be unique` : ""}
-                                        style={{ width: 62, fontSize: 10, padding: "1px 4px", fontFamily: "monospace", color: isDup ? "#dc2626" : "#7c3aed", background: isDup ? "#fee2e2" : "#ede9fe", border: `1px solid ${isDup ? "#fca5a5" : "#ddd6fe"}`, borderRadius: 4, textAlign: "center" }}
-                                      />
-                                      <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`}`}</span>
-                                      <button
-                                        onClick={() => updateBox("customFields", (activeBox.customFields || []).filter((f) => f.id !== cf.id))}
-                                        style={{ background: "#dc2626", padding: "1px 6px", fontSize: 11, marginLeft: 4 }}
-                                        title="Remove field"
-                                      >✕</button>
+                                    <span style={{ fontSize: 11, color: "#9ca3af" }}>
+                                      {dimUnit === "mm" ? (ftVal ? ftVal + " ft" : "") : (mmVal ? mmVal + " mm" : "")}
                                     </span>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                            <tr>
-                              <td colSpan={3} style={{ padding: "5px 8px" }}>
-                                <button
-                                  onClick={() => updateBox("customFields", [...(activeBox.customFields || []), { id: Date.now(), label: "", value: 0, ref: "" }])}
-                                  style={{ background: "#e0f2fe", color: "#0369a1", border: "1px solid #bae6fd", fontSize: 12, padding: "3px 14px", borderRadius: 6, cursor: "pointer" }}
-                                >+ Add Field</button>
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ══ SECTION 2: SHEET CALCULATION AND CUT LIST ══ */}
-                  <SectionHeader
-                    title="2. Sheet Calculation and Cut List"
-                    open={openSections.sheets}
-                    onToggle={() => toggleSection("sheets")}
-                  />
-                  {openSections.sheets && (
-                    <div style={{ border: "1px solid #ede9fe", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "10px 10px 6px", background: "#fff" }}>
-                      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginBottom: 8, gap: 8 }}>
-                        <button
-                          onClick={() => setCutSheetOpen(true)}
-                          style={{ background: "#0369a1", padding: "4px 14px", fontSize: 12 }}
-                        >📋 Cut Sheet</button>
-                        <button
-                          onClick={addPart}
-                          style={{ background: "#2563eb", padding: "4px 14px", fontSize: 12 }}
-                        >+ Add Part</button>
-                      </div>
-                      <div style={{ overflow: "auto", maxHeight: "65vh" }}>
-                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 900 }}>
-                          <thead>
-                            <tr>
-                              {["#", "Group", "Ply Name", "Req", "EB", "Side A", "Side B", "W (mm)", "H (mm)", "Qty", "Material", "Rotation", "Label", "Edge", "Remarks", ""].map((h) => (
-                                <th key={h} style={{ position: "sticky", top: 0, zIndex: 2, background: "#1e3a5f", color: "#fff", padding: "6px 8px", textAlign: h === "#" || h === "Req" || h === "EB" || h === "Qty" || h === "Rotation" || h === "Edge" ? "center" : "left", fontWeight: 600, whiteSpace: "nowrap" }} title={h === "EB" ? "Edge Beading required for this part" : undefined}>{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {activeParts.length === 0 ? (
-                              <tr>
-                                <td colSpan={16} style={{ textAlign: "center", padding: "16px", color: "#9ca3af", fontStyle: "italic" }}>
-                                  No parts defined. Click "+ Add Part" to start building the cut list.
-                                </td>
-                              </tr>
-                            ) : activeParts.map((p, i) => {
-                              const autoLabel = `${activeBox.shortName || ""} ${p.partName}`.trim();
-                              const priceNames = new Set((prices || []).map((pr) => pr.materialName));
-                              const resolveMat = (name, id) => {
-                                if (id != null) return (prices || []).find((pr) => pr.id === id)?.materialName ?? name;
-                                return priceNames.has(name) ? name : "";
-                              };
-                              const matOptions = [
-                                ...MATERIAL_FIELDS.map(([lbl, fld]) => {
-                                  const idf = `${fld}Id`;
-                                  const iid = activeBox[idf];
-                                  const res = iid != null
-                                    ? (prices || []).find((pr) => pr.id === iid)?.materialName ?? activeBox[fld]
-                                    : activeBox[fld];
-                                  return res || lbl;
-                                }),
-                                ...(activeBox.customMaterials || []).map((cm) => cm.value || cm.label).filter(Boolean),
-                                ...[...new Set(activeParts.map((pt) => resolveMat(pt.material, pt.materialId)).filter(Boolean))],
-                              ];
-                              const priceLaminates = (prices || [])
-                                .filter((pr) => (pr.group || "").toLowerCase() === "laminate" && pr.materialName)
-                                .map((pr) => pr.materialName);
-                              const boxLaminates = [activeBox.matInsideLaminate, activeBox.matOutsideLaminate].filter(Boolean);
-                              const existingSides = [...new Set(activeParts.flatMap((pt) => [resolveMat(pt.sideA, pt.sideAId), resolveMat(pt.sideB, pt.sideBId)]).filter(Boolean))];
-                              const laminateOptions = [...new Set([...(priceLaminates.length > 0 ? priceLaminates : boxLaminates), ...existingSides])];
-                              const numCell = { padding: "3px 4px", borderBottom: "1px solid #ede9fe", textAlign: "center" };
-                              const txtCell = { padding: "3px 4px", borderBottom: "1px solid #ede9fe" };
-                              const inp = (field, type = "text", width = "100%", min) => (
-                                <input
-                                  type={type}
-                                  value={p[field] ?? ""}
-                                  onChange={(e) => updatePart(p.id, field, type === "number" ? Number(e.target.value) : e.target.value)}
-                                  style={{ width, fontSize: 12, padding: "2px 5px", minWidth: type === "number" ? 44 : 60 }}
-                                  min={min}
-                                />
-                              );
-                              const vars = BOX_VARS(activeBox);
-                              const formulaInp = (field) => {
-                                const raw = String(p[field] ?? "");
-                                const isFormula = raw.includes("{");
-                                const resolved = isFormula ? resolveFormula(raw, vars) : null;
-                                const usedVars = isFormula
-                                  ? [...new Set([...raw.matchAll(/\{(\w+)\}/g)].map((m) => m[1]))]
-                                  : [];
-                                const VAR_TO_FIELD = Object.fromEntries(
-                                  Object.entries({ ...DEFAULT_REFS, ...(activeBox.refs || {}) })
-                                    .filter(([, varName]) => varName)
-                                    .map(([field, varName]) => [varName, field])
-                                );
-                                return (
-                                  <div style={{ minWidth: 64 }}>
+                                    <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`{`}</span>
                                     <input
                                       type="text"
-                                      value={raw}
-                                      onChange={(e) => updatePart(p.id, field, e.target.value)}
-                                      placeholder="mm or {H}"
-                                      style={{
-                                        width: "100%", fontSize: 12, padding: "2px 5px",
-                                        fontFamily: isFormula ? "monospace" : "inherit",
-                                        borderColor: isFormula ? "#7c3aed" : undefined,
-                                        color: isFormula ? "#4c1d95" : undefined,
-                                      }}
+                                      value={refName}
+                                      onChange={(e) => updateSheetField(subSheetId, "refs", { ...(sheet.refs || DEFAULT_REFS), [key]: e.target.value })}
+                                      title={isDup ? `"${refName}" is used by multiple fields — each ref must be unique` : ""}
+                                      style={{ width: 40, fontSize: 10, padding: "1px 4px", fontFamily: "monospace", color: isDup ? "#dc2626" : "#7c3aed", background: isDup ? "#fee2e2" : "#ede9fe", border: `1px solid ${isDup ? "#fca5a5" : "#ddd6fe"}`, borderRadius: 4, textAlign: "center" }}
                                     />
-                                    {isFormula && (
-                                      <div style={{ marginTop: 2, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
-                                        <span style={{ fontSize: 10, color: resolved === "?" ? "#dc2626" : "#059669", fontWeight: 600 }}>= {resolved}</span>
-                                        {usedVars.map((v) => {
-                                          const boxField = VAR_TO_FIELD[v];
-                                          if (!boxField) return null;
-                                          return (
-                                            <span key={v} style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                                              <span style={{ fontSize: 10, color: "#7c3aed", fontFamily: "monospace" }}>{`{${v}}`}=</span>
-                                              <input
-                                                type="number"
-                                                value={activeBox[boxField] ?? ""}
-                                                onChange={(e) => updateBox(boxField, e.target.value)}
-                                                style={{ width: 46, fontSize: 10, padding: "1px 3px" }}
-                                              />
-                                            </span>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
+                                    <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`}`}</span>
                                   </div>
                                 );
-                              };
-                              const isReq = p.req !== false;
-                              const rowBg = isReq
-                                ? (PART_GROUP_COLORS[p.group] ?? (i % 2 === 0 ? "#f5f3ff" : "#fff"))
-                                : "#f3f4f6";
-                              const edgeOpen = expandedEdgeId === p.id;
-                              return (
-                                <tr key={p.id} style={{ background: rowBg, verticalAlign: "top", opacity: isReq ? 1 : 0.45 }}>
-                                  <td style={{ ...numCell, color: "#6b7280", fontWeight: 600, paddingTop: 6 }}>{i + 1}</td>
-                                  <td style={txtCell}>
-                                    <select
-                                      value={p.group || "Ply"}
-                                      onChange={(e) => updatePart(p.id, "group", e.target.value)}
-                                      style={{ fontSize: 11, padding: "2px 3px", width: "100%", minWidth: 90, background: PART_GROUP_COLORS[p.group] || "#fff" }}
-                                    >
-                                      {PART_GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
-                                    </select>
-                                  </td>
-                                  <td style={{ ...txtCell, textDecoration: isReq ? "none" : "line-through" }}>{inp("partName")}</td>
-                                  <td style={{ ...numCell, textAlign: "center" }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={isReq}
-                                      onChange={(e) => updatePart(p.id, "req", e.target.checked)}
-                                      style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#7c3aed" }}
-                                      title={isReq ? "Included in calculation" : "Excluded from calculation"}
-                                    />
-                                  </td>
-                                  <td style={{ ...numCell, textAlign: "center" }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={p.edgeReq !== false}
-                                      onChange={(e) => updatePart(p.id, "edgeReq", e.target.checked)}
-                                      style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#059669" }}
-                                      title={p.edgeReq !== false ? "Edge beading applied" : "No edge beading"}
-                                    />
-                                  </td>
-                                  <td style={txtCell}>
-                                    <select
-                                      value={resolveMat(p.sideA, p.sideAId) || ""}
-                                      onChange={(e) => { const name = e.target.value; const pi = (prices || []).find((pr) => pr.materialName === name); updatePartFields(p.id, { sideA: name, sideAId: pi?.id ?? null }); }}
-                                      style={{ fontSize: 11, padding: "2px 3px", width: "100%", minWidth: 110, background: (p.sideA || p.sideAId) ? "#fef3c7" : "#fff" }}
-                                    >
-                                      <option value="">— None —</option>
-                                      {laminateOptions.map((o) => <option key={o} value={o}>{o}</option>)}
-                                    </select>
-                                  </td>
-                                  <td style={txtCell}>
-                                    <select
-                                      value={resolveMat(p.sideB, p.sideBId) || ""}
-                                      onChange={(e) => { const name = e.target.value; const pi = (prices || []).find((pr) => pr.materialName === name); updatePartFields(p.id, { sideB: name, sideBId: pi?.id ?? null }); }}
-                                      style={{ fontSize: 11, padding: "2px 3px", width: "100%", minWidth: 110, background: (p.sideB || p.sideBId) ? "#dcfce7" : "#fff" }}
-                                    >
-                                      <option value="">— None —</option>
-                                      {laminateOptions.map((o) => <option key={o} value={o}>{o}</option>)}
-                                    </select>
-                                  </td>
-                                  <td style={{ ...numCell, padding: "3px 4px" }}>{formulaInp("widthMm")}</td>
-                                  <td style={{ ...numCell, padding: "3px 4px" }}>{formulaInp("heightMm")}</td>
-                                  <td style={{ ...numCell, padding: "3px 4px" }}>{formulaInp("qty")}</td>
-                                  <td style={txtCell}>
-                                    <select
-                                      value={resolveMat(p.material, p.materialId) || ""}
-                                      onChange={(e) => { const name = e.target.value; const pi = (prices || []).find((pr) => pr.materialName === name); updatePartFields(p.id, { material: name, materialId: pi?.id ?? null }); }}
-                                      style={{ fontSize: 12, padding: "2px 4px", width: "100%" }}
-                                    >
-                                      <option value="">— Select —</option>
-                                      {[...new Set(matOptions)].filter(Boolean).map((m) => (
-                                        <option key={m} value={m}>{m}</option>
-                                      ))}
-                                    </select>
-                                  </td>
-                                  <td style={numCell}>{inp("rotation", "number", 44, 1)}</td>
-                                  <td style={txtCell}>
-                                    <input
-                                      type="text"
-                                      readOnly
-                                      value={autoLabel}
-                                      style={{ fontSize: 12, padding: "2px 5px", width: "100%", minWidth: 80, background: "#f3f4f6", color: "#374151", cursor: "default" }}
-                                    />
-                                  </td>
-                                  <td style={{ ...numCell, textAlign: "center", minWidth: 70, opacity: p.edgeReq !== false ? 1 : 0.35 }}>
-                                    {edgeOpen && p.edgeReq !== false ? (
-                                      <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "stretch", minWidth: 130 }}>
-                                        {[["T", "edgeTop", "edgeTopReq"], ["B", "edgeBottom", "edgeBottomReq"], ["L", "edgeLeft", "edgeLeftReq"], ["R", "edgeRight", "edgeRightReq"]].map(([lbl, fld, reqFld]) => {
-                                          const isEdgeReq = p[reqFld] !== false;
-                                          return (
-                                            <div key={fld} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                                              <input
-                                                type="checkbox"
-                                                checked={isEdgeReq}
-                                                onChange={(e) => updatePart(p.id, reqFld, e.target.checked)}
-                                                style={{ width: 13, height: 13, cursor: "pointer", accentColor: "#7c3aed", flexShrink: 0 }}
-                                                title={isEdgeReq ? `${lbl} edge required` : `${lbl} edge not required`}
-                                              />
-                                              <span style={{ fontSize: 10, fontWeight: 700, color: isEdgeReq ? "#374151" : "#9ca3af", width: 10 }}>{lbl}</span>
-                                              <input
-                                                type="number"
-                                                value={p[fld] ?? 0}
-                                                onChange={(e) => updatePart(p.id, fld, Number(e.target.value))}
-                                                disabled={!isEdgeReq}
-                                                style={{ width: 42, fontSize: 11, padding: "1px 3px", opacity: isEdgeReq ? 1 : 0.35 }}
-                                                min={0}
-                                              />
-                                            </div>
-                                          );
-                                        })}
-                                        <button onClick={() => setExpandedEdgeId(null)} style={{ fontSize: 10, padding: "1px 4px", background: "#e5e7eb", border: "1px solid #d1d5db", borderRadius: 4, cursor: "pointer", marginTop: 2 }}>Done</button>
-                                      </div>
-                                    ) : (
+                              })}
+                              <button
+                                onClick={() => setDimUnit(dimUnit === "mm" ? "ft" : "mm")}
+                                style={{ fontSize: 11, padding: "3px 10px", background: "#ede9fe", color: "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 6 }}
+                              >
+                                {dimUnit === "mm" ? "→ ft" : "→ mm"}
+                              </button>
+                              <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>Area Sft</span>
+                                <input
+                                  type="text"
+                                  readOnly
+                                  value={vars.Sft || ""}
+                                  placeholder="—"
+                                  title="Auto-calculated: H × W in sq ft"
+                                  style={{ width: 72, fontSize: 12, padding: "3px 6px", background: "#f3f4f6", color: "#374151", fontWeight: 600, cursor: "default" }}
+                                />
+                                <span style={{ fontSize: 11, color: "#9ca3af" }}>sq ft</span>
+                                <span style={{ fontSize: 10, color: "#7c3aed", fontFamily: "monospace" }} title="Reference this in any formula">{`{Sft}`}</span>
+                              </div>
+                            </div>
+
+                            {/* Materials + Box Configuration side by side */}
+                            <div style={{ marginTop: 8, borderTop: "1px solid #ede9fe", paddingTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
+
+                              {/* Materials */}
+                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                                <thead>
+                                  <tr>
+                                    <th style={{ background: "#1e3a5f", color: "#fff", padding: "7px 10px", textAlign: "left", fontWeight: 600, fontSize: 12 }}>Material</th>
+                                    <th style={{ background: "#1e3a5f", color: "#fff", padding: "7px 10px", textAlign: "left", fontWeight: 600, fontSize: 12 }}>Selection</th>
+                                    <th style={{ background: "#1e3a5f", color: "#fff", padding: "7px 6px", width: 32 }}></th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {MATERIAL_FIELDS.map(([label, field], i) => {
+                                    const idField = `${field}Id`;
+                                    const itemId = sheet[idField];
+                                    const resolved = itemId != null
+                                      ? (prices || []).find((p) => p.id === itemId)?.materialName ?? sheet[field]
+                                      : sheet[field];
+                                    const stale = itemId != null && resolved !== sheet[field] && sheet[field];
+                                    return (
+                                      <tr key={field} style={{ background: i % 2 === 0 ? "#f5f3ff" : "#fff" }}>
+                                        <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
+                                          <input
+                                            type="text"
+                                            value={sheet.materialLabels?.[field] ?? label}
+                                            onChange={(e) => updateSheetField(subSheetId, "materialLabels", { ...(sheet.materialLabels || {}), [field]: e.target.value })}
+                                            style={{ width: "100%", fontSize: 12, padding: "3px 6px", fontWeight: 600, color: "#374151", background: "#fff" }}
+                                          />
+                                        </td>
+                                        <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
+                                          <input
+                                            type="text"
+                                            value={resolved || ""}
+                                            onChange={(e) => updateSheetFields(subSheetId, { [field]: e.target.value, [idField]: null })}
+                                            placeholder="Select..."
+                                            style={{ width: "100%", fontSize: 12, padding: "3px 6px", borderColor: stale ? "#f59e0b" : undefined }}
+                                          />
+                                        </td>
+                                        <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
+                                          <button
+                                            onClick={() => setMatPicker({ field, label, subSheetId })}
+                                            title="Browse item list"
+                                            style={{ background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", padding: "3px 7px", fontSize: 13 }}
+                                          >🔍</button>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                  {(sheet.customMaterials || []).map((cm) => (
+                                    <tr key={cm.id} style={{ background: "#fffbeb" }}>
+                                      <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
+                                        <input
+                                          type="text"
+                                          value={cm.label || ""}
+                                          onChange={(e) => updateSheetField(subSheetId, "customMaterials", (sheet.customMaterials || []).map((m) => m.id === cm.id ? { ...m, label: e.target.value } : m))}
+                                          placeholder="Label..."
+                                          style={{ width: "100%", fontSize: 12, padding: "3px 6px" }}
+                                        />
+                                      </td>
+                                      <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
+                                        <input
+                                          type="text"
+                                          value={cm.value || ""}
+                                          onChange={(e) => updateSheetField(subSheetId, "customMaterials", (sheet.customMaterials || []).map((m) => m.id === cm.id ? { ...m, value: e.target.value, itemId: null } : m))}
+                                          placeholder="Select..."
+                                          style={{ width: "100%", fontSize: 12, padding: "3px 6px" }}
+                                        />
+                                      </td>
+                                      <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe", textAlign: "center", display: "flex", gap: 4 }}>
+                                        <button
+                                          onClick={() => setMatPicker({ field: `customMat_${cm.id}`, label: cm.label || "Material", customMatId: cm.id, subSheetId })}
+                                          title="Browse item list"
+                                          style={{ background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", padding: "3px 7px", fontSize: 13 }}
+                                        >🔍</button>
+                                        <button
+                                          onClick={() => updateSheetField(subSheetId, "customMaterials", (sheet.customMaterials || []).filter((m) => m.id !== cm.id))}
+                                          style={{ background: "#dc2626", padding: "3px 7px", fontSize: 12 }}
+                                          title="Remove"
+                                        >✕</button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                  <tr>
+                                    <td colSpan={3} style={{ padding: "5px 8px" }}>
                                       <button
-                                        onClick={() => setExpandedEdgeId(p.id)}
-                                        title="Edit edge beading"
-                                        style={{ fontSize: 10, padding: "2px 6px", background: "#ede9fe", color: "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
-                                      >
-                                        {[["T", "edgeTopReq"], ["B", "edgeBottomReq"], ["L", "edgeLeftReq"], ["R", "edgeRightReq"]].map(([lbl, rf]) => (
-                                          <span key={lbl} style={{ color: p[rf] !== false ? "#7c3aed" : "#d1d5db", marginRight: 1 }}>{lbl}</span>
-                                        ))}
-                                      </button>
-                                    )}
-                                  </td>
-                                  <td style={txtCell}>
-                                    <input
-                                      type="text"
-                                      value={p.remarks || ""}
-                                      onChange={(e) => updatePart(p.id, "remarks", e.target.value)}
-                                      placeholder="Notes..."
-                                      style={{ fontSize: 12, padding: "2px 5px", width: "100%", minWidth: 100 }}
-                                    />
-                                  </td>
-                                  <td style={{ ...numCell, textAlign: "center" }}>
-                                    <button
-                                      onClick={() => deletePart(p.id)}
-                                      style={{ background: "#dc2626", padding: "2px 7px", fontSize: 11 }}
-                                      title="Delete part"
-                                    >✕</button>
-                                  </td>
-                                </tr>
-                              );
+                                        onClick={() => updateSheetField(subSheetId, "customMaterials", [...(sheet.customMaterials || []), { id: Date.now(), label: "", value: "", itemId: null }])}
+                                        style={{ background: "#e0f2fe", color: "#0369a1", border: "1px solid #bae6fd", fontSize: 12, padding: "3px 14px", borderRadius: 6, cursor: "pointer" }}
+                                      >+ Add Material</button>
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
+
+                              {/* Box Configuration */}
+                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                                <thead>
+                                  <tr>
+                                    <th style={{ background: "#1e3a5f", color: "#fff", padding: "7px 10px", textAlign: "left", fontWeight: 600, fontSize: 12 }}>Field</th>
+                                    <th style={{ background: "#1e3a5f", color: "#fff", padding: "7px 10px", textAlign: "left", fontWeight: 600, fontSize: 12 }}>Value</th>
+                                    <th style={{ background: "#1e3a5f", color: "#fff", padding: "7px 8px", textAlign: "left", fontWeight: 600, fontSize: 12 }}>Ref</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {[
+                                    ["Short Name",           "shortName",  "text",   null],
+                                    ["Doors Horizontal",     "doorsH",     "number", "doorsH"],
+                                    ["Doors Vertical",       "doorsV",     "number", "doorsV"],
+                                    ["Back Ply Parts",       "backParts",  "number", "backParts"],
+                                    ["Vertical Panels (VP)", "partitions", "number", "partitions"],
+                                    ["Shelf Planks Qty",     "shelves",    "number", "shelves"],
+                                  ].map(([label, field, type, refKey], i) => {
+                                    const refName = refKey ? (refsMap[refKey] ?? DEFAULT_REFS[refKey]) : null;
+                                    const isDup = refName != null && dupSet.has(refName);
+                                    return (
+                                    <tr key={field} style={{ background: i % 2 === 0 ? "#f5f3ff" : "#fff" }}>
+                                      <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
+                                        <input
+                                          type="text"
+                                          value={sheet.fieldLabels?.[field] ?? label}
+                                          onChange={(e) => updateSheetField(subSheetId, "fieldLabels", { ...(sheet.fieldLabels || {}), [field]: e.target.value })}
+                                          style={{ width: "100%", fontSize: 12, padding: "3px 6px", fontWeight: 600, color: "#374151", background: "#fff" }}
+                                        />
+                                      </td>
+                                      <td style={{ padding: "4px 10px", borderBottom: "1px solid #ede9fe" }}>
+                                        <input
+                                          type={type}
+                                          value={sheet[field] ?? ""}
+                                          onChange={(e) => updateSheetField(subSheetId, field, type === "number" ? Number(e.target.value) : e.target.value)}
+                                          style={{ width: "100%", fontSize: 13, padding: "3px 8px" }}
+                                          placeholder={type === "text" ? "e.g. MBR" : "0"}
+                                          min={type === "number" ? 0 : undefined}
+                                        />
+                                      </td>
+                                      <td style={{ padding: "4px 8px", borderBottom: "1px solid #ede9fe", whiteSpace: "nowrap" }}>
+                                        {refName != null && (
+                                          <span style={{ display: "inline-flex", alignItems: "center", gap: 1 }}>
+                                            <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`{`}</span>
+                                            <input
+                                              type="text"
+                                              value={refName}
+                                              onChange={(e) => updateSheetField(subSheetId, "refs", { ...(sheet.refs || DEFAULT_REFS), [refKey]: e.target.value })}
+                                              title={isDup ? `"${refName}" is used by multiple fields — each ref must be unique` : ""}
+                                              style={{ width: 72, fontSize: 10, padding: "1px 4px", fontFamily: "monospace", color: isDup ? "#dc2626" : "#7c3aed", background: isDup ? "#fee2e2" : "#ede9fe", border: `1px solid ${isDup ? "#fca5a5" : "#ddd6fe"}`, borderRadius: 4, textAlign: "center" }}
+                                            />
+                                            <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`}`}</span>
+                                          </span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                    );
+                                  })}
+                                  {(sheet.customFields || []).map((cf) => {
+                                    const rv2 = [...Object.values(refsMap), ...(sheet.customFields || []).map((f) => f.ref)].filter(Boolean);
+                                    const dup2 = new Set(rv2.filter((v, _, a) => a.filter(x => x === v).length > 1));
+                                    const isDup = cf.ref && dup2.has(cf.ref);
+                                    return (
+                                      <tr key={cf.id} style={{ background: "#fffbeb" }}>
+                                        <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
+                                          <input
+                                            type="text"
+                                            value={cf.label || ""}
+                                            onChange={(e) => updateSheetField(subSheetId, "customFields", (sheet.customFields || []).map((f) => f.id === cf.id ? { ...f, label: e.target.value } : f))}
+                                            placeholder="Field label..."
+                                            style={{ width: "100%", fontSize: 12, padding: "3px 6px" }}
+                                          />
+                                        </td>
+                                        <td style={{ padding: "4px 10px", borderBottom: "1px solid #ede9fe" }}>
+                                          <input
+                                            type="number"
+                                            value={cf.value ?? ""}
+                                            onChange={(e) => updateSheetField(subSheetId, "customFields", (sheet.customFields || []).map((f) => f.id === cf.id ? { ...f, value: Number(e.target.value) } : f))}
+                                            placeholder="0"
+                                            style={{ width: "100%", fontSize: 13, padding: "3px 8px" }}
+                                          />
+                                        </td>
+                                        <td style={{ padding: "4px 8px", borderBottom: "1px solid #ede9fe", whiteSpace: "nowrap" }}>
+                                          <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+                                            <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`{`}</span>
+                                            <input
+                                              type="text"
+                                              value={cf.ref || ""}
+                                              onChange={(e) => updateSheetField(subSheetId, "customFields", (sheet.customFields || []).map((f) => f.id === cf.id ? { ...f, ref: e.target.value } : f))}
+                                              title={isDup ? `"${cf.ref}" is used by multiple fields — each ref must be unique` : ""}
+                                              style={{ width: 62, fontSize: 10, padding: "1px 4px", fontFamily: "monospace", color: isDup ? "#dc2626" : "#7c3aed", background: isDup ? "#fee2e2" : "#ede9fe", border: `1px solid ${isDup ? "#fca5a5" : "#ddd6fe"}`, borderRadius: 4, textAlign: "center" }}
+                                            />
+                                            <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`}`}</span>
+                                            <button
+                                              onClick={() => updateSheetField(subSheetId, "customFields", (sheet.customFields || []).filter((f) => f.id !== cf.id))}
+                                              style={{ background: "#dc2626", padding: "1px 6px", fontSize: 11, marginLeft: 4 }}
+                                              title="Remove field"
+                                            >✕</button>
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                  <tr>
+                                    <td colSpan={3} style={{ padding: "5px 8px" }}>
+                                      <button
+                                        onClick={() => updateSheetField(subSheetId, "customFields", [...(sheet.customFields || []), { id: Date.now(), label: "", value: 0, ref: "" }])}
+                                        style={{ background: "#e0f2fe", color: "#0369a1", border: "1px solid #bae6fd", fontSize: 12, padding: "3px 14px", borderRadius: 6, cursor: "pointer" }}
+                                      >+ Add Field</button>
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
+
+                            </div>
+
+                            {renderPartsTable({
+                              parts: sheetParts,
+                              vars,
+                              refsMap,
+                              sheet,
+                              subSheetId,
+                              labelPrefix,
+                              matOptions,
+                              laminateOptions,
+                              extraButtons: subSheetId == null
+                                ? <button onClick={() => setCutSheetOpen(true)} style={{ background: "#0369a1", padding: "4px 14px", fontSize: 12 }}>📋 Cut Sheet</button>
+                                : null,
                             })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
+                          </div>
+                        );
+                      };
+
+                      const sheets = [
+                        { subSheetId: null, sheet: activeBox, numbering: "1." },
+                        ...(activeBox.subSheets || []).map((sub, i) => ({ subSheetId: sub.id, sheet: sub, numbering: `1.${i + 1}` })),
+                      ];
+
+                      return (
+                        <>
+                          {sheets.map(({ subSheetId, sheet, numbering }) => {
+                            const sectionKey = subSheetId == null ? "sheets" : `sheet_${subSheetId}`;
+                            const isOpen = !!openSections[sectionKey];
+                            const title = subSheetId == null
+                              ? "1. Sheet Calculation and Cut List"
+                              : `${numbering} Sheet Calculation and Cut List — ${sheet.name || "Sub Sheet"}`;
+                            return (
+                              <Fragment key={subSheetId ?? "main"}>
+                                <SectionHeader
+                                  title={title}
+                                  open={isOpen}
+                                  onToggle={() => toggleSection(sectionKey)}
+                                  style={{ marginTop: subSheetId == null ? 0 : 10 }}
+                                  action={
+                                    <div style={{ display: "flex", gap: 6 }}>
+                                      {copiedSheet && (
+                                        <button onClick={() => pasteSheetData(subSheetId)} title={`Paste ${copiedSheet.sourceLabel}'s data here`} style={{ background: "#059669", padding: "3px 10px", fontSize: 11 }}>📋 Paste</button>
+                                      )}
+                                      <button onClick={() => copySheetData(subSheetId)} title="Copy this sheet's materials/fields/parts" style={{ background: "#ede9fe", color: "#4c1d95", padding: "3px 10px", fontSize: 11 }}>⧉ Copy</button>
+                                      {subSheetId != null && (
+                                        <button onClick={() => deleteSubSheet(subSheetId)} style={{ background: "#dc2626", padding: "3px 10px", fontSize: 11 }}>Delete</button>
+                                      )}
+                                    </div>
+                                  }
+                                />
+                                {isOpen && renderSheetBlock({ subSheetId, sheet, numbering })}
+                              </Fragment>
+                            );
+                          })}
+                          <button onClick={addSubSheet} style={{ background: "#7c3aed", padding: "6px 16px", fontSize: 13, marginTop: 10 }}>+ Add Sub Sheet</button>
+                        </>
+                      );
+                    })()}
 
                 </div>
               ) : null}
 
-              {/* ══ SECTION 3: HARDWARE & CONSUMABLES — ALL BOXES ══ */}
+              {/* ══ SECTION 2: HARDWARE & CONSUMABLES — ALL BOXES ══ */}
               {draft && boxes.length > 0 && (() => {
                 const groupOf = (mat) => (prices || []).find((p) => p.materialName === mat)?.group || "Other";
                 // Every group present in Items Pricing shows up here automatically —
@@ -1825,7 +2146,7 @@ function TemplateMaster() {
                 return (
                   <div style={{ marginTop: 16 }}>
                     <SectionHeader
-                      title="3. Hardware & Consumables — All Boxes"
+                      title="2. Hardware & Consumables — All Boxes"
                       open={openSections.hardware}
                       onToggle={() => toggleSection("hardware")}
                       style={{ marginTop: 0 }}
@@ -1987,7 +2308,7 @@ function TemplateMaster() {
                 return (
                   <div style={{ marginTop: 16 }}>
                     <SectionHeader
-                      title="4. Material Summary"
+                      title="3. Material Summary"
                       open={openSections.summary}
                       onToggle={() => toggleSection("summary")}
                       style={{ marginTop: 0 }}
@@ -2199,11 +2520,15 @@ function TemplateMaster() {
           prices={prices}
           onSelect={(name, id) => {
             const f = matPicker.field;
+            const subSheetId = matPicker.subSheetId ?? null;
             if (matPicker.customMatId != null) {
-              updateBox("customMaterials", (activeBox.customMaterials || []).map((m) =>
+              const sheetObj = subSheetId == null ? activeBox : (activeBox.subSheets || []).find((s) => s.id === subSheetId);
+              const updated = (sheetObj?.customMaterials || []).map((m) =>
                 m.id === matPicker.customMatId ? { ...m, value: name, itemId: id } : m
-              ));
-            } else {
+              );
+              if (subSheetId == null) updateBox("customMaterials", updated);
+              else updateSubSheet(subSheetId, "customMaterials", updated);
+            } else if (subSheetId == null) {
               setDraft((prev) => ({
                 ...prev,
                 boxes: prev.boxes.map((b) =>
@@ -2211,6 +2536,8 @@ function TemplateMaster() {
                 ),
               }));
               setIsDirty(true);
+            } else {
+              updateSubSheetFields(subSheetId, { [f]: name, [`${f}Id`]: id });
             }
             setMatPicker(null);
           }}

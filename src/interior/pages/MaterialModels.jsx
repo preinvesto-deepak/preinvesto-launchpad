@@ -6,7 +6,12 @@ const MODELS = ["economy", "standard", "premium"];
 const MODEL_LABELS = { economy: "Economy", standard: "Standard", premium: "Premium" };
 const MODEL_COLORS = { economy: "#059669", standard: "#2563eb", premium: "#7c3aed" };
 
-const emptyModel = () => ({ brand: "", baseRate: "", rate: "", gst: "18", rateWithGst: "" });
+// priceId links this cell to the exact Items Pricing row it was picked
+// from (via the 🔍 button) — when set, the cell's rate stays LIVE against
+// that row (see resolveCell below), so editing the price in Items Pricing
+// is reflected here automatically. Manually editing any field on the cell
+// clears priceId, freezing it — from then on it's yours to maintain.
+const emptyModel = () => ({ brand: "", baseRate: "", rate: "", gst: "18", rateWithGst: "", priceId: null });
 const emptyRates = () => ({ economy: emptyModel(), standard: emptyModel(), premium: emptyModel() });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -147,6 +152,12 @@ function MaterialModels() {
   const [searchGroup, setSearchGroup] = useState("");
   const [searchName, setSearchName] = useState("");
   const [activeGroup, setActiveGroup] = useState("All");
+  // Hides materials where Economy/Standard/Premium all resolve to the exact
+  // same rate — usually means no tier differentiation has been set for that
+  // material yet, so it's just noise once you're hunting for ones that do
+  // differ. An item with any tier still empty is never "same priced" (it's
+  // incomplete, not undifferentiated) so it stays visible either way.
+  const [hideSamePriced, setHideSamePriced] = useState(false);
 
   // Local edits buffer — keyed by materialName
   const [edits, setEdits] = useState({});
@@ -168,11 +179,28 @@ function MaterialModels() {
   // Standard/Premium rates are tracked once per materialName (see getRates),
   // not once per supplier row — so only list each material name once here.
   const seenNames = new Set();
-  const displayItems = filtered.filter((p) => {
+  const uniqueItems = filtered.filter((p) => {
     if (!p.materialName || seenNames.has(p.materialName)) return false;
     seenNames.add(p.materialName);
     return true;
   });
+
+  // A cell picked via the 🔍 button carries a priceId — resolve it against
+  // the CURRENT Items Pricing row (not the frozen snapshot taken at pick
+  // time), so an edit made there shows up here immediately without needing
+  // to re-pick. Falls back to the stored values if that row was deleted, or
+  // if the cell was never linked (typed by hand, or predates this feature).
+  const resolveCell = (cell, model) => {
+    if (!cell.priceId) return cell;
+    const live = prices.find((p) => p.id === cell.priceId);
+    if (!live) return cell;
+    const baseRate = live.rate > 0 ? String(live.rate) : "";
+    const gst = live.gst !== undefined && live.gst !== null ? String(live.gst) : cell.gst;
+    const profit = Number(materialModelProfitPercent?.[model]) || 0;
+    const rate = baseRate !== "" ? applyProfit(baseRate, profit) : "";
+    const rateWithGst = rate !== "" ? calcWithGst(rate, gst) : "";
+    return { ...cell, brand: live.brand || cell.brand, baseRate, gst, rate, rateWithGst };
+  };
 
   // Get current rates for an item (edits > saved > empty). Legacy entries
   // saved before Profit % existed have no baseRate — treat their existing
@@ -181,18 +209,35 @@ function MaterialModels() {
     const r = edits[name] ?? materialModelRates[name] ?? emptyRates();
     const withBase = {};
     MODELS.forEach((model) => {
-      const cell = r[model] || emptyModel();
+      const cell = resolveCell(r[model] || emptyModel(), model);
       withBase[model] = { ...cell, baseRate: cell.baseRate !== undefined && cell.baseRate !== "" ? cell.baseRate : cell.rate };
     });
     return withBase;
   };
 
+  // "Same priced" = every tier has a rate set, and all of them are equal —
+  // an item with any tier still blank isn't counted (it's incomplete, not
+  // undifferentiated).
+  const isSamePriced = (rates) => {
+    const vals = MODELS.map((m) => rates[m].rateWithGst || rates[m].rate || "");
+    if (vals.some((v) => v === "")) return false;
+    return vals.every((v) => v === vals[0]);
+  };
+
+  const displayItems = hideSamePriced
+    ? uniqueItems.filter((p) => !isSamePriced(getRates(p.materialName)))
+    : uniqueItems;
+  const samePricedCount = uniqueItems.length - uniqueItems.filter((p) => !isSamePriced(getRates(p.materialName))).length;
+
   const setField = (name, model, field, value) => {
     const current = getRates(name);
     const profit = Number(materialModelProfitPercent?.[model]) || 0;
+    // Any manual edit freezes the cell — it stops tracking Items Pricing
+    // updates from here on, so this typed value doesn't get silently
+    // overwritten on the next render.
     const updated = {
       ...current,
-      [model]: { ...current[model], [field]: value },
+      [model]: { ...current[model], [field]: value, priceId: null },
     };
     // auto-calc — the "Rate (excl GST)" input edits the BASE (pre-profit)
     // rate; the effective rate (what GST applies to, and what gets saved) is
@@ -228,7 +273,9 @@ function MaterialModels() {
       ...prev,
       [materialName]: {
         ...current,
-        [model]: { brand: priceItem.brand || "", baseRate, rate, gst: String(gst), rateWithGst },
+        // priceId links this cell to that exact Items Pricing row from here
+        // on — see resolveCell — so a later edit there keeps showing up here.
+        [model]: { brand: priceItem.brand || "", baseRate, rate, gst: String(gst), rateWithGst, priceId: priceItem.id },
       },
     }));
     setPicker(null);
@@ -237,16 +284,17 @@ function MaterialModels() {
   // Profit % changed for a model — recompute rate/rateWithGst from baseRate
   // for every material that currently has one, so the table (and Save
   // Template) reflects the new profit immediately without compounding on
-  // top of an already-inflated rate.
+  // top of an already-inflated rate. Linked cells resolve their base rate
+  // live first, same as getRates, so this can't recompute off a stale value.
   const applyProfitChange = (model, newProfitPercent) => {
     setMaterialModelProfitPercent((prev) => ({ ...prev, [model]: newProfitPercent }));
     const profit = Number(newProfitPercent) || 0;
     setEdits((prevEdits) => {
       const next = { ...prevEdits };
-      displayItems.forEach((item) => {
+      uniqueItems.forEach((item) => {
         const name = item.materialName;
         const current = next[name] ?? materialModelRates[name] ?? emptyRates();
-        const cell = current[model] || emptyModel();
+        const cell = resolveCell(current[model] || emptyModel(), model);
         const base = cell.baseRate !== undefined && cell.baseRate !== "" ? cell.baseRate : cell.rate;
         if (base === "" || base === undefined) return;
         const rate = applyProfit(base, profit);
@@ -273,7 +321,6 @@ function MaterialModels() {
 
   // ── Download comparison quotation ──────────────────────────────────────────
   const downloadCSV = () => {
-    const saved = { ...materialModelRates, ...edits };
     const rows = [
       ["Group", "Material", "Spec", "Unit",
         "Economy Brand", "Economy Rate", "Economy Rate+GST",
@@ -284,7 +331,9 @@ function MaterialModels() {
     prices.forEach((p) => {
       if (!p.materialName || seenNames.has(p.materialName)) return;
       seenNames.add(p.materialName);
-      const r = saved[p.materialName] ?? emptyRates();
+      // getRates resolves linked cells against the current Items Pricing
+      // rate, same as the on-screen table, so the export never lags behind.
+      const r = getRates(p.materialName);
       rows.push([
         p.group || "", p.materialName || "", p.materialSpec || "", p.unit || "",
         r.economy.brand || "", r.economy.rate || "", r.economy.rateWithGst || "",
@@ -342,6 +391,10 @@ function MaterialModels() {
               {v && <span onClick={() => s("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", cursor: "pointer", color: "#9ca3af", fontSize: 13 }}>✕</span>}
             </div>
           ))}
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
+            <input type="checkbox" checked={hideSamePriced} onChange={(e) => setHideSamePriced(e.target.checked)} />
+            Hide same-priced items{samePricedCount > 0 ? ` (${samePricedCount})` : ""}
+          </label>
           <span style={{ fontSize: 12, color: "#9ca3af" }}>{displayItems.length} items</span>
           {hasEdits && (
             <button onClick={() => setEdits({})} style={{ marginLeft: "auto", background: "#6b7280", padding: "7px 14px", fontSize: 13 }}>Discard</button>
@@ -401,7 +454,10 @@ function MaterialModels() {
                   const m = rates[model];
                   return (
                     <div key={model} style={{ borderLeft: "2px solid #e5e7eb", paddingLeft: 10, paddingRight: 8, display: "flex", flexDirection: "column", gap: 4 }}>
-                      <div style={{ display: "flex", gap: 4 }}>
+                      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                        {m.priceId && (
+                          <span title="Linked to Items Pricing — updates automatically when that item's price changes" style={{ fontSize: 12, flexShrink: 0 }}>🔗</span>
+                        )}
                         <input
                           type="text" placeholder="Brand" value={m.brand}
                           onChange={(e) => setField(item.materialName, model, "brand", e.target.value)}
