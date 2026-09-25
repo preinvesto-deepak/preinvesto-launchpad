@@ -20,6 +20,85 @@ function withGroupSpan(rows, groupKey = "group") {
   });
 }
 
+// Copies text to the clipboard, falling back to a hidden-textarea + execCommand
+// for contexts where navigator.clipboard is unavailable (e.g. non-HTTPS).
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+// A "{H}"-style formula reference chip — click to copy "{H}" to the
+// clipboard (paste with Ctrl+V into any formula field), or drag it onto a
+// W (mm)/H (mm)/Qty field to insert it at the drop point directly. Dragging
+// is mouse-only; copy/paste covers touch devices and anyone who'd rather not
+// drag.
+function RefChip({ label, style: extraStyle }) {
+  const [copied, setCopied] = useState(false);
+  const text = `{${label}}`;
+  const handleCopy = async (e) => {
+    e.stopPropagation();
+    if (await copyToClipboard(text)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    }
+  };
+  return (
+    <span
+      draggable
+      onDragStart={(e) => { e.dataTransfer.setData("text/plain", text); e.dataTransfer.effectAllowed = "copy"; }}
+      onClick={handleCopy}
+      title={copied ? "Copied!" : `Click to copy "${text}", or drag it into a formula field`}
+      style={{
+        fontSize: 10, fontFamily: "monospace", padding: "1px 6px", borderRadius: 4,
+        cursor: "grab", userSelect: "none", whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s",
+        color: copied ? "#059669" : "#7c3aed", background: copied ? "#d1fae5" : "#ede9fe",
+        ...extraStyle,
+      }}
+    >{copied ? "✓ Copied" : text}</span>
+  );
+}
+
+// The "⠿" grip icon used next to editable {ref} boxes (H/W/D row, Fields
+// table) — drag it into a formula field, or click to copy "{ref}" to the
+// clipboard. Kept visually compact (just the grip glyph) since the {ref}
+// itself is already shown in the adjacent editable box.
+function GripChip({ refName }) {
+  const [copied, setCopied] = useState(false);
+  const text = `{${refName}}`;
+  const handleCopy = async (e) => {
+    e.stopPropagation();
+    if (await copyToClipboard(text)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    }
+  };
+  return (
+    <span
+      draggable
+      onDragStart={(e) => { e.dataTransfer.setData("text/plain", text); e.dataTransfer.effectAllowed = "copy"; }}
+      onClick={handleCopy}
+      title={copied ? "Copied!" : `Click to copy "${text}", or drag into a formula field`}
+      style={{ fontSize: 11, color: copied ? "#059669" : "#7c3aed", cursor: "grab", userSelect: "none", padding: "0 2px" }}
+    >{copied ? "✓" : "⠿"}</span>
+  );
+}
+
 const DOOR_TYPES = ["Sliding Door", "Swing Door"];
 
 // Material Models pricing tiers — same set shown on the Material Models page
@@ -1503,13 +1582,25 @@ function TemplateMaster() {
                                     const VAR_TO_FIELD = Object.fromEntries(
                                       Object.entries(refsMap).filter(([, varName]) => varName).map(([field, varName]) => [varName, field])
                                     );
+                                    // Dropping a dragged "{H}"-style chip inserts it at the drop
+                                    // point (cursor position) instead of replacing the formula.
+                                    const handleDrop = (e) => {
+                                      e.preventDefault();
+                                      const text = e.dataTransfer.getData("text/plain");
+                                      if (!text) return;
+                                      const start = e.target.selectionStart ?? raw.length;
+                                      const end = e.target.selectionEnd ?? raw.length;
+                                      updatePart(p.id, field, raw.slice(0, start) + text + raw.slice(end), subSheetId);
+                                    };
                                     return (
                                       <div style={{ minWidth: 64 }}>
                                         <input
                                           type="text"
                                           value={raw}
                                           onChange={(e) => updatePart(p.id, field, e.target.value, subSheetId)}
-                                          placeholder="mm or {H}"
+                                          onDragOver={(e) => e.preventDefault()}
+                                          onDrop={handleDrop}
+                                          placeholder="mm or {H} — or drag a {ref} chip in"
                                           style={{
                                             width: "100%", fontSize: 12, padding: "2px 5px",
                                             fontFamily: isFormula ? "monospace" : "inherit",
@@ -1796,6 +1887,7 @@ function TemplateMaster() {
                                       style={{ width: 40, fontSize: 10, padding: "1px 4px", fontFamily: "monospace", color: isDup ? "#dc2626" : "#7c3aed", background: isDup ? "#fee2e2" : "#ede9fe", border: `1px solid ${isDup ? "#fca5a5" : "#ddd6fe"}`, borderRadius: 4, textAlign: "center" }}
                                     />
                                     <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`}`}</span>
+                                    {refName && <GripChip refName={refName} />}
                                   </div>
                                 );
                               })}
@@ -1816,7 +1908,7 @@ function TemplateMaster() {
                                   style={{ width: 72, fontSize: 12, padding: "3px 6px", background: "#f3f4f6", color: "#374151", fontWeight: 600, cursor: "default" }}
                                 />
                                 <span style={{ fontSize: 11, color: "#9ca3af" }}>sq ft</span>
-                                <span style={{ fontSize: 10, color: "#7c3aed", fontFamily: "monospace" }} title="Reference this in any formula">{`{Sft}`}</span>
+                                <RefChip label="Sft" />
                               </div>
                             </div>
 
@@ -1966,6 +2058,7 @@ function TemplateMaster() {
                                               style={{ width: 72, fontSize: 10, padding: "1px 4px", fontFamily: "monospace", color: isDup ? "#dc2626" : "#7c3aed", background: isDup ? "#fee2e2" : "#ede9fe", border: `1px solid ${isDup ? "#fca5a5" : "#ddd6fe"}`, borderRadius: 4, textAlign: "center" }}
                                             />
                                             <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`}`}</span>
+                                            <GripChip refName={refName} />
                                           </span>
                                         )}
                                       </td>
@@ -2302,9 +2395,11 @@ function TemplateMaster() {
                     modelTotals[model] += row.requiredQty * modelRateFor(row.material, model);
                   });
                 });
-                // Sum of every box's own Area Sft (H × W in sq ft) in this template —
-                // the denominator for the per-sqft cost row below the Total.
-                const totalAreaSft = boxes.reduce((s, b) => s + (Number(BOX_VARS(b).Sft) || 0), 0);
+                // Sum of every box's Quotation Details area (quotationAreaSft — H × W
+                // from Quotation Details, falling back to Section 1's H/W when left
+                // blank) in this template — the denominator for the per-sqft cost row
+                // below the Total, matching Projects.jsx's Material Summary.
+                const totalAreaSft = boxes.reduce((s, b) => s + quotationAreaSft(b), 0);
                 return (
                   <div style={{ marginTop: 16 }}>
                     <SectionHeader

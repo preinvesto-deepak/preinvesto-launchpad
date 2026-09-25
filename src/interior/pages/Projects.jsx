@@ -62,6 +62,60 @@ function SectionHeader({ title, open, onToggle, action, style: extraStyle }) {
   );
 }
 
+// Copies text to the clipboard, falling back to a hidden-textarea + execCommand
+// for contexts where navigator.clipboard is unavailable (e.g. non-HTTPS).
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+// A "{H}"-style formula reference chip — click to copy "{H}" to the
+// clipboard (paste with Ctrl+V into any formula field), or drag it onto a
+// W (mm)/H (mm)/Qty field to insert it at the drop point directly. Dragging
+// is mouse-only; copy/paste covers touch devices and anyone who'd rather not
+// drag.
+function RefChip({ label, style: extraStyle }) {
+  const [copied, setCopied] = useState(false);
+  const text = `{${label}}`;
+  const handleCopy = async (e) => {
+    e.stopPropagation();
+    if (await copyToClipboard(text)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    }
+  };
+  return (
+    <span
+      draggable
+      onDragStart={(e) => { e.dataTransfer.setData("text/plain", text); e.dataTransfer.effectAllowed = "copy"; }}
+      onClick={handleCopy}
+      title={copied ? "Copied!" : `Click to copy "${text}", or drag it into a formula field`}
+      style={{
+        fontSize: 10, fontFamily: "monospace", padding: "1px 6px", borderRadius: 4,
+        cursor: "grab", userSelect: "none", whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s",
+        color: copied ? "#059669" : "#7c3aed", background: copied ? "#d1fae5" : "#ede9fe",
+        ...extraStyle,
+      }}
+    >{copied ? "✓ Copied" : text}</span>
+  );
+}
+
 const TEMPLATE_ICONS = {
   Wardrobe: "🚪", Kitchen: "🍳", "TV Unit": "📺", "Study Unit": "📚", Loft: "📦",
 };
@@ -502,7 +556,7 @@ function ProjItemPickerModal({ materialName, prices, onSelect, onClose, initialG
   );
 }
 
-function ProjectMaterialModels({ project, prices, globalRates, setProjects }) {
+function ProjectMaterialModels({ project, prices, globalRates, globalProfitPercent, setProjects }) {
   const [resetConfirm, setResetConfirm] = useState(false);
   const [activeGroup, setActiveGroup] = useState("All");
   const [searchGroup, setSearchGroup] = useState("");
@@ -627,8 +681,13 @@ function ProjectMaterialModels({ project, prices, globalRates, setProjects }) {
 
   const resetToGlobal = () => {
     const snapshot = JSON.parse(JSON.stringify(globalRates || {}));
+    // Rates alone aren't enough — they were computed using the GLOBAL Profit %,
+    // so this project's own Profit % override has to reset alongside them or
+    // the two go out of sync (rates say one profit margin, the displayed
+    // Profit % input says another).
+    const profitSnapshot = JSON.parse(JSON.stringify(globalProfitPercent || { economy: 0, standard: 0, premium: 0 }));
     setProjects((prev) => prev.map((p) =>
-      p.id === project.id ? { ...p, materialModelRates: snapshot } : p
+      p.id === project.id ? { ...p, materialModelRates: snapshot, materialModelProfitPercent: profitSnapshot } : p
     ));
     setResetConfirm(false);
   };
@@ -813,6 +872,7 @@ function Projects() {
     setSelectedTemplateId,
     prices,
     materialModelRates,
+    materialModelProfitPercent,
     materialStockSettings,
     templates,
   } = useAppData();
@@ -918,6 +978,9 @@ function Projects() {
   // resolve to the exact same value — usually means no tier differentiation
   // has been set for that material, so it's just noise once comparing models.
   const [hideSamePricedSummary, setHideSamePricedSummary] = useState(false);
+  // Summary tab's own GST % for its Sft Rate (Incl. GST) row — independent
+  // of each room's own GST% field, since this tab spans every room.
+  const [summaryGstPercent, setSummaryGstPercent] = useState(18);
 
   // Reset tab when switching projects
   useEffect(() => {
@@ -1726,6 +1789,7 @@ function Projects() {
                 project={selectedProject}
                 prices={prices}
                 globalRates={materialModelRates}
+                globalProfitPercent={materialModelProfitPercent}
                 setProjects={setProjects}
               />
             )}
@@ -1768,6 +1832,16 @@ function Projects() {
               Object.values(groupTotals).forEach((g) => {
                 PROJ_MODELS.forEach((model) => { modelTotals[model] += g[model]; });
               });
+              // Sum of every "Include in Quotation" box's Quotation Details area
+              // (quotationAreaSft, falling back to Section 1's H/W when left blank)
+              // across every room in the project — the denominator for the Sft
+              // Rate row below the Grand Total, matching what the Project
+              // Quotation itself counts.
+              const totalAreaSft = rooms.reduce((sum, room) =>
+                sum + (room.boxes || [])
+                  .filter((b) => b.includeInQuotation !== false)
+                  .reduce((s, b) => s + quotationAreaSft(b), 0),
+              0);
               const sortedRows = [...costedRows].sort((a, b) =>
                 groupTotals[b.group].standard - groupTotals[a.group].standard ||
                 b._stdAmount - a._stdAmount
@@ -1792,10 +1866,23 @@ function Projects() {
                         Total material required and costed (Economy/Standard/Premium) across {rooms.length} room{rooms.length !== 1 ? "s" : ""} in this project, with each group's own contribution to the total.
                       </p>
                     </div>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
-                      <input type="checkbox" checked={hideSamePricedSummary} onChange={(e) => setHideSamePricedSummary(e.target.checked)} />
-                      Hide same-priced items{samePricedCount > 0 ? ` (${samePricedCount})` : ""}
-                    </label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
+                        <span style={{ fontWeight: 600 }}>GST</span>
+                        <input
+                          type="number" step="1" min={0}
+                          value={summaryGstPercent}
+                          onChange={(e) => setSummaryGstPercent(e.target.value)}
+                          onBlur={(e) => setSummaryGstPercent(Math.max(0, Number(e.target.value) || 0))}
+                          style={{ width: 50, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
+                        />
+                        <span>%</span>
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
+                        <input type="checkbox" checked={hideSamePricedSummary} onChange={(e) => setHideSamePricedSummary(e.target.checked)} />
+                        Hide same-priced items{samePricedCount > 0 ? ` (${samePricedCount})` : ""}
+                      </label>
+                    </div>
                   </div>
                   {summaryRows.length === 0 ? (
                     <div style={{ padding: "16px 14px", color: "#9ca3af", fontSize: 13, border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff" }}>
@@ -1868,6 +1955,34 @@ function Projects() {
                             {PROJ_MODELS.map((model) => (
                               <td key={model} colSpan={2} style={{ padding: "9px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 12, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>
                                 {formatCurrency(modelTotals[model])}
+                              </td>
+                            ))}
+                          </tr>
+                          <tr style={{ background: "#334e68" }}>
+                            <td colSpan={4} style={{ padding: "9px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Grand Total (Incl. GST {summaryGstPercent}%)</td>
+                            {PROJ_MODELS.map((model) => (
+                              <td key={model} colSpan={2} style={{ padding: "9px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 12, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>
+                                {formatCurrency(modelTotals[model] * (1 + (Number(summaryGstPercent) || 0) / 100))}
+                              </td>
+                            ))}
+                          </tr>
+                          <tr style={{ background: "#f1f5f9" }}>
+                            <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 700, color: "#374151", fontSize: 12 }}>
+                              Sft Rate (Excl. GST) <span style={{ fontWeight: 400, color: "#9ca3af" }}>(Grand Total ÷ {roundTo2(totalAreaSft)} sqft — Quotation Details area)</span>
+                            </td>
+                            {PROJ_MODELS.map((model) => (
+                              <td key={model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: PROJ_MODEL_COLORS[model], fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>
+                                {totalAreaSft > 0 ? `${formatCurrency(modelTotals[model] / totalAreaSft)}/sqft` : <span style={{ color: "#d1d5db" }}>—</span>}
+                              </td>
+                            ))}
+                          </tr>
+                          <tr style={{ background: "#e5e7eb" }}>
+                            <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 700, color: "#374151", fontSize: 12 }}>
+                              Sft Rate (Incl. GST {summaryGstPercent}%) <span style={{ fontWeight: 400, color: "#9ca3af" }}>(Grand Total ÷ {roundTo2(totalAreaSft)} sqft — Quotation Details area)</span>
+                            </td>
+                            {PROJ_MODELS.map((model) => (
+                              <td key={model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: PROJ_MODEL_COLORS[model], fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>
+                                {totalAreaSft > 0 ? `${formatCurrency((modelTotals[model] * (1 + (Number(summaryGstPercent) || 0) / 100)) / totalAreaSft)}/sqft` : <span style={{ color: "#d1d5db" }}>—</span>}
                               </td>
                             ))}
                           </tr>
@@ -2180,13 +2295,26 @@ function Projects() {
                               const VAR_TO_FIELD = Object.fromEntries(
                                 Object.entries(refsMap).filter(([, v]) => v).map(([f, v]) => [v, f])
                               );
+                              // Dropping a dragged "{H}"-style chip inserts it at the drop
+                              // point (cursor position when the drag started over this input)
+                              // instead of replacing the whole formula.
+                              const handleDrop = (e) => {
+                                e.preventDefault();
+                                const text = e.dataTransfer.getData("text/plain");
+                                if (!text) return;
+                                const start = e.target.selectionStart ?? raw.length;
+                                const end = e.target.selectionEnd ?? raw.length;
+                                updatePart(part.id, field, raw.slice(0, start) + text + raw.slice(end), subSheetId);
+                              };
                               return (
                                 <div style={{ minWidth: 64 }}>
                                   <input
                                     type="text"
                                     value={raw}
                                     onChange={(e) => updatePart(part.id, field, e.target.value, subSheetId)}
-                                    placeholder="mm or {H}"
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={handleDrop}
+                                    placeholder="mm or {H} — or drag a {ref} chip in"
                                     style={{
                                       width: "100%", fontSize: 12, padding: "2px 5px",
                                       fontFamily: isFormula ? "monospace" : "inherit",
@@ -2441,6 +2569,7 @@ function Projects() {
                                         <span style={{ fontSize: 11, color: "#9ca3af" }}>
                                           {dimUnit === "mm" ? (ftVal ? ftVal + " ft" : "") : (mmVal ? mmVal + " mm" : "")}
                                         </span>
+                                        <RefChip label={refsMap[key] || lbl} />
                                       </div>
                                     );
                                   })}
@@ -2459,7 +2588,7 @@ function Projects() {
                                       style={{ width: 72, fontSize: 12, padding: "3px 6px", background: "#f3f4f6", color: "#374151", fontWeight: 600, cursor: "default" }}
                                     />
                                     <span style={{ fontSize: 11, color: "#9ca3af" }}>sq ft</span>
-                                    <span style={{ fontSize: 10, color: "#7c3aed", fontFamily: "monospace" }} title="Reference this in any formula">{`{Sft}`}</span>
+                                    <RefChip label="Sft" />
                                   </div>
                                 </div>
 
@@ -2557,7 +2686,7 @@ function Projects() {
                                               <input type="number" value={sheet[field] ?? ""} onChange={(e) => updateSheetField(subSheetId, field, Number(e.target.value))} placeholder="0" min={0} style={{ width: "100%", fontSize: 13, padding: "3px 8px" }} />
                                             </td>
                                             <td style={{ padding: "4px 8px", borderBottom: "1px solid #ede9fe", whiteSpace: "nowrap" }}>
-                                              {varName && <span style={{ fontSize: 11, color: "#7c3aed", fontFamily: "monospace", background: "#ede9fe", padding: "1px 6px", borderRadius: 4 }}>{`{${varName}}`}</span>}
+                                              {varName && <RefChip label={varName} style={{ fontSize: 11, padding: "1px 6px" }} />}
                                             </td>
                                           </tr>
                                         );
@@ -2881,9 +3010,14 @@ function Projects() {
                           modelTotals[model] += row.requiredQty * modelRateFor(row.material, model);
                         });
                       });
-                      // Sum of every box's own Area Sft (H × W in sq ft) in this room —
-                      // the denominator for the per-sqft cost row below the Total.
-                      const totalAreaSft = boxes.reduce((s, b) => s + (Number(BOX_VARS(b).Sft) || 0), 0);
+                      // Sum of every "Include in Quotation" box's Quotation Details area
+                      // (quotationAreaSft — H × W from Quotation Details, falling back to
+                      // Section 1's H/W when left blank) in this room — the denominator
+                      // for the per-sqft cost row below the Total, matching what the
+                      // actual Project Quotation counts.
+                      const totalAreaSft = boxes
+                        .filter((b) => b.includeInQuotation !== false)
+                        .reduce((s, b) => s + quotationAreaSft(b), 0);
                       return (
                         <div style={{ marginTop: 16 }}>
                           <SectionHeader
