@@ -4,6 +4,8 @@ export interface ContactFormData {
   phone: string;
   service?: string;
   message: string;
+  captchaToken: string;
+  captchaAnswer: string;
 }
 
 export interface ContactApiResponse {

@@ -5,9 +5,12 @@ import { motion } from "framer-motion";
 import { BRAND } from "@/data/content";
 import { MapPin, Phone, Mail, MessageCircle, Send, ExternalLink, Loader2 } from "lucide-react";
 import { submitContactForm } from "@/lib/contactApi";
+import Captcha, { CaptchaValue } from "@/components/Captcha";
 
 const Contact = () => {
   const [form, setForm] = useState({ name: "", email: "", phone: "", service: "", message: "" });
+  const [captcha, setCaptcha] = useState<CaptchaValue>({ token: "", answer: "" });
+  const [captchaKey, setCaptchaKey] = useState(0);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -24,6 +27,10 @@ const Contact = () => {
       setError("Please enter a valid email address.");
       return;
     }
+    if (!captcha.answer.trim()) {
+      setError("Please answer the verification question.");
+      return;
+    }
 
     setLoading(true);
     try {
@@ -33,6 +40,8 @@ const Contact = () => {
         phone: form.phone,
         service: form.service,
         message: form.message,
+        captchaToken: captcha.token,
+        captchaAnswer: captcha.answer,
       });
       setSubmitted(true);
       setForm({ name: "", email: "", phone: "", service: "", message: "" });
@@ -41,6 +50,7 @@ const Contact = () => {
       setError(err.message || "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
+      setCaptchaKey((k) => k + 1);
     }
   };
 
@@ -117,6 +127,7 @@ const Contact = () => {
                   <label htmlFor="message" className="block text-sm font-medium text-foreground mb-1.5">Message *</label>
                   <textarea id="message" required maxLength={1000} rows={5} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} className="w-full px-4 py-3 rounded-lg border border-input bg-background text-foreground text-sm focus:ring-2 focus:ring-accent/30 focus:border-accent outline-none transition resize-none" placeholder="Tell us about your project requirements..." />
                 </div>
+                <Captcha key={captchaKey} value={captcha} onChange={setCaptcha} idPrefix="contact" />
                 <button type="submit" disabled={loading} className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-accent text-accent-foreground font-semibold rounded-lg hover:opacity-90 transition-opacity disabled:opacity-60">
                   {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</> : <><Send className="w-4 h-4" /> Send Message</>}
                 </button>

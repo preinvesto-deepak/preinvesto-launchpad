@@ -3,9 +3,12 @@ import { Link } from "react-router-dom";
 import { Send, MessageCircle, Loader2 } from "lucide-react";
 import { BRAND } from "@/data/content";
 import { submitContactForm } from "@/lib/contactApi";
+import Captcha, { CaptchaValue } from "@/components/Captcha";
 
 const ContactTeaser = () => {
   const [form, setForm] = useState({ name: "", email: "", phone: "", message: "" });
+  const [captcha, setCaptcha] = useState<CaptchaValue>({ token: "", answer: "" });
+  const [captchaKey, setCaptchaKey] = useState(0);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -13,14 +16,21 @@ const ContactTeaser = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    setLoading(true);
 
+    if (!captcha.answer.trim()) {
+      setError("Please answer the verification question.");
+      return;
+    }
+
+    setLoading(true);
     try {
       await submitContactForm({
         name: form.name,
         email: form.email,
         phone: form.phone,
         message: form.message,
+        captchaToken: captcha.token,
+        captchaAnswer: captcha.answer,
       });
       setSubmitted(true);
       setForm({ name: "", email: "", phone: "", message: "" });
@@ -29,6 +39,7 @@ const ContactTeaser = () => {
       setError(err.message || "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
+      setCaptchaKey((k) => k + 1);
     }
   };
 
@@ -121,6 +132,7 @@ const ContactTeaser = () => {
                 placeholder="Tell us about your project..."
               />
             </div>
+            <Captcha key={captchaKey} value={captcha} onChange={setCaptcha} idPrefix="teaser" />
             <button
               type="submit"
               disabled={loading}

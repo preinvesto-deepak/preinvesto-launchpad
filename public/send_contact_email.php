@@ -1,6 +1,8 @@
 <?php
 // send_contact_email.php
 
+require_once __DIR__ . '/api/captcha_helper.php';
+
 // Always return JSON
 header('Content-Type: application/json');
 
@@ -44,6 +46,9 @@ $phone   = get_value($data, 'phone');
 $service = get_value($data, 'service');
 $message = get_value($data, 'message');
 
+$captchaToken  = get_value($data, 'captchaToken');
+$captchaAnswer = get_value($data, 'captchaAnswer');
+
 // Basic validation
 $errors = [];
 
@@ -57,6 +62,10 @@ if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
 
 if ($message === '') {
     $errors[] = 'Message is required.';
+}
+
+if (!captcha_verify($captchaToken, $captchaAnswer)) {
+    $errors[] = 'Verification answer is incorrect or expired. Please try again.';
 }
 
 if (!empty($errors)) {

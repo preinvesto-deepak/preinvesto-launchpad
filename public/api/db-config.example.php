@@ -20,3 +20,9 @@ define('ADMIN_PIN', '0000');
 // incoming request host instead, which is usually fine — set it explicitly if
 // the site sits behind a proxy that rewrites Host.
 define('APP_BASE_URL', 'https://preinvesto.com');
+
+// Signs the self-hosted contact-form CAPTCHA tokens (captcha.php /
+// captcha_helper.php). Optional — falls back to a secret derived from DB_PASS
+// and ADMIN_PIN when unset — but set your own random string here for a
+// dedicated key.
+define('CAPTCHA_SECRET', 'change-me-to-a-random-string');
