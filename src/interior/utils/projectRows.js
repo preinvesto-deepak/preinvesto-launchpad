@@ -74,7 +74,14 @@ function boxPartGroups(box) {
  */
 export function buildBoxRows(box, prices) {
   const rows = [];
-  const rmat = (name, id) => id != null ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name) : name;
+  // id set: resolve by id (self-correcting if the material was renamed since).
+  // id unset: only trust the raw text if it still names a real priced material
+  // — a stale/placeholder string (e.g. "Inside Laminate" left over from a
+  // part that never had a real selection made) means nothing is required on
+  // that side, not "some unidentified material is required."
+  const rmat = (name, id) => id != null
+    ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name)
+    : ((prices || []).some((pr) => pr.materialName === name) ? name : "");
   let rowNum = 0;
   boxPartGroups(box).forEach(({ label: groupLabel, vars, parts }) => {
     (parts || []).forEach((part) => {
@@ -99,7 +106,11 @@ export function buildRoomRows(room, prices) {
   return (room.boxes || []).flatMap((box) => buildBoxRows(box, prices));
 }
 
-const rmat = (name, id, prices) => id != null ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name) : name;
+// See buildBoxRows' rmat above for why an unset id falls back to "" rather
+// than the raw stored text when that text isn't a real priced material.
+const rmat = (name, id, prices) => id != null
+  ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name)
+  : ((prices || []).some((pr) => pr.materialName === name) ? name : "");
 
 /**
  * Edge banding required for one box, in mm — sums each required part edge

@@ -204,6 +204,32 @@ export function packSheets(rows, getStockSize, kerf = 0) {
 }
 
 /**
+ * Pieces that cannot be cut from their material's stock sheet at all — too
+ * large in both orientations, so packSheets silently drops them (see "Piece
+ * too large for any sheet — skip" above) rather than ever placing them. A
+ * material stuck at a suspiciously low/zero sheet count despite having real
+ * parts is usually one of these, not a data problem — callers should show
+ * this list as an error rather than let the shortfall pass silently.
+ * rows        : same shape as packSheets — [{ material, w, h, qty, label, rowNum }]
+ * getStockSize: (material) => { sheetW, sheetH } — defaults to 2440×1220.
+ * returns     : [{ material, label, rowNum, w, h, sheetW, sheetH }]
+ */
+export function findOversizedPieces(rows, getStockSize) {
+  const out = [];
+  (rows || []).forEach((row) => {
+    if (!row.material || !+row.w || !+row.h) return;
+    const { sheetW = 2440, sheetH = 1220 } = getStockSize(row.material) || {};
+    const w = +row.w, h = +row.h;
+    const fitsAsIs = w <= sheetW && h <= sheetH;
+    const fitsRotated = h <= sheetW && w <= sheetH;
+    if (!fitsAsIs && !fitsRotated) {
+      out.push({ material: row.material, label: row.label || "", rowNum: row.rowNum || 0, w, h, sheetW, sheetH });
+    }
+  });
+  return out;
+}
+
+/**
  * Actual required sheet count per material, computed via real nesting
  * (packSheets) instead of a naive area-ratio estimate. Used by BOQ and
  * Quotation pages so cost reflects real waste (leftover offcuts that can't
