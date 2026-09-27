@@ -37,7 +37,10 @@ export async function authFetch(path: string, init: RequestInit = {}) {
   const token = getAuthToken();
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  if (init.body && !headers.has("Content-Type")) {
+  // FormData must be left to the browser to set its own multipart boundary —
+  // forcing application/json here would silently break any authenticated
+  // file upload that uses authFetch.
+  if (init.body && !headers.has("Content-Type") && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
   return fetch(`${API_URL}${path}`, { ...init, headers });

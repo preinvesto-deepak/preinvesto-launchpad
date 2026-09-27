@@ -14,6 +14,7 @@ import DimensionsEntry from "./pages/DimensionsEntry";
 import ProjectBOQ from "./pages/ProjectBOQ";
 import ProjectQuotation from "./pages/ProjectQuotation";
 import Profile from "./pages/Profile";
+import DesignGallery from "./pages/DesignGallery";
 
 import "./interior.css";
 
@@ -22,6 +23,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/interior/projects": "Projects & Rooms",
   "/interior/sub-projects": "Projects & Rooms",
   "/interior/template-master": "Templates",
+  "/interior/design-gallery": "Design Gallery",
   "/interior/items-pricing": "Items Pricing",
   "/interior/material-models": "Material Models",
   "/interior/dimensions-entry": "Dimensions Entry",
@@ -155,6 +157,7 @@ const InteriorApp = () => {
               <Route path="projects" element={<Projects />} />
               <Route path="sub-projects" element={<SubProjects />} />
               <Route path="template-master" element={<TemplateMaster />} />
+              <Route path="design-gallery" element={<DesignGallery />} />
               <Route path="items-pricing" element={<ItemsPricing />} />
               <Route path="material-models" element={<MaterialModels />} />
               <Route path="dimensions-entry" element={<DimensionsEntry />} />

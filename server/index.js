@@ -44,6 +44,27 @@ const upload = multer({
   },
 });
 
+// Multer: save Design Gallery uploads to public/uploads/gallery/ — kept
+// separate from the property-photo storage/route above.
+const uploadsGalleryDir = path.join(__dirname, '../public/uploads/gallery');
+if (!fs.existsSync(uploadsGalleryDir)) fs.mkdirSync(uploadsGalleryDir, { recursive: true });
+const galleryStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadsGalleryDir),
+  filename: (_req, file, cb) => {
+    const ext  = path.extname(file.originalname).toLowerCase();
+    const name = `${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 15)}_${crypto.randomBytes(4).toString('hex')}${ext}`;
+    cb(null, name);
+  },
+});
+const uploadGallery = multer({
+  storage: galleryStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    cb(null, allowed.includes(file.mimetype));
+  },
+});
+
 const pool = mysql.createPool({
   host: process.env.MYSQL_HOST,
   port: Number(process.env.MYSQL_PORT) || 3306,
@@ -105,6 +126,17 @@ app.post('/api/upload_image.php', upload.single('image'), (req, res) => {
     return res.status(400).json({ error: 'No image uploaded or invalid file type' });
   }
   res.json({ url: `/uploads/properties/${req.file.filename}` });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/upload_gallery_image.php — upload a Design Gallery image (dev
+// mirror of PHP)
+// ---------------------------------------------------------------------------
+app.post('/api/upload_gallery_image.php', uploadGallery.single('image'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No image uploaded or invalid file type' });
+  }
+  res.json({ url: `/uploads/gallery/${req.file.filename}` });
 });
 
 // ---------------------------------------------------------------------------

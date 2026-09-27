@@ -34,6 +34,9 @@ const INTERIOR_DEFAULTS = {
   // quotations — separate from the per-project Company fields already in
   // Project Quotation Settings, which can still override it per quotation.
   companyProfile: {},
+  // Configure > Design Gallery tree — see AppDataContext.jsx's defaultData
+  // comment for the shape. moodBoard lives inside subProjects, not here.
+  designGallery: [],
 };
 
 export default function registerAuthRoutes(app, pool) {

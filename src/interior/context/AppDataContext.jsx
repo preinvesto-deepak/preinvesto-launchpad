@@ -32,6 +32,12 @@ const defaultData = {
   // quotations. Separate from the per-project Company fields in Project
   // Quotation Settings, which can still override it for one quotation.
   companyProfile: {},
+  // Configure > Design Gallery — an unlimited-depth tree of groups/sub-groups
+  // (a group and a sub-group are the same shape: { id, name, images, children })
+  // used to organize reference photos, which rooms then pick from to build a
+  // Mood Board (see subProjects[i].moodBoard, which rides along inside the
+  // existing subProjects field rather than needing its own default here).
+  designGallery: [],
 };
 
 // Debounce writes to the API so fast typing (a text input, a number field)
@@ -51,6 +57,7 @@ function AppDataProvider({ children }) {
   const [materialStockSettings, setMaterialStockSettings] = useState(defaultData.materialStockSettings);
   const [kerfWidth, setKerfWidth] = useState(defaultData.kerfWidth);
   const [companyProfile, setCompanyProfile] = useState(defaultData.companyProfile);
+  const [designGallery, setDesignGallery] = useState(defaultData.designGallery);
 
   // Gates the very first render (before the API has responded) and stops
   // the save effect from firing on the initial default state — otherwise
@@ -99,6 +106,7 @@ function AppDataProvider({ children }) {
         setMaterialStockSettings(data.materialStockSettings || {});
         setKerfWidth(data.kerfWidth ?? 0);
         setCompanyProfile(data.companyProfile || {});
+        setDesignGallery(data.designGallery || []);
         // Only now does state genuinely reflect the server — safe to arm autosave.
         setIsLoaded(true);
       })
@@ -130,6 +138,7 @@ function AppDataProvider({ children }) {
         materialStockSettings,
         kerfWidth,
         companyProfile,
+        designGallery,
       };
       saveState(dataToSave)
         .then(() => setSaveError(null))
@@ -153,6 +162,7 @@ function AppDataProvider({ children }) {
     materialStockSettings,
     kerfWidth,
     companyProfile,
+    designGallery,
   ]);
 
   // Update a price entry and link any unlinked parts that reference it by name.
@@ -203,6 +213,7 @@ function AppDataProvider({ children }) {
     setSelectedTemplateId("");
     setMaterialStockSettings({});
     setKerfWidth(0);
+    setDesignGallery([]);
     // The debounced save effect above picks this up and POSTs the cleared
     // state to MySQL — no direct API call needed here.
   };
@@ -216,6 +227,7 @@ function AppDataProvider({ children }) {
     setSelectedTemplateId("");
     setMaterialStockSettings({});
     setKerfWidth(0);
+    setDesignGallery([]);
     // Same as resetAllData — the debounced save effect persists this.
   };
 
@@ -244,6 +256,8 @@ function AppDataProvider({ children }) {
         setKerfWidth,
         companyProfile,
         setCompanyProfile,
+        designGallery,
+        setDesignGallery,
         renamePrice,
         resetAllData,
         restoreSampleData,

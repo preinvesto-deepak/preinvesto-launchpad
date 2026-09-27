@@ -28,6 +28,7 @@ $DEFAULTS = [
     'materialStockSettings'      => new stdClass(),
     'kerfWidth'                  => 0,
     'companyProfile'             => new stdClass(),
+    'designGallery'              => [],
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {

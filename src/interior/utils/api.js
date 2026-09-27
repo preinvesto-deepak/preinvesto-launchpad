@@ -35,3 +35,27 @@ export async function saveState(state) {
   }
   return res.json();
 }
+
+/**
+ * Uploads an already-cropped image (from ImageCropModal) for the Design
+ * Gallery. Returns the server-stored URL — the gallery tree only ever holds
+ * this URL, never the image data itself, so the account's autosaved
+ * workspace stays small no matter how many images accumulate.
+ */
+export async function uploadGalleryImage(blob, filename = "image.jpg") {
+  const form = new FormData();
+  form.append("image", blob, filename);
+  const res = await authFetch("/api/upload_gallery_image.php", {
+    method: "POST",
+    body: form,
+  });
+  if (res.status === 401) {
+    throw new Error("Your session has expired. Please sign in again.");
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Failed to upload image (${res.status})`);
+  }
+  const body = await res.json();
+  return body.url;
+}

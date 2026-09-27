@@ -4,8 +4,9 @@ import { useAppData } from "../context/AppDataContext";
 import { formatCurrency, mmToFeet, feetToMm, roundTo2 } from "../utils/unitConversions";
 import CutSheetOptimizer from "./CutSheetOptimizer";
 import ProjectQuotation from "./ProjectQuotation";
-import { packSheets } from "../utils/binPack";
+import { packSheets, findOversizedPieces } from "../utils/binPack";
 import { GROUP_OPTIONS } from "../data/priceData";
+import MoodBoardCanvas from "../components/MoodBoardCanvas";
 
 // Annotates a group-sorted row list with rowSpan info so the "Group" cell can
 // be rendered once per group (merged) instead of repeated on every row.
@@ -20,11 +21,6 @@ function withGroupSpan(rows, groupKey = "group") {
     return { ...row, _groupFirst: isFirst, _groupSpan: span };
   });
 }
-
-// Groups shown in the Hardware & Consumables table — every Items Pricing
-// group except the sheet-material ones (Wood/Laminate qty is finalized via
-// the Sheet Calculation & Cut List section instead).
-const HARDWARE_GROUPS = GROUP_OPTIONS.filter((g) => g !== "Wood" && g !== "Laminate");
 
 const LABEL_TO_GROUP = {
   "Door Ply":         "Wood",
@@ -874,7 +870,9 @@ function Projects() {
     materialModelRates,
     materialModelProfitPercent,
     materialStockSettings,
+    setMaterialStockSettings,
     templates,
+    designGallery,
   } = useAppData();
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1299,7 +1297,12 @@ function Projects() {
   const generateCutSheet = () => {
     if (!activeBox) return [];
     const rows = [];
-    const rmat = (name, id) => id != null ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name) : name;
+    // id unset: only trust the raw text if it still names a real priced
+    // material — a stale/placeholder string means nothing is required on
+    // that side, not "some unidentified material is required."
+    const rmat = (name, id) => id != null
+      ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name)
+      : ((prices || []).some((pr) => pr.materialName === name) ? name : "");
     let rowNum = 0;
     boxPartGroups(activeBox).forEach(({ vars, parts, label: groupLabel }) => {
       (parts || []).forEach((part) => {
@@ -1328,7 +1331,12 @@ function Projects() {
   // ── Cut Sheet for ALL boxes in the active room ───────────────────────────────
   const generateAllBoxesCutSheet = () => {
     const rows = [];
-    const rmat = (name, id) => id != null ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name) : name;
+    // id unset: only trust the raw text if it still names a real priced
+    // material — a stale/placeholder string means nothing is required on
+    // that side, not "some unidentified material is required."
+    const rmat = (name, id) => id != null
+      ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name)
+      : ((prices || []).some((pr) => pr.materialName === name) ? name : "");
     boxes.forEach((box) => {
       let rowNum = 0;
       boxPartGroups(box).forEach(({ vars, parts, label: groupLabel }) => {
@@ -1362,7 +1370,12 @@ function Projects() {
   // returns: { [edgeBandMaterialName]: lengthMm }
   const computeBoxEdgeBandingMm = (box) => {
     const totals = {};
-    const rmat = (name, id) => id != null ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name) : name;
+    // id unset: only trust the raw text if it still names a real priced
+    // material — a stale/placeholder string means nothing is required on
+    // that side, not "some unidentified material is required."
+    const rmat = (name, id) => id != null
+      ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name)
+      : ((prices || []).some((pr) => pr.materialName === name) ? name : "");
     boxPartGroups(box).forEach(({ vars, parts, sheet }) => {
       (parts || []).forEach((part) => {
         if (part.req === false) return;
@@ -1415,8 +1428,10 @@ function Projects() {
     return [{ material: boxType, base, extra, qty: Math.round((base + extra) * 100) / 100 }];
   };
 
-  // ── Material Summary across ALL boxes in the active room ────────────────────
-  const computeMatSummary = () => {
+  // Real sheet-nesting count per Wood/Laminate material for the active room —
+  // one source of truth shared by "Hardware & Consumables" (AUTO rows) and
+  // "3. Material Summary" so the two sections never disagree.
+  const computeSheetRows = () => {
     const rows = generateAllBoxesCutSheet();
     const getStockSize = (mat) => {
       const s = materialStockSettings?.[mat];
@@ -1426,11 +1441,31 @@ function Projects() {
     const sheetCount = {};
     packed.forEach((s) => { sheetCount[s.material] = (sheetCount[s.material] || 0) + 1; });
     const materials = [...new Set(rows.map((r) => r.material).filter(Boolean))];
-    const sheetRows = materials.map((material) => {
+    return materials.map((material) => {
       const priceEntry = (prices || []).find((p) => p.materialName === material);
-      const extraSheets = Math.max(0, Number(materialStockSettings?.[material]?.extraQty) || 0);
-      return { material, group: priceEntry?.group || "Other", requiredQty: (sheetCount[material] || 0) + extraSheets, unit: priceEntry?.unit || "Sheet" };
+      const base = sheetCount[material] || 0;
+      const extra = Math.max(0, Number(materialStockSettings?.[material]?.extraQty) || 0);
+      return { material, group: priceEntry?.group || "Other", base, extra, requiredQty: base + extra, unit: priceEntry?.unit || "Sheet" };
     });
+  };
+
+  // Parts whose size doesn't fit their material's stock sheet in any
+  // orientation — packSheets silently drops these (see findOversizedPieces),
+  // which otherwise shows up as a confusing "0 sheets" with no explanation.
+  // Surfaced as an error banner above "Material Details" and "3. Material
+  // Summary" instead of failing silently.
+  const computeOversizedPieces = () => {
+    const rows = generateAllBoxesCutSheet();
+    const getStockSize = (mat) => {
+      const s = materialStockSettings?.[mat];
+      return { sheetW: s?.sheetW || 2440, sheetH: s?.sheetH || 1220 };
+    };
+    return findOversizedPieces(rows, getStockSize);
+  };
+
+  // ── Material Summary across ALL boxes in the active room ────────────────────
+  const computeMatSummary = () => {
+    const sheetRows = computeSheetRows();
 
     const edgeSummed = {};
     boxes.forEach((box) => {
@@ -1485,7 +1520,12 @@ function Projects() {
   // walks every room, using each room's own persisted Edge/Carpenter extra
   // buffers (not the currently-active room's local state).
   const computeProjectMatSummary = () => {
-    const rmat = (name, id) => id != null ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name) : name;
+    // id unset: only trust the raw text if it still names a real priced
+    // material — a stale/placeholder string means nothing is required on
+    // that side, not "some unidentified material is required."
+    const rmat = (name, id) => id != null
+      ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name)
+      : ((prices || []).some((pr) => pr.materialName === name) ? name : "");
     const rows = [];
     rooms.forEach((room) => {
       (room.boxes || []).forEach((box) => {
@@ -1719,7 +1759,7 @@ function Projects() {
         ) : (
           <>
             {/* ── Project Header ── */}
-            <div style={{ padding: "12px 24px 8px", borderBottom: "1px solid #e5e7eb", background: "#fff" }}>
+            <div className="no-print" style={{ padding: "12px 24px 8px", borderBottom: "1px solid #e5e7eb", background: "#fff" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
                 <div>
                   <h2 style={{ margin: "0 0 6px", fontSize: 20 }}>{selectedProject.name}</h2>
@@ -1757,8 +1797,8 @@ function Projects() {
             </div>
 
             {/* ── Project-level Tab Bar ── */}
-            <div style={{ borderBottom: "2px solid #e5e7eb", padding: "0 24px", display: "flex", alignItems: "flex-end", gap: 0, background: "#fff" }}>
-              {[["rooms", "🏠 Rooms & Boxes"], ["material-models", "📋 Material Models"], ["summary", "📊 Summary"], ["quotation", "🧾 Quotation"]].map(([tab, label]) => {
+            <div className="no-print" style={{ borderBottom: "2px solid #e5e7eb", padding: "0 24px", display: "flex", alignItems: "flex-end", gap: 0, background: "#fff" }}>
+              {[["rooms", "🏠 Rooms & Boxes"], ["material-models", "📋 Material Models"], ["summary", "📊 Summary"], ["quotation", "🧾 Quotation"], ["mood-board", "🖼️ Mood Board"]].map(([tab, label]) => {
                 const active = projectTab === tab;
                 return (
                   <button
@@ -1799,6 +1839,50 @@ function Projects() {
               <div style={{ padding: "20px 24px" }}>
                 <ProjectQuotation initialProjectName={selectedProject.name} lockProject />
               </div>
+            )}
+
+            {/* ── Mood Board Tab — freeform per-room canvas built from Design
+                Gallery images (Configure > Design Gallery). Its own room
+                switcher, since a project can have several rooms and a mood
+                board is scoped to one room at a time (room.moodBoard). ── */}
+            {projectTab === "mood-board" && (
+              <>
+                {rooms.length > 1 && (
+                  <div className="no-print" style={{ borderBottom: "2px solid #e5e7eb", padding: "0 24px", display: "flex", alignItems: "flex-end", gap: 2, flexWrap: "wrap", background: "#fff" }}>
+                    {rooms.map((room) => {
+                      const isActive = activeRoom?.id === room.id || (!activeRoomId && rooms[0]?.id === room.id);
+                      return (
+                        <button
+                          key={room.id}
+                          onClick={() => setActiveRoomId(room.id)}
+                          style={{
+                            padding: "7px 16px", border: "none",
+                            borderBottom: isActive ? "3px solid #2563eb" : "3px solid transparent",
+                            background: "none", color: isActive ? "#2563eb" : "#374151",
+                            fontWeight: isActive ? 700 : 400, cursor: "pointer", fontSize: 14,
+                            marginBottom: -2, whiteSpace: "nowrap",
+                          }}
+                        >
+                          {room.subProject || room.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                <div style={{ padding: "20px 24px" }}>
+                  {activeRoom ? (
+                    <MoodBoardCanvas
+                      room={activeRoom}
+                      designGallery={designGallery}
+                      onChange={(moodBoard) => updateRoomField("moodBoard", moodBoard)}
+                    />
+                  ) : (
+                    <div style={{ color: "#9ca3af", fontSize: 13, padding: 24, textAlign: "center" }}>
+                      Add a room first (🏠 Rooms & Boxes tab) to build its Mood Board.
+                    </div>
+                  )}
+                </div>
+              </>
             )}
 
             {/* ── Project Summary Tab — total material required + costed across
@@ -2345,6 +2429,25 @@ function Projects() {
                                 </div>
                               );
                             };
+                            // A part's own W×H can't be re-nested per material once cut — the
+                            // core board and both laminate faces are the same physical piece —
+                            // so one size check against each selected material's stock sheet
+                            // catches what packSheets would otherwise drop silently later.
+                            const oversizedInfo = (p) => {
+                              const w = resolveFormula(p.widthMm, vars);
+                              const h = resolveFormula(p.heightMm, vars);
+                              if (!w || !h || w === "?" || h === "?") return null;
+                              const mats = [resolveMat(p.material, p.materialId), resolveMat(p.sideA, p.sideAId), resolveMat(p.sideB, p.sideBId)].filter(Boolean);
+                              const bad = [];
+                              mats.forEach((mat) => {
+                                const s = materialStockSettings?.[mat];
+                                const sheetW = s?.sheetW || 2440, sheetH = s?.sheetH || 1220;
+                                const fitsAsIs = w <= sheetW && h <= sheetH;
+                                const fitsRotated = h <= sheetW && w <= sheetH;
+                                if (!fitsAsIs && !fitsRotated) bad.push(`${mat}: ${w}×${h}mm doesn't fit its ${sheetW}×${sheetH}mm sheet in either orientation`);
+                              });
+                              return bad.length ? bad : null;
+                            };
                             return (
                               <div style={{ border: "1px solid #ede9fe", borderRadius: "0 0 8px 8px", padding: "12px 12px 4px", background: "#fff" }}>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -2378,9 +2481,15 @@ function Projects() {
                                           : "#f3f4f6";
                                         const edgeKey = `${subSheetId ?? "main"}_${p.id}`;
                                         const edgeOpen = expandedEdgeId === edgeKey;
+                                        const oversized = isReq ? oversizedInfo(p) : null;
                                         return (
-                                          <tr key={p.id} style={{ background: rowBg, verticalAlign: "top", opacity: isReq ? 1 : 0.45 }}>
-                                            <td style={{ ...numCell, color: "#6b7280", fontWeight: 600, paddingTop: 6 }}>{i + 1}</td>
+                                          <tr key={p.id} style={{ background: rowBg, verticalAlign: "top", opacity: isReq ? 1 : 0.45, ...(oversized ? { boxShadow: "inset 3px 0 0 #dc2626" } : {}) }}>
+                                            <td style={{ ...numCell, color: "#6b7280", fontWeight: 600, paddingTop: 6 }}>
+                                              {i + 1}
+                                              {oversized && (
+                                                <div title={oversized.join("\n")} style={{ fontSize: 13, color: "#dc2626", cursor: "help", marginTop: 2 }}>⚠</div>
+                                              )}
+                                            </td>
                                             <td style={txtCell}>
                                               <select
                                                 value={p.group || "Ply"}
@@ -2416,8 +2525,8 @@ function Projects() {
                                                 {laminateOptions.map((o) => <option key={o} value={o}>{o}</option>)}
                                               </select>
                                             </td>
-                                            <td style={{ ...numCell, padding: "3px 4px" }}>{formulaInp(p, "widthMm")}</td>
-                                            <td style={{ ...numCell, padding: "3px 4px" }}>{formulaInp(p, "heightMm")}</td>
+                                            <td style={{ ...numCell, padding: "3px 4px", ...(oversized ? { background: "#fee2e2" } : {}) }}>{formulaInp(p, "widthMm")}</td>
+                                            <td style={{ ...numCell, padding: "3px 4px", ...(oversized ? { background: "#fee2e2" } : {}) }}>{formulaInp(p, "heightMm")}</td>
                                             <td style={{ ...numCell, padding: "3px 4px" }}>{formulaInp(p, "qty")}</td>
                                             <td style={txtCell}>
                                               <select value={resolveMat(p.material, p.materialId) || ""} onChange={(e) => { const name = e.target.value; const pi = (prices || []).find((pr) => pr.materialName === name); updatePartFields(p.id, { material: name, materialId: pi?.id ?? null }, subSheetId); }} style={{ fontSize: 12, padding: "2px 4px", width: "100%" }}>
@@ -2807,14 +2916,25 @@ function Projects() {
                     {boxes.length > 0 && (() => {
                       const groupOf = (mat) => (prices || []).find((p) => p.materialName === mat)?.group || "Other";
                       // Every group present in Items Pricing shows up here automatically —
-                      // including ones added after HARDWARE_GROUPS was written — except
-                      // Wood/Laminate, whose quantities are finalized via Sheet Calculation
-                      // & Cut List instead of this hardware table.
+                      // including custom groups not in the fixed GROUP_OPTIONS list. Wood/
+                      // Laminate get a single room-wide AUTO row per material below (real
+                      // sheet nesting), not a per-box one.
                       const dynamicGroups = Array.from(new Set([
-                        ...HARDWARE_GROUPS,
-                        ...(prices || []).map((p) => p.group || "").filter((g) => g && g !== "Wood" && g !== "Laminate"),
+                        ...GROUP_OPTIONS,
+                        ...(prices || []).map((p) => p.group || "").filter(Boolean),
                       ]));
                       const allRows = [];
+                      // Wood/Laminate AUTO rows are room-wide (real sheet nesting spans
+                      // every box, so they can't be split per box without overstating the
+                      // sheet count) — one combined "All Boxes" row per material, the same
+                      // numbers "3. Material Summary" shows.
+                      computeSheetRows().forEach((r) => {
+                        allRows.push({
+                          id: `sheet_${r.material}`, materialName: r.material, base: r.base, extra: r.extra,
+                          unit: r.unit, auto: true, autoType: "sheet",
+                          boxId: "all", boxName: "All Boxes",
+                        });
+                      });
                       boxes.forEach((box) => {
                         computeBoxEdgeBandingRows(box).forEach((r) => {
                           allRows.push({
@@ -2851,17 +2971,28 @@ function Projects() {
                         if (g && rowsByGroup[g]) rowsByGroup[g].push(hw);
                         else unassignedHwRows.push(hw);
                       });
+                      const oversizedPieces = computeOversizedPieces();
 
                       return (
                         <div style={{ marginTop: 16 }}>
                           <SectionHeader
-                            title="2. Hardware & Consumables — All Boxes"
+                            title="2. Material Details — All Boxes"
                             open={openSections.hardware}
                             onToggle={() => toggleSection("hardware")}
                             style={{ marginTop: 0 }}
                           />
                           {openSections.hardware && (
                             <div style={{ border: "1px solid #e5e7eb", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "10px 10px 6px", background: "#fff" }}>
+                              {oversizedPieces.length > 0 && (
+                                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "8px 12px", marginBottom: 10, fontSize: 12, color: "#991b1b" }}>
+                                  <strong>⚠ {oversizedPieces.length} part{oversizedPieces.length !== 1 ? "s" : ""} too large for its stock sheet</strong> — dropped from the sheet count below instead of being silently ignored. Fix the part's size or the material's sheet size in Material Models.
+                                  <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                                    {oversizedPieces.map((p, i) => (
+                                      <li key={i}>{p.label ? `${p.label} — ` : ""}{p.material}: {p.w}×{p.h}mm doesn't fit a {p.sheetW}×{p.sheetH}mm sheet in either orientation</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
                               <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 8 }}>
                                 Select items for any of the {boxes.length} box{boxes.length !== 1 ? "es" : ""} below — no need to switch box tabs.
                               </div>
@@ -2927,12 +3058,14 @@ function Projects() {
                                                     onChange={(e) => {
                                                       if (hw.autoType === "edge") setEdgeExtraMtr(e.target.value);
                                                       else if (hw.autoType === "carpenter") setCarpenterExtraSft(e.target.value);
+                                                      else if (hw.autoType === "sheet") setMaterialStockSettings((prev) => ({ ...prev, [hw.materialName]: { ...(prev?.[hw.materialName] || {}), extraQty: e.target.value } }));
                                                       else updateHardwareItem(hw.boxId, hw.id, "extra", e.target.value);
                                                     }}
                                                     onBlur={(e) => {
                                                       const v = Math.max(0, Number(e.target.value) || 0);
                                                       if (hw.autoType === "edge") setEdgeExtraMtr(v);
                                                       else if (hw.autoType === "carpenter") setCarpenterExtraSft(v);
+                                                      else if (hw.autoType === "sheet") setMaterialStockSettings((prev) => ({ ...prev, [hw.materialName]: { ...(prev?.[hw.materialName] || {}), extraQty: v } }));
                                                       else updateHardwareItem(hw.boxId, hw.id, "extra", v);
                                                     }}
                                                     style={{ width: 48, fontSize: 12, padding: "2px 4px", textAlign: "center" }} />
@@ -3018,8 +3151,14 @@ function Projects() {
                       const totalAreaSft = boxes
                         .filter((b) => b.includeInQuotation !== false)
                         .reduce((s, b) => s + quotationAreaSft(b), 0);
+                      const oversizedPieces = computeOversizedPieces();
                       return (
                         <div style={{ marginTop: 16 }}>
+                          {oversizedPieces.length > 0 && (
+                            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "8px 12px", marginBottom: 8, fontSize: 12, color: "#991b1b" }}>
+                              <strong>⚠ {oversizedPieces.length} part{oversizedPieces.length !== 1 ? "s" : ""} too large for its stock sheet</strong> — excluded from the sheet counts below (see "2. Material Details" for which parts).
+                            </div>
+                          )}
                           <SectionHeader
                             title="3. Material Summary"
                             open={openSections.summary}
@@ -3353,7 +3492,7 @@ function Projects() {
 
       {hardwarePicker && (
         <ProjItemPickerModal
-          materialName="Hardware & Consumables"
+          materialName="Material Details"
           prices={prices}
           initialGroup={hardwarePicker.group}
           onSelect={(p) => {

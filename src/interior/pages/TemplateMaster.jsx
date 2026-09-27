@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
 import { mmToFeet, feetToMm, roundTo2, formatCurrency } from "../utils/unitConversions";
 import CutSheetOptimizer from "./CutSheetOptimizer";
-import { packSheets } from "../utils/binPack";
+import { packSheets, findOversizedPieces } from "../utils/binPack";
 import { GROUP_OPTIONS } from "../data/priceData";
 
 // Annotates a group-sorted row list with rowSpan info so the "Group" cell can
@@ -454,11 +454,6 @@ const LABEL_TO_GROUP = {
   "Edge Beading":     "Edge Beading",
 };
 
-// Groups shown in the Hardware & Consumables table — every Items Pricing
-// group except the sheet-material ones (Wood/Laminate qty is finalized via
-// the Sheet Calculation & Cut List section instead).
-const HARDWARE_GROUPS = GROUP_OPTIONS.filter((g) => g !== "Wood" && g !== "Laminate");
-
 // Grouped tabs + multi-field search, mirroring the Items Pricing page's own
 // filter UI so picking a material here feels the same as browsing it there.
 function ItemPickerModal({ label, prices, onSelect, onClose, initialGroup }) {
@@ -601,7 +596,7 @@ function SectionHeader({ title, open, onToggle, action, style: extraStyle }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 function TemplateMaster() {
-  const { templates, setTemplates, prices, materialStockSettings, materialModelRates } = useAppData();
+  const { templates, setTemplates, prices, materialStockSettings, setMaterialStockSettings, materialModelRates } = useAppData();
 
   // Left panel
   const [search, setSearch] = useState("");
@@ -702,7 +697,12 @@ function TemplateMaster() {
   // no wastage buffer applied here. returns: { [edgeBandMaterialName]: lengthMm }
   const computeBoxEdgeBandingMm = (box) => {
     const totals = {};
-    const rmat = (name, id) => id != null ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name) : name;
+    // id unset: only trust the raw text if it still names a real priced
+    // material — a stale/placeholder string means nothing is required on
+    // that side, not "some unidentified material is required."
+    const rmat = (name, id) => id != null
+      ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name)
+      : ((prices || []).some((pr) => pr.materialName === name) ? name : "");
     boxPartGroups(box).forEach(({ vars, parts, sheet }) => {
       (parts || []).forEach((part) => {
         if (part.req === false) return;
@@ -759,11 +759,10 @@ function TemplateMaster() {
     return [{ material: boxType, base, extra, qty: Math.round((base + extra) * 100) / 100 }];
   };
 
-  // ── Material Summary across ALL boxes ────────────────────────────────────────
-  // Sheet materials come from real nesting; Edge Banding is picked up directly
-  // from what each box's own Hardware & Consumables panel already shows (same
-  // per-box rows, summed across boxes) — one source of truth, not a second calc.
-  const computeMatSummary = () => {
+  // Real sheet-nesting count per Wood/Laminate material — one source of truth
+  // shared by "2. Hardware & Consumables" (AUTO rows) and "3. Material
+  // Summary" so the two sections never disagree on how many sheets are needed.
+  const computeSheetRows = () => {
     if (!draft) return [];
     const rows = generateAllBoxesCutSheet();
     const getStockSize = (mat) => {
@@ -774,13 +773,38 @@ function TemplateMaster() {
     const sheetCount = {};
     packed.forEach((s) => { sheetCount[s.material] = (sheetCount[s.material] || 0) + 1; });
     const materials = [...new Set(rows.map((r) => r.material).filter(Boolean))];
+    return materials.map((material) => {
+      const priceEntry = (prices || []).find((p) => p.materialName === material);
+      const base = sheetCount[material] || 0;
+      const extra = Math.max(0, Number(materialStockSettings?.[material]?.extraQty) || 0);
+      return { material, group: priceEntry?.group || "Other", base, extra, requiredQty: base + extra, unit: priceEntry?.unit || "Sheet" };
+    });
+  };
+
+  // Parts whose size doesn't fit their material's stock sheet in any
+  // orientation — packSheets silently drops these (see findOversizedPieces),
+  // which otherwise shows up as a confusing "0 sheets" with no explanation.
+  // Surfaced as an error banner above "2. Material Details" and "3. Material
+  // Summary" instead of failing silently.
+  const computeOversizedPieces = () => {
+    if (!draft) return [];
+    const rows = generateAllBoxesCutSheet();
+    const getStockSize = (mat) => {
+      const s = materialStockSettings?.[mat];
+      return { sheetW: s?.sheetW || 2440, sheetH: s?.sheetH || 1220 };
+    };
+    return findOversizedPieces(rows, getStockSize);
+  };
+
+  // ── Material Summary across ALL boxes ────────────────────────────────────────
+  // Sheet materials come from real nesting; Edge Banding is picked up directly
+  // from what each box's own Hardware & Consumables panel already shows (same
+  // per-box rows, summed across boxes) — one source of truth, not a second calc.
+  const computeMatSummary = () => {
+    if (!draft) return [];
     // Segregate by the "group" field from Items Pricing (Wood, Laminate, ...)
     // so the summary mirrors the BOQ's category layout.
-    const sheetRows = materials.map((material) => {
-      const priceEntry = (prices || []).find((p) => p.materialName === material);
-      const extraSheets = Math.max(0, Number(materialStockSettings?.[material]?.extraQty) || 0);
-      return { material, group: priceEntry?.group || "Other", requiredQty: (sheetCount[material] || 0) + extraSheets, unit: priceEntry?.unit || "Sheet" };
-    });
+    const sheetRows = computeSheetRows();
 
     const edgeSummed = {};
     (draft.boxes || []).forEach((box) => {
@@ -839,7 +863,12 @@ function TemplateMaster() {
   // ── Cut Sheet Generator ───────────────────────────────────────────────────────
   const generateCutSheet = () => {
     if (!activeBox) return [];
-    const rmat = (name, id) => id != null ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name) : name;
+    // id unset: only trust the raw text if it still names a real priced
+    // material — a stale/placeholder string means nothing is required on
+    // that side, not "some unidentified material is required."
+    const rmat = (name, id) => id != null
+      ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name)
+      : ((prices || []).some((pr) => pr.materialName === name) ? name : "");
     const rows = [];
     let rowNum = 0;
     boxPartGroups(activeBox).forEach(({ vars, parts, label: groupLabel }) => {
@@ -870,7 +899,12 @@ function TemplateMaster() {
   const generateAllBoxesCutSheet = () => {
     if (!draft) return [];
     const rows = [];
-    const rmat = (name, id) => id != null ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name) : name;
+    // id unset: only trust the raw text if it still names a real priced
+    // material — a stale/placeholder string means nothing is required on
+    // that side, not "some unidentified material is required."
+    const rmat = (name, id) => id != null
+      ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name)
+      : ((prices || []).some((pr) => pr.materialName === name) ? name : "");
     (draft.boxes || []).forEach((box) => {
       let rowNum = 0;
       boxPartGroups(box).forEach(({ vars, parts, label: groupLabel }) => {
@@ -1637,9 +1671,35 @@ function TemplateMaster() {
                                     : "#f3f4f6";
                                   const edgeKey = `${subSheetId ?? "main"}_${p.id}`;
                                   const edgeOpen = expandedEdgeId === edgeKey;
+                                  // A part's own W×H can't be re-nested per material once cut —
+                                  // the core board and both laminate faces are the same physical
+                                  // piece — so one size check against each selected material's
+                                  // stock sheet catches what packSheets would otherwise drop
+                                  // silently later.
+                                  const oversized = (() => {
+                                    if (!isReq) return null;
+                                    const w = resolveFormula(p.widthMm, vars);
+                                    const h = resolveFormula(p.heightMm, vars);
+                                    if (!w || !h || w === "?" || h === "?") return null;
+                                    const mats = [resolveMat(p.material, p.materialId), resolveMat(p.sideA, p.sideAId), resolveMat(p.sideB, p.sideBId)].filter(Boolean);
+                                    const bad = [];
+                                    mats.forEach((mat) => {
+                                      const s = materialStockSettings?.[mat];
+                                      const sheetW = s?.sheetW || 2440, sheetH = s?.sheetH || 1220;
+                                      const fitsAsIs = w <= sheetW && h <= sheetH;
+                                      const fitsRotated = h <= sheetW && w <= sheetH;
+                                      if (!fitsAsIs && !fitsRotated) bad.push(`${mat}: ${w}×${h}mm doesn't fit its ${sheetW}×${sheetH}mm sheet in either orientation`);
+                                    });
+                                    return bad.length ? bad : null;
+                                  })();
                                   return (
-                                    <tr key={p.id} style={{ background: rowBg, verticalAlign: "top", opacity: isReq ? 1 : 0.45 }}>
-                                      <td style={{ ...numCell, color: "#6b7280", fontWeight: 600, paddingTop: 6 }}>{i + 1}</td>
+                                    <tr key={p.id} style={{ background: rowBg, verticalAlign: "top", opacity: isReq ? 1 : 0.45, ...(oversized ? { boxShadow: "inset 3px 0 0 #dc2626" } : {}) }}>
+                                      <td style={{ ...numCell, color: "#6b7280", fontWeight: 600, paddingTop: 6 }}>
+                                        {i + 1}
+                                        {oversized && (
+                                          <div title={oversized.join("\n")} style={{ fontSize: 13, color: "#dc2626", cursor: "help", marginTop: 2 }}>⚠</div>
+                                        )}
+                                      </td>
                                       <td style={txtCell}>
                                         <select
                                           value={p.group || "Ply"}
@@ -1688,8 +1748,8 @@ function TemplateMaster() {
                                           {laminateOptions.map((o) => <option key={o} value={o}>{o}</option>)}
                                         </select>
                                       </td>
-                                      <td style={{ ...numCell, padding: "3px 4px" }}>{formulaInp("widthMm")}</td>
-                                      <td style={{ ...numCell, padding: "3px 4px" }}>{formulaInp("heightMm")}</td>
+                                      <td style={{ ...numCell, padding: "3px 4px", ...(oversized ? { background: "#fee2e2" } : {}) }}>{formulaInp("widthMm")}</td>
+                                      <td style={{ ...numCell, padding: "3px 4px", ...(oversized ? { background: "#fee2e2" } : {}) }}>{formulaInp("heightMm")}</td>
                                       <td style={{ ...numCell, padding: "3px 4px" }}>{formulaInp("qty")}</td>
                                       <td style={txtCell}>
                                         <select
@@ -2188,17 +2248,28 @@ function TemplateMaster() {
               {draft && boxes.length > 0 && (() => {
                 const groupOf = (mat) => (prices || []).find((p) => p.materialName === mat)?.group || "Other";
                 // Every group present in Items Pricing shows up here automatically —
-                // including ones added after HARDWARE_GROUPS was written — except
-                // Wood/Laminate, whose quantities are finalized via Sheet Calculation
-                // & Cut List instead of this hardware table.
+                // including custom groups not in the fixed GROUP_OPTIONS list. Wood/
+                // Laminate get a single project-wide AUTO row per material below
+                // (real sheet nesting), not a per-box one.
                 const dynamicGroups = Array.from(new Set([
-                  ...HARDWARE_GROUPS,
-                  ...(prices || []).map((p) => p.group || "").filter((g) => g && g !== "Wood" && g !== "Laminate"),
+                  ...GROUP_OPTIONS,
+                  ...(prices || []).map((p) => p.group || "").filter(Boolean),
                 ]));
                 // Every box's rows — auto Edge Banding + auto Carpenter (same calc as
                 // before, now just listed per box instead of per active-box tab) plus
                 // its manually-added hardware/consumables — all tagged with their box.
                 const allRows = [];
+                // Wood/Laminate AUTO rows are project-wide (real sheet nesting spans
+                // every box, so they can't be split per box without overstating the
+                // sheet count) — one combined "All Boxes" row per material, the same
+                // numbers "3. Material Summary" shows.
+                computeSheetRows().forEach((r) => {
+                  allRows.push({
+                    id: `sheet_${r.material}`, materialName: r.material, base: r.base, extra: r.extra,
+                    unit: r.unit, auto: true, autoType: "sheet",
+                    boxId: "all", boxName: "All Boxes",
+                  });
+                });
                 boxes.forEach((box) => {
                   computeBoxEdgeBandingRows(box).forEach((r) => {
                     allRows.push({
@@ -2235,17 +2306,28 @@ function TemplateMaster() {
                   if (g && rowsByGroup[g]) rowsByGroup[g].push(hw);
                   else unassignedHwRows.push(hw);
                 });
+                const oversizedPieces = computeOversizedPieces();
 
                 return (
                   <div style={{ marginTop: 16 }}>
                     <SectionHeader
-                      title="2. Hardware & Consumables — All Boxes"
+                      title="2. Material Details — All Boxes"
                       open={openSections.hardware}
                       onToggle={() => toggleSection("hardware")}
                       style={{ marginTop: 0 }}
                     />
                     {openSections.hardware && (
                       <div style={{ border: "1px solid #e5e7eb", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "10px 10px 6px", background: "#fff" }}>
+                        {oversizedPieces.length > 0 && (
+                          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "8px 12px", marginBottom: 10, fontSize: 12, color: "#991b1b" }}>
+                            <strong>⚠ {oversizedPieces.length} part{oversizedPieces.length !== 1 ? "s" : ""} too large for its stock sheet</strong> — dropped from the sheet count below instead of being silently ignored. Fix the part's size or the material's sheet size in Material Models.
+                            <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                              {oversizedPieces.map((p, i) => (
+                                <li key={i}>{p.label ? `${p.label} — ` : ""}{p.material}: {p.w}×{p.h}mm doesn't fit a {p.sheetW}×{p.sheetH}mm sheet in either orientation</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
                         <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 8 }}>
                           Select items for any of the {boxes.length} box{boxes.length !== 1 ? "es" : ""} below — no need to switch box tabs.
                         </div>
@@ -2311,12 +2393,14 @@ function TemplateMaster() {
                                               onChange={(e) => {
                                                 if (hw.autoType === "edge") setEdgeExtraMtr(e.target.value);
                                                 else if (hw.autoType === "carpenter") setCarpenterExtraSft(e.target.value);
+                                                else if (hw.autoType === "sheet") setMaterialStockSettings((prev) => ({ ...prev, [hw.materialName]: { ...(prev?.[hw.materialName] || {}), extraQty: e.target.value } }));
                                                 else updateHardwareItem(hw.boxId, hw.id, "extra", e.target.value);
                                               }}
                                               onBlur={(e) => {
                                                 const v = Math.max(0, Number(e.target.value) || 0);
                                                 if (hw.autoType === "edge") setEdgeExtraMtr(v);
                                                 else if (hw.autoType === "carpenter") setCarpenterExtraSft(v);
+                                                else if (hw.autoType === "sheet") setMaterialStockSettings((prev) => ({ ...prev, [hw.materialName]: { ...(prev?.[hw.materialName] || {}), extraQty: v } }));
                                                 else updateHardwareItem(hw.boxId, hw.id, "extra", v);
                                               }}
                                               style={{ width: 48, fontSize: 12, padding: "2px 4px", textAlign: "center" }} />
@@ -2400,8 +2484,14 @@ function TemplateMaster() {
                 // blank) in this template — the denominator for the per-sqft cost row
                 // below the Total, matching Projects.jsx's Material Summary.
                 const totalAreaSft = boxes.reduce((s, b) => s + quotationAreaSft(b), 0);
+                const oversizedPieces = computeOversizedPieces();
                 return (
                   <div style={{ marginTop: 16 }}>
+                    {oversizedPieces.length > 0 && (
+                      <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "8px 12px", marginBottom: 8, fontSize: 12, color: "#991b1b" }}>
+                        <strong>⚠ {oversizedPieces.length} part{oversizedPieces.length !== 1 ? "s" : ""} too large for its stock sheet</strong> — excluded from the sheet counts below (see "2. Material Details" for which parts).
+                      </div>
+                    )}
                     <SectionHeader
                       title="3. Material Summary"
                       open={openSections.summary}
@@ -2642,7 +2732,7 @@ function TemplateMaster() {
 
       {hardwarePicker && (
         <ItemPickerModal
-          label="Hardware & Consumables"
+          label="Material Details"
           prices={prices}
           initialGroup={hardwarePicker.group}
           onSelect={(name, id) => {
