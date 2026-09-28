@@ -14,57 +14,123 @@ function emptyBoard() {
   return { items: [], nextZIndex: 1 };
 }
 
-// Read-only recursive browser over the Design Gallery tree, for picking an
-// image to drop onto the canvas — same tree shape as DesignGallery.jsx's
-// TreeNode, but selection-only (no add/rename/delete here).
-function PickerNode({ node, depth, onPick }) {
-  const [open, setOpen] = useState(true);
-  const hasImages = (node.images || []).length > 0;
+function coverOf(node) {
+  return (node.images || []).find((i) => i.isDisplay) || (node.images || [])[0] || null;
+}
+function countImages(node) {
+  return (node.images || []).length + (node.children || []).reduce((s, c) => s + countImages(c), 0);
+}
+
+// Same folder-tile look as DesignGallery.jsx's FolderCard (tab + body,
+// favorite image as the cover) so browsing here feels like the same place —
+// just selection-only, no rename/delete.
+function PickerFolderCard({ node, onOpen }) {
+  const cover = coverOf(node);
+  const imgCount = countImages(node);
+  const subCount = (node.children || []).length;
   return (
-    <div>
-      <div
-        onClick={() => node.children.length && setOpen((o) => !o)}
-        style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 6px", paddingLeft: 6 + depth * 16, cursor: node.children.length ? "pointer" : "default", fontSize: 13, color: "#374151" }}
-      >
-        <span style={{ width: 12, fontSize: 10, color: "#9ca3af", visibility: node.children.length ? "visible" : "hidden" }}>{open ? "▾" : "▸"}</span>
-        <span style={{ fontWeight: 600 }}>{node.name}</span>
+    <div onClick={() => onOpen(node.id)} style={{ width: 300, cursor: "pointer", userSelect: "none" }}>
+      <div style={{ width: 104, height: 26, background: "#ddd6fe", borderRadius: "16px 16px 0 0", marginLeft: 16 }} />
+      <div style={{ width: "100%", height: 216, background: "#ddd6fe", borderRadius: "0 20px 20px 20px", overflow: "hidden", position: "relative", marginTop: -1, boxShadow: "0 3px 8px rgba(0,0,0,0.1)" }}>
+        {cover ? (
+          <img src={cover.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ) : (
+          <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 60, opacity: 0.7 }}>📁</div>
+        )}
+        {imgCount > 0 && (
+          <span style={{ position: "absolute", bottom: 10, right: 10, fontSize: 14, fontWeight: 700, color: "#fff", background: "rgba(0,0,0,0.55)", borderRadius: 14, padding: "3px 10px" }}>🖼 {imgCount}</span>
+        )}
+        {subCount > 0 && (
+          <span style={{ position: "absolute", bottom: 10, left: 10, fontSize: 14, fontWeight: 700, color: "#fff", background: "rgba(0,0,0,0.55)", borderRadius: 14, padding: "3px 10px" }}>📁 {subCount}</span>
+        )}
       </div>
-      {hasImages && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, paddingLeft: 6 + depth * 16 + 16, marginBottom: 6 }}>
-          {node.images.map((img) => (
-            <img
-              key={img.id}
-              src={img.url}
-              alt={img.name}
-              onClick={() => onPick(img)}
-              title={`Add "${img.name}"`}
-              style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }}
-            />
-          ))}
-        </div>
-      )}
-      {open && node.children.map((c) => (
-        <PickerNode key={c.id} node={c} depth={depth + 1} onPick={onPick} />
-      ))}
+      <div style={{ marginTop: 10, fontSize: 16, fontWeight: 600, color: "#374151", textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.name}</div>
     </div>
   );
 }
 
+// Same drill-down browsing model as DesignGallery.jsx (breadcrumb + folder
+// grid), but selection-only: clicking an image adds it to the board and
+// closes the picker. Thumbnails are shown large — this is the step users
+// pick from, so small/cramped tiles defeat the point.
 function ImagePickerModal({ designGallery, onPick, onClose }) {
+  const [pathIds, setPathIds] = useState([]);
+  const resolvePath = () => {
+    const path = [];
+    let level = designGallery || [];
+    for (const id of pathIds) {
+      const node = level.find((n) => n.id === id);
+      if (!node) break;
+      path.push(node);
+      level = node.children || [];
+    }
+    return path;
+  };
+  const path = resolvePath();
+  const currentNode = path.length ? path[path.length - 1] : null;
+  const currentChildren = currentNode ? currentNode.children : (designGallery || []);
+  const currentImages = currentNode ? (currentNode.images || []) : [];
+
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, width: 420, maxHeight: "80vh", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "14px 18px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontWeight: 700, fontSize: 15, color: "#1e3a5f" }}>Add image from gallery</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 16, cursor: "pointer", color: "#6b7280" }}>✕</button>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, width: 1200, maxWidth: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontWeight: 700, fontSize: 16, color: "#1e3a5f" }}>Add image from gallery</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#6b7280" }}>✕</button>
         </div>
-        <div style={{ padding: 12, overflow: "auto" }}>
+
+        <div style={{ padding: "12px 20px 0", display: "flex", alignItems: "center", flexWrap: "wrap", gap: 4, fontSize: 13 }}>
+          <span
+            onClick={() => setPathIds([])}
+            style={{ cursor: "pointer", fontWeight: path.length === 0 ? 700 : 500, color: path.length === 0 ? "#1e3a5f" : "#7c3aed" }}
+          >🏠 All Groups</span>
+          {path.map((n, i) => (
+            <span key={n.id}>
+              <span style={{ color: "#cbd5e1", margin: "0 4px" }}>/</span>
+              <span
+                onClick={() => setPathIds((prev) => prev.slice(0, i + 1))}
+                style={{ cursor: "pointer", fontWeight: i === path.length - 1 ? 700 : 500, color: i === path.length - 1 ? "#1e3a5f" : "#7c3aed" }}
+              >{n.name}</span>
+            </span>
+          ))}
+        </div>
+
+        <div style={{ padding: 20, overflow: "auto" }}>
           {(!designGallery || designGallery.length === 0) ? (
             <div style={{ color: "#9ca3af", fontSize: 13, padding: 16, textAlign: "center" }}>
               No images yet — add some under Configure &gt; Design Gallery first.
             </div>
           ) : (
-            designGallery.map((n) => <PickerNode key={n.id} node={n} depth={0} onPick={onPick} />)
+            <>
+              {currentChildren.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 18, marginBottom: currentImages.length ? 24 : 0 }}>
+                  {currentChildren.map((n) => (
+                    <PickerFolderCard key={n.id} node={n} onOpen={(id) => setPathIds((prev) => [...prev, id])} />
+                  ))}
+                </div>
+              )}
+              {currentImages.length > 0 && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 20 }}>
+                  {currentImages.map((img) => (
+                    <div
+                      key={img.id}
+                      onClick={() => onPick(img)}
+                      title={`Add "${img.name}"`}
+                      style={{ aspectRatio: "4 / 3", borderRadius: 14, overflow: "hidden", border: "1px solid #e5e7eb", cursor: "pointer", boxShadow: "0 2px 6px rgba(0,0,0,0.08)", transition: "transform 0.1s" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.03)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+                    >
+                      <img src={img.url} alt={img.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {currentChildren.length === 0 && currentImages.length === 0 && (
+                <div style={{ color: "#9ca3af", fontSize: 13, padding: 16, textAlign: "center" }}>
+                  This group has no images yet — add some under Configure &gt; Design Gallery.
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

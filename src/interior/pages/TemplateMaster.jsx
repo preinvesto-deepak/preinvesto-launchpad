@@ -34,9 +34,9 @@ async function copyToClipboard(text) {
       ta.style.opacity = "0";
       document.body.appendChild(ta);
       ta.select();
-      document.execCommand("copy");
+      const ok = document.execCommand("copy");
       document.body.removeChild(ta);
-      return true;
+      return ok;
     } catch {
       return false;
     }
@@ -49,28 +49,30 @@ async function copyToClipboard(text) {
 // is mouse-only; copy/paste covers touch devices and anyone who'd rather not
 // drag.
 function RefChip({ label, style: extraStyle }) {
-  const [copied, setCopied] = useState(false);
+  const [status, setStatus] = useState(null); // null | "copied" | "failed"
   const text = `{${label}}`;
   const handleCopy = async (e) => {
     e.stopPropagation();
-    if (await copyToClipboard(text)) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    }
+    const ok = await copyToClipboard(text);
+    setStatus(ok ? "copied" : "failed");
+    setTimeout(() => setStatus(null), 1200);
   };
+  const shownText = status === "copied" ? "✓ Copied" : status === "failed" ? "✕ Copy failed" : text;
+  const color = status === "copied" ? "#059669" : status === "failed" ? "#dc2626" : "#7c3aed";
+  const background = status === "copied" ? "#d1fae5" : status === "failed" ? "#fee2e2" : "#ede9fe";
   return (
     <span
       draggable
       onDragStart={(e) => { e.dataTransfer.setData("text/plain", text); e.dataTransfer.effectAllowed = "copy"; }}
       onClick={handleCopy}
-      title={copied ? "Copied!" : `Click to copy "${text}", or drag it into a formula field`}
+      title={status === "copied" ? "Copied!" : status === "failed" ? "Couldn't access the clipboard — try dragging the chip instead" : `Click to copy "${text}", or drag it into a formula field`}
       style={{
         fontSize: 10, fontFamily: "monospace", padding: "1px 6px", borderRadius: 4,
-        cursor: "grab", userSelect: "none", whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s",
-        color: copied ? "#059669" : "#7c3aed", background: copied ? "#d1fae5" : "#ede9fe",
+        cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s",
+        color, background,
         ...extraStyle,
       }}
-    >{copied ? "✓ Copied" : text}</span>
+    >{shownText}</span>
   );
 }
 
@@ -79,23 +81,24 @@ function RefChip({ label, style: extraStyle }) {
 // clipboard. Kept visually compact (just the grip glyph) since the {ref}
 // itself is already shown in the adjacent editable box.
 function GripChip({ refName }) {
-  const [copied, setCopied] = useState(false);
+  const [status, setStatus] = useState(null); // null | "copied" | "failed"
   const text = `{${refName}}`;
   const handleCopy = async (e) => {
     e.stopPropagation();
-    if (await copyToClipboard(text)) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    }
+    const ok = await copyToClipboard(text);
+    setStatus(ok ? "copied" : "failed");
+    setTimeout(() => setStatus(null), 1200);
   };
+  const glyph = status === "copied" ? "✓" : status === "failed" ? "✕" : "⠿";
+  const color = status === "copied" ? "#059669" : status === "failed" ? "#dc2626" : "#7c3aed";
   return (
     <span
       draggable
       onDragStart={(e) => { e.dataTransfer.setData("text/plain", text); e.dataTransfer.effectAllowed = "copy"; }}
       onClick={handleCopy}
-      title={copied ? "Copied!" : `Click to copy "${text}", or drag into a formula field`}
-      style={{ fontSize: 11, color: copied ? "#059669" : "#7c3aed", cursor: "grab", userSelect: "none", padding: "0 2px" }}
-    >{copied ? "✓" : "⠿"}</span>
+      title={status === "copied" ? "Copied!" : status === "failed" ? "Couldn't access the clipboard — try dragging instead" : `Click to copy "${text}", or drag into a formula field`}
+      style={{ fontSize: 11, color, cursor: "pointer", userSelect: "none", padding: "0 2px" }}
+    >{glyph}</span>
   );
 }
 

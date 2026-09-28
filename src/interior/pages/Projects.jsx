@@ -72,9 +72,9 @@ async function copyToClipboard(text) {
       ta.style.opacity = "0";
       document.body.appendChild(ta);
       ta.select();
-      document.execCommand("copy");
+      const ok = document.execCommand("copy");
       document.body.removeChild(ta);
-      return true;
+      return ok;
     } catch {
       return false;
     }
@@ -87,28 +87,30 @@ async function copyToClipboard(text) {
 // is mouse-only; copy/paste covers touch devices and anyone who'd rather not
 // drag.
 function RefChip({ label, style: extraStyle }) {
-  const [copied, setCopied] = useState(false);
+  const [status, setStatus] = useState(null); // null | "copied" | "failed"
   const text = `{${label}}`;
   const handleCopy = async (e) => {
     e.stopPropagation();
-    if (await copyToClipboard(text)) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    }
+    const ok = await copyToClipboard(text);
+    setStatus(ok ? "copied" : "failed");
+    setTimeout(() => setStatus(null), 1200);
   };
+  const label_ = status === "copied" ? "✓ Copied" : status === "failed" ? "✕ Copy failed" : text;
+  const color = status === "copied" ? "#059669" : status === "failed" ? "#dc2626" : "#7c3aed";
+  const background = status === "copied" ? "#d1fae5" : status === "failed" ? "#fee2e2" : "#ede9fe";
   return (
     <span
       draggable
       onDragStart={(e) => { e.dataTransfer.setData("text/plain", text); e.dataTransfer.effectAllowed = "copy"; }}
       onClick={handleCopy}
-      title={copied ? "Copied!" : `Click to copy "${text}", or drag it into a formula field`}
+      title={status === "copied" ? "Copied!" : status === "failed" ? "Couldn't access the clipboard — try dragging the chip instead" : `Click to copy "${text}", or drag it into a formula field`}
       style={{
         fontSize: 10, fontFamily: "monospace", padding: "1px 6px", borderRadius: 4,
-        cursor: "grab", userSelect: "none", whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s",
-        color: copied ? "#059669" : "#7c3aed", background: copied ? "#d1fae5" : "#ede9fe",
+        cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s",
+        color, background,
         ...extraStyle,
       }}
-    >{copied ? "✓ Copied" : text}</span>
+    >{label_}</span>
   );
 }
 
@@ -1798,7 +1800,7 @@ function Projects() {
 
             {/* ── Project-level Tab Bar ── */}
             <div className="no-print" style={{ borderBottom: "2px solid #e5e7eb", padding: "0 24px", display: "flex", alignItems: "flex-end", gap: 0, background: "#fff" }}>
-              {[["rooms", "🏠 Rooms & Boxes"], ["material-models", "📋 Material Models"], ["summary", "📊 Summary"], ["quotation", "🧾 Quotation"], ["mood-board", "🖼️ Mood Board"]].map(([tab, label]) => {
+              {[["mood-board", "🖼️ Mood Board"], ["rooms", "🏠 Rooms & Boxes"], ["material-models", "📋 Material Models"], ["summary", "📊 Summary"], ["quotation", "🧾 Quotation"]].map(([tab, label]) => {
                 const active = projectTab === tab;
                 return (
                   <button
@@ -1847,28 +1849,32 @@ function Projects() {
                 board is scoped to one room at a time (room.moodBoard). ── */}
             {projectTab === "mood-board" && (
               <>
-                {rooms.length > 1 && (
-                  <div className="no-print" style={{ borderBottom: "2px solid #e5e7eb", padding: "0 24px", display: "flex", alignItems: "flex-end", gap: 2, flexWrap: "wrap", background: "#fff" }}>
-                    {rooms.map((room) => {
-                      const isActive = activeRoom?.id === room.id || (!activeRoomId && rooms[0]?.id === room.id);
-                      return (
-                        <button
-                          key={room.id}
-                          onClick={() => setActiveRoomId(room.id)}
-                          style={{
-                            padding: "7px 16px", border: "none",
-                            borderBottom: isActive ? "3px solid #2563eb" : "3px solid transparent",
-                            background: "none", color: isActive ? "#2563eb" : "#374151",
-                            fontWeight: isActive ? 700 : 400, cursor: "pointer", fontSize: 14,
-                            marginBottom: -2, whiteSpace: "nowrap",
-                          }}
-                        >
-                          {room.subProject || room.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                <div className="no-print" style={{ borderBottom: "2px solid #e5e7eb", padding: "0 24px", display: "flex", alignItems: "flex-end", gap: 2, flexWrap: "wrap", background: "#fff" }}>
+                  {rooms.map((room) => {
+                    const isActive = activeRoom?.id === room.id || (!activeRoomId && rooms[0]?.id === room.id);
+                    return (
+                      <button
+                        key={room.id}
+                        onClick={() => setActiveRoomId(room.id)}
+                        style={{
+                          padding: "7px 16px", border: "none",
+                          borderBottom: isActive ? "3px solid #2563eb" : "3px solid transparent",
+                          background: "none", color: isActive ? "#2563eb" : "#374151",
+                          fontWeight: isActive ? 700 : 400, cursor: "pointer", fontSize: 14,
+                          marginBottom: -2, whiteSpace: "nowrap",
+                        }}
+                      >
+                        {room.subProject || room.name}
+                      </button>
+                    );
+                  })}
+                  <button
+                    onClick={openAddRoom}
+                    style={{ padding: "10px 14px", border: "none", background: "none", color: "#2563eb", cursor: "pointer", fontSize: 13, marginLeft: 4, whiteSpace: "nowrap" }}
+                  >
+                    + Room
+                  </button>
+                </div>
                 <div style={{ padding: "20px 24px" }}>
                   {activeRoom ? (
                     <MoodBoardCanvas
@@ -1877,8 +1883,9 @@ function Projects() {
                       onChange={(moodBoard) => updateRoomField("moodBoard", moodBoard)}
                     />
                   ) : (
-                    <div style={{ color: "#9ca3af", fontSize: 13, padding: 24, textAlign: "center" }}>
-                      Add a room first (🏠 Rooms & Boxes tab) to build its Mood Board.
+                    <div style={{ textAlign: "center", padding: 48, border: "2px dashed #e5e7eb", borderRadius: 12, color: "#6b7280" }}>
+                      <p style={{ fontSize: 15, marginBottom: 16 }}>No rooms added yet.</p>
+                      <button onClick={openAddRoom}>+ Add First Room</button>
                     </div>
                   )}
                 </div>

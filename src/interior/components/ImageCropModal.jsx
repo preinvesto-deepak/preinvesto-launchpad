@@ -13,10 +13,11 @@ import { useState } from "react";
  * independent copy of the same pattern rather than a shared refactor, to
  * avoid any regression risk to those already-working features.
  */
-function ImageCropModal({ src, frameW = 420, frameH = 315, outputScale = 2, onConfirm, onCancel }) {
+function ImageCropModal({ src, frameW = 420, frameH = 315, outputScale = 2, onConfirm, onCancel, onError }) {
   const outputW = frameW * outputScale;
   const outputH = frameH * outputScale;
 
+  const [cropError, setCropError] = useState("");
   const imgRef = useState(() => ({ current: null }))[0];
   const [natSize, setNatSize] = useState(null); // { w, h } in natural pixels
   const [zoom, setZoom] = useState(1); // multiplier over the "fills the frame" scale
@@ -83,8 +84,17 @@ function ImageCropModal({ src, frameW = 420, frameH = 315, outputScale = 2, onCo
     const sy = -offset.y / scale;
     const sW = frameW / scale;
     const sH = frameH / scale;
-    ctx.drawImage(imgRef.current, sx, sy, sW, sH, 0, 0, outputW, outputH);
-    canvas.toBlob((blob) => onConfirm(blob), "image/jpeg", 0.85);
+    try {
+      ctx.drawImage(imgRef.current, sx, sy, sW, sH, 0, 0, outputW, outputH);
+      // A source loaded from another origin without CORS headers "taints"
+      // the canvas — toBlob then throws a SecurityError instead of
+      // rejecting, so this whole step has to be guarded, not just awaited.
+      canvas.toBlob((blob) => onConfirm(blob), "image/jpeg", 0.85);
+    } catch {
+      const msg = "This image is hosted elsewhere and can't be re-cropped here — remove it and re-add it by uploading the file instead.";
+      if (onError) onError(msg);
+      else setCropError(msg);
+    }
   };
 
   return (
@@ -123,6 +133,7 @@ function ImageCropModal({ src, frameW = 420, frameH = 315, outputScale = 2, onCo
             style={{ flex: 1 }}
           />
         </div>
+        {cropError && <p style={{ color: "#dc2626", fontSize: 12, margin: "10px 0 0" }}>{cropError}</p>}
         <div style={{ display: "flex", gap: 10, marginTop: 18, justifyContent: "flex-end" }}>
           <button onClick={onCancel} style={{ background: "#6b7280", padding: "7px 16px", fontSize: 13 }}>Cancel</button>
           <button onClick={handleConfirm} disabled={!natSize} style={{ background: "#2563eb", padding: "7px 16px", fontSize: 13 }}>Use This Photo</button>
