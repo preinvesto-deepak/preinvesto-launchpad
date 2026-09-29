@@ -29,6 +29,7 @@ $DEFAULTS = [
     'kerfWidth'                  => 0,
     'companyProfile'             => new stdClass(),
     'designGallery'              => [],
+    'leads'                      => [],
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {

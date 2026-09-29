@@ -520,7 +520,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
       const catSums = {};
       CATS.forEach((k) => { catSums[k] = boxOwnCosts.reduce((s, c) => s + c[k], 0); });
 
-      return boxes.map((box, idx) => {
+      const boxRows = boxes.map((box, idx) => {
         const boxArea = boxAreaSftQ(box);
         const areaShare = roomTotalArea > 0 ? boxArea / roomTotalArea : 1 / boxes.length;
         const own = boxOwnCosts[idx];
@@ -533,12 +533,18 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
         const transportationAmount = cost.transportationAmount * shareFor("transportationAmount");
         const laborAmount = cost.laborAmount * shareFor("laborAmount");
         const totalAmount = woodAmount + edgeAmount + hardwareAmount + transportationAmount + laborAmount;
+        // Same H/W mm source boxAreaSftQ itself reads from — Quotation Details'
+        // own fields when set, else Section 1's H/W (for boxes that predate them).
+        const hMm = Number(box.quotationHeightMm) || Number(box.heightMm) || 0;
+        const wMm = Number(box.quotationWidthMm) || Number(box.widthMm) || 0;
         return {
           id: `${room.id}-${idx}`,
           roomName,
           boxCount: 1,
           boxName: box.name || `Box ${idx + 1}`,
           typeOfWork: box.quotationBoxType || box.boxType || "—",
+          widthFt: wMm ? roundTo2(mmToFeet(wMm)) : null,
+          heightFt: hMm ? roundTo2(mmToFeet(hMm)) : null,
           areaSqFt: boxArea,
           costTotal: totalAmount,
           woodAmount, edgeAmount, hardwareAmount, transportationAmount, laborAmount,
@@ -546,6 +552,32 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
           areaSqMm: cost.areaSqMm * areaShare,
         };
       });
+
+      // Same per-room Combined/Per Box choice as "3. Material Summary" (room's
+      // "Sft rows" setting) — Combined merges every box in this room into a
+      // single row (summing all its cost fields, Sft Rate shown as the blended
+      // total cost ÷ total area rather than any one box's own rate), instead
+      // of listing each box separately. The underlying per-box cost math above
+      // is untouched either way; this only changes how the results are grouped.
+      if (room.quotationSftMode === "perBox") return boxRows;
+      const g = {
+        id: `${room.id}-all`, roomName, boxCount: 0, boxName: "All Boxes", typeOfWork: "—",
+        widthFt: null, heightFt: null,
+        areaSqFt: 0, costTotal: 0, woodAmount: 0, edgeAmount: 0, hardwareAmount: 0, transportationAmount: 0, laborAmount: 0, totalAmount: 0, areaSqMm: 0,
+      };
+      boxRows.forEach((r) => {
+        g.boxCount += r.boxCount;
+        g.areaSqFt += r.areaSqFt;
+        g.costTotal += r.costTotal;
+        g.woodAmount += r.woodAmount;
+        g.edgeAmount += r.edgeAmount;
+        g.hardwareAmount += r.hardwareAmount;
+        g.transportationAmount += r.transportationAmount;
+        g.laborAmount += r.laborAmount;
+        g.totalAmount += r.totalAmount;
+        g.areaSqMm += r.areaSqMm;
+      });
+      return [g];
     });
   };
 
@@ -661,7 +693,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
         <h3>Rooms</h3>
         <table border="1" cellpadding="7" cellspacing="0" width="100%" style="margin-bottom:16px;font-size:13px">
           <thead style="background:#f9fafb">
-            <tr><th>#</th><th>Room</th><th>Box Name</th><th>Type of Work</th><th>Area (sq ft)</th><th>Cost/Sft</th><th>Amount (Incl. GST)</th></tr>
+            <tr><th>#</th><th>Room</th><th>Box Name</th><th>Type of Work</th><th>W (ft)</th><th>H (ft)</th><th>Area (sq ft)</th><th>Cost/Sft</th><th>Amount (Incl. GST)</th></tr>
           </thead>
           <tbody>
             ${withRoomRowSpans(v.items)
@@ -672,6 +704,8 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                 ${item.roomSpan > 0 ? `<td rowspan="${item.roomSpan}">${item.roomName}</td>` : ""}
                 <td>${item.boxName}</td>
                 <td>${item.typeOfWork}</td>
+                <td>${item.widthFt ?? "—"}</td>
+                <td>${item.heightFt ?? "—"}</td>
                 <td>${item.areaSqFt}</td>
                 <td style="text-align:right">${item.areaSqFt > 0 ? `${fmtCurrency(item.sellingAmount / item.areaSqFt)}/sqft` : "—"}</td>
                 <td style="text-align:right">${fmtCurrency(item.sellingAmount)}</td>
@@ -848,12 +882,12 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     autoTable(doc, {
       startY: y,
       margin: { left: margin, right: margin },
-      head: [["#", "Room", "Box Name", "Type of Work", "Area (sqft)", "Cost/Sft", "Amount (Incl. GST)"]],
+      head: [["#", "Room", "Box Name", "Type of Work", "W (ft)", "H (ft)", "Area (sqft)", "Cost/Sft", "Amount (Incl. GST)"]],
       body: withRoomRowSpans(v.items).map((item, i) => {
         const row = [i + 1];
         if (item.roomSpan > 0) row.push({ content: item.roomName, rowSpan: item.roomSpan });
         row.push(
-          item.boxName, item.typeOfWork, item.areaSqFt,
+          item.boxName, item.typeOfWork, item.widthFt ?? "-", item.heightFt ?? "-", item.areaSqFt,
           item.areaSqFt > 0 ? `${fmtPdf(item.sellingAmount / item.areaSqFt)}/sqft` : "-",
           fmtPdf(item.sellingAmount),
         );
@@ -1061,6 +1095,8 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                 <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Room</th>
                 <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Box Name</th>
                 <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Type of Work</th>
+                <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>W (ft)</th>
+                <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>H (ft)</th>
                 <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Area (sq ft)</th>
                 {QUOT_MODELS.map((m) => (
                   <th key={m} colSpan={2} style={{ background: QUOT_MODEL_COLORS[m], color: "#fff", padding: "6px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.3)" }}>{QUOT_MODEL_LABELS[m]}</th>
@@ -1114,6 +1150,8 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                   )}
                   <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", color: "#6b7280" }}>{item.boxName}</td>
                   <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", color: "#6b7280" }}>{item.typeOfWork}</td>
+                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280" }}>{item.widthFt ?? "—"}</td>
+                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280" }}>{item.heightFt ?? "—"}</td>
                   <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280" }}>{item.areaSqFt}</td>
                   {compareVariants.map((v) => (
                     <Fragment key={v.model}>
@@ -1218,6 +1256,8 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                   <th>Room</th>
                   <th>Box Name</th>
                   <th>Type of Work</th>
+                  <th>W (ft)</th>
+                  <th>H (ft)</th>
                   <th>Area (sq ft)</th>
                   <th>Cost/Sft</th>
                   <th>Amount (Incl. GST)</th>
@@ -1230,6 +1270,8 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                     {item.roomSpan > 0 && <td rowSpan={item.roomSpan}>{item.roomName}</td>}
                     <td>{item.boxName}</td>
                     <td>{item.typeOfWork}</td>
+                    <td>{item.widthFt ?? "—"}</td>
+                    <td>{item.heightFt ?? "—"}</td>
                     <td>{item.areaSqFt}</td>
                     <td>{item.areaSqFt > 0 ? `${formatCurrency(item.sellingAmount / item.areaSqFt)}/sqft` : "—"}</td>
                     <td>{formatCurrency(item.sellingAmount)}</td>

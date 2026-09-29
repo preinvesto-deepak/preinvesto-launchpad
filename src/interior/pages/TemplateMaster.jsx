@@ -1,6 +1,7 @@
 import { useState, useEffect, Fragment } from "react";
 import { useLocation } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
+import { useUnsavedChanges } from "../context/UnsavedChangesContext";
 import { mmToFeet, feetToMm, roundTo2, formatCurrency } from "../utils/unitConversions";
 import CutSheetOptimizer from "./CutSheetOptimizer";
 import { packSheets, findOversizedPieces } from "../utils/binPack";
@@ -600,6 +601,7 @@ function SectionHeader({ title, open, onToggle, action, style: extraStyle }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function TemplateMaster() {
   const { templates, setTemplates, prices, materialStockSettings, setMaterialStockSettings, materialModelRates } = useAppData();
+  const { registerGuard, guardedNavigate } = useUnsavedChanges();
 
   // Left panel
   const [search, setSearch] = useState("");
@@ -763,11 +765,16 @@ function TemplateMaster() {
   };
 
   // Real sheet-nesting count per Wood/Laminate material — one source of truth
-  // shared by "2. Hardware & Consumables" (AUTO rows) and "3. Material
-  // Summary" so the two sections never disagree on how many sheets are needed.
+  // shared by "2. Material Details" and "3. Material Summary" so the two
+  // sections never disagree on how many sheets are needed. Deliberately
+  // scoped to Wood/Laminate only (see computeAreaRows below for everything
+  // else referenced in the cut list) — nesting a 2100×600mm glass panel onto
+  // a "stock sheet" and calling the result its quantity made no sense for a
+  // material actually priced and bought per sqft.
   const computeSheetRows = () => {
     if (!draft) return [];
-    const rows = generateAllBoxesCutSheet();
+    const isSheetGroup = (g) => g === "Wood" || g === "Laminate";
+    const rows = generateAllBoxesCutSheet().filter((r) => isSheetGroup((prices || []).find((p) => p.materialName === r.material)?.group));
     const getStockSize = (mat) => {
       const s = materialStockSettings?.[mat];
       return { sheetW: s?.sheetW || 2440, sheetH: s?.sheetH || 1220, sheetTexture: s?.sheetTexture ?? 1 };
@@ -781,6 +788,31 @@ function TemplateMaster() {
       const base = sheetCount[material] || 0;
       const extra = Math.max(0, Number(materialStockSettings?.[material]?.extraQty) || 0);
       return { material, group: priceEntry?.group || "Other", base, extra, requiredQty: base + extra, unit: priceEntry?.unit || "Sheet" };
+    });
+  };
+
+  // Materials referenced in the cut list that aren't Wood/Laminate sheets
+  // but ARE priced per sqft (e.g. glass, mirrors, stone tops picked as a
+  // part's Material/Side A/Side B) — real area used (Σ w×h×qty converted to
+  // sqft), not a sheet-nesting count, since these are bought/priced by area,
+  // not by whole standard sheets.
+  const computeAreaRows = () => {
+    if (!draft) return [];
+    const totals = {};
+    generateAllBoxesCutSheet().forEach((r) => {
+      if (!r.material || !+r.w || !+r.h || !+r.qty) return;
+      const priceEntry = (prices || []).find((p) => p.materialName === r.material);
+      const group = priceEntry?.group;
+      if (group === "Wood" || group === "Laminate") return; // handled by computeSheetRows
+      if (!/sq\.?\s?ft/i.test(priceEntry?.unit || "")) return; // only meaningful when priced per sqft
+      const areaSft = mmToFeet(+r.w) * mmToFeet(+r.h) * (+r.qty);
+      totals[r.material] = (totals[r.material] || 0) + areaSft;
+    });
+    return Object.entries(totals).map(([material, area]) => {
+      const priceEntry = (prices || []).find((p) => p.materialName === material);
+      const base = Math.round(area * 100) / 100;
+      const extra = Math.max(0, Number(materialStockSettings?.[material]?.extraQty) || 0);
+      return { material, group: priceEntry?.group || "Other", base, extra, requiredQty: Math.round((base + extra) * 100) / 100, unit: priceEntry?.unit || "Sq.ft" };
     });
   };
 
@@ -808,6 +840,7 @@ function TemplateMaster() {
     // Segregate by the "group" field from Items Pricing (Wood, Laminate, ...)
     // so the summary mirrors the BOQ's category layout.
     const sheetRows = computeSheetRows();
+    const areaRows = computeAreaRows();
 
     const edgeSummed = {};
     (draft.boxes || []).forEach((box) => {
@@ -860,7 +893,7 @@ function TemplateMaster() {
       ? [{ material: FEVICOL_NAME, group: fevicolPriceEntry?.group || "Glue", requiredQty: fevicolQty, unit: fevicolPriceEntry?.unit || "KG" }]
       : [];
 
-    return [...sheetRows, ...edgeRows, ...carpRows, ...hwRows, ...fevicolRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
+    return [...sheetRows, ...areaRows, ...edgeRows, ...carpRows, ...hwRows, ...fevicolRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
   };
 
   // ── Cut Sheet Generator ───────────────────────────────────────────────────────
@@ -977,6 +1010,24 @@ function TemplateMaster() {
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 2000);
   };
+  const discardDraft = () => {
+    if (!savedTemplate) return;
+    setDraft(JSON.parse(JSON.stringify(savedTemplate)));
+    setIsDirty(false);
+  };
+
+  // Registers this page's dirty state with the app-wide unsaved-changes
+  // guard, so Sidebar links / Back to Preinvesto / Sign out / switching to a
+  // different template below all prompt to save first instead of silently
+  // discarding the draft — see UnsavedChangesContext.
+  useEffect(() => {
+    return registerGuard({
+      isDirty,
+      label: draft?.templateName ? `The "${draft.templateName}" template` : "This template",
+      onSaveAndLeave: saveTemplate,
+      onDiscardAndLeave: discardDraft,
+    });
+  }, [isDirty, draft, savedTemplate]);
 
   // ── Template CRUD ─────────────────────────────────────────────────────────────
   const createTemplate = () => {
@@ -1240,7 +1291,7 @@ function TemplateMaster() {
                 style={{ padding: "7px 12px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 7, width: 220 }}
               />
               <button
-                onClick={() => { setNewName(""); setShowNewModal(true); }}
+                onClick={() => guardedNavigate(() => { setNewName(""); setShowNewModal(true); })}
                 style={{ background: "#2563eb", padding: "8px 16px", fontSize: 13, whiteSpace: "nowrap" }}
               >
                 + New Template
@@ -1254,7 +1305,7 @@ function TemplateMaster() {
               <div style={{ textAlign: "center", padding: 60, color: "#9ca3af" }}>
                 <div style={{ fontSize: 48, marginBottom: 12 }}>📐</div>
                 <p style={{ fontSize: 15, marginBottom: 16 }}>{search ? `No results for "${search}"` : "No templates yet."}</p>
-                {!search && <button onClick={() => { setNewName(""); setShowNewModal(true); }}>+ Create First Template</button>}
+                {!search && <button onClick={() => guardedNavigate(() => { setNewName(""); setShowNewModal(true); })}>+ Create First Template</button>}
               </div>
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 }}>
@@ -1263,7 +1314,7 @@ function TemplateMaster() {
                   return (
                     <div
                       key={t.id}
-                      onClick={() => { setSelectedId(t.id); setView("detail"); }}
+                      onClick={() => guardedNavigate(() => { setSelectedId(t.id); setView("detail"); })}
                       style={{
                         border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden",
                         cursor: "pointer", background: "#fff",
@@ -2195,9 +2246,7 @@ function TemplateMaster() {
                               labelPrefix,
                               matOptions,
                               laminateOptions,
-                              extraButtons: subSheetId == null
-                                ? <button onClick={() => setCutSheetOpen(true)} style={{ background: "#0369a1", padding: "4px 14px", fontSize: 12 }}>📋 Cut Sheet</button>
-                                : null,
+                              extraButtons: <button onClick={() => setCutSheetOpen(true)} style={{ background: "#0369a1", padding: "4px 14px", fontSize: 12 }} title="Shows the whole box's cut list — including every sub-sheet, not just this one">📋 Cut Sheet</button>,
                             })}
                           </div>
                         );
@@ -2269,6 +2318,16 @@ function TemplateMaster() {
                 computeSheetRows().forEach((r) => {
                   allRows.push({
                     id: `sheet_${r.material}`, materialName: r.material, base: r.base, extra: r.extra,
+                    unit: r.unit, auto: true, autoType: "sheet",
+                    boxId: "all", boxName: "All Boxes",
+                  });
+                });
+                // Same "All Boxes" combined treatment as sheet rows, for
+                // non-Wood/Laminate cut-list materials priced per sqft
+                // (glass, mirrors, etc.) — real area used, not a sheet count.
+                computeAreaRows().forEach((r) => {
+                  allRows.push({
+                    id: `area_${r.material}`, materialName: r.material, base: r.base, extra: r.extra,
                     unit: r.unit, auto: true, autoType: "sheet",
                     boxId: "all", boxName: "All Boxes",
                   });
@@ -2638,7 +2697,7 @@ function TemplateMaster() {
               <div style={{ position: "sticky", bottom: 0, background: "#fffbeb", borderTop: "1px solid #fde68a", padding: "10px 24px", display: "flex", justifyContent: "flex-end", gap: 10, alignItems: "center" }}>
                 <span style={{ fontSize: 13, color: "#92400e" }}>You have unsaved changes.</span>
                 <button
-                  onClick={() => { setDraft(JSON.parse(JSON.stringify(savedTemplate))); setIsDirty(false); }}
+                  onClick={discardDraft}
                   style={{ background: "#6b7280", padding: "7px 16px", fontSize: 13 }}
                 >
                   Discard

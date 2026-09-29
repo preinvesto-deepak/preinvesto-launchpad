@@ -37,6 +37,10 @@ const INTERIOR_DEFAULTS = {
   // Configure > Design Gallery tree — see AppDataContext.jsx's defaultData
   // comment for the shape. moodBoard lives inside subProjects, not here.
   designGallery: [],
+  // Leads — enquiries received before they're confirmed as real work.
+  // Deliberately separate from `projects`: a lead only becomes a project via
+  // "Convert to Project" (see Leads.jsx), never automatically.
+  leads: [],
 };
 
 export default function registerAuthRoutes(app, pool) {

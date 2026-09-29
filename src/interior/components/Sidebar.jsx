@@ -1,6 +1,7 @@
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useState } from "react";
 import { useAppData } from "../context/AppDataContext";
+import { useUnsavedChanges } from "../context/UnsavedChangesContext";
 
 function GroupLabel({ label }) {
   return <div className="sidebar-group-label">{label}</div>;
@@ -10,11 +11,21 @@ function Sidebar() {
   const { projects } = useAppData();
   const navigate = useNavigate();
   const location = useLocation();
+  const { guardedNavigate } = useUnsavedChanges();
   const [projectsOpen, setProjectsOpen] = useState(true);
 
   const onProjectsPage = location.pathname === "/interior/projects";
   const params = new URLSearchParams(location.search);
   const activeProjectId = onProjectsPage ? Number(params.get("id")) : null;
+
+  // Every Sidebar link goes through this instead of navigating directly —
+  // if the page you're leaving has unsaved edits (Templates, Material
+  // Models), it prompts to save/discard/cancel first instead of silently
+  // discarding them.
+  const goTo = (e, to) => {
+    e.preventDefault();
+    guardedNavigate(() => navigate(to));
+  };
 
   return (
     <div className="sidebar">
@@ -35,9 +46,11 @@ function Sidebar() {
 
       <nav>
         <ul>
-          <li><NavLink to="/interior">Dashboard</NavLink></li>
+          <li><NavLink to="/interior" onClick={(e) => goTo(e, "/interior")}>Dashboard</NavLink></li>
 
           <GroupLabel label="Setup" />
+
+          <li><NavLink to="/interior/leads" onClick={(e) => goTo(e, "/interior/leads")}>Leads</NavLink></li>
 
           {/* Projects collapsible */}
           <li>
@@ -57,7 +70,7 @@ function Sidebar() {
                 userSelect: "none",
               }}
               onClick={() => {
-                if (!onProjectsPage) navigate("/interior/projects");
+                if (!onProjectsPage) guardedNavigate(() => navigate("/interior/projects"));
                 else setProjectsOpen((o) => !o);
               }}
             >
@@ -77,7 +90,7 @@ function Sidebar() {
                   return (
                     <li key={p.id}>
                       <div
-                        onClick={() => navigate(`/interior/projects?id=${p.id}`)}
+                        onClick={() => guardedNavigate(() => navigate(`/interior/projects?id=${p.id}`))}
                         style={{
                           display: "flex",
                           alignItems: "center",
@@ -107,7 +120,7 @@ function Sidebar() {
 
                 <li>
                   <div
-                    onClick={() => navigate("/interior/projects?new=1")}
+                    onClick={() => guardedNavigate(() => navigate("/interior/projects?new=1"))}
                     style={{
                       display: "block",
                       padding: "5px 8px 5px 12px",
@@ -128,17 +141,17 @@ function Sidebar() {
           </li>
 
           <GroupLabel label="Configure" />
-          <li><NavLink to="/interior/items-pricing">Items Pricing</NavLink></li>
-          <li><NavLink to="/interior/material-models">Material Models</NavLink></li>
-          <li><NavLink to="/interior/template-master">Templates</NavLink></li>
-          <li><NavLink to="/interior/design-gallery">Design Gallery</NavLink></li>
+          <li><NavLink to="/interior/items-pricing" onClick={(e) => goTo(e, "/interior/items-pricing")}>Items Pricing</NavLink></li>
+          <li><NavLink to="/interior/material-models" onClick={(e) => goTo(e, "/interior/material-models")}>Material Models</NavLink></li>
+          <li><NavLink to="/interior/template-master" onClick={(e) => goTo(e, "/interior/template-master")}>Templates</NavLink></li>
+          <li><NavLink to="/interior/design-gallery" onClick={(e) => goTo(e, "/interior/design-gallery")}>Design Gallery</NavLink></li>
 
           <GroupLabel label="Output" />
-          <li><NavLink to="/interior/project-boq">Project BOQ</NavLink></li>
-          <li><NavLink to="/interior/project-quotation">Project Quotation</NavLink></li>
+          <li><NavLink to="/interior/project-boq" onClick={(e) => goTo(e, "/interior/project-boq")}>Project BOQ</NavLink></li>
+          <li><NavLink to="/interior/project-quotation" onClick={(e) => goTo(e, "/interior/project-quotation")}>Project Quotation</NavLink></li>
 
           <GroupLabel label="Account" />
-          <li><NavLink to="/interior/profile">Your Profile</NavLink></li>
+          <li><NavLink to="/interior/profile" onClick={(e) => goTo(e, "/interior/profile")}>Your Profile</NavLink></li>
         </ul>
       </nav>
     </div>

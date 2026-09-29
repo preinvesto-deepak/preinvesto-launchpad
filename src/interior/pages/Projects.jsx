@@ -6,6 +6,8 @@ import CutSheetOptimizer from "./CutSheetOptimizer";
 import ProjectQuotation from "./ProjectQuotation";
 import { packSheets, findOversizedPieces } from "../utils/binPack";
 import { GROUP_OPTIONS } from "../data/priceData";
+import { PROJECT_STATUSES, projectStatusInfo } from "../data/projectStatus";
+import { LEAD_SOURCES, leadSourceLabel } from "../data/leadSource";
 import MoodBoardCanvas from "../components/MoodBoardCanvas";
 
 // Annotates a group-sorted row list with rowSpan info so the "Group" cell can
@@ -894,7 +896,7 @@ function Projects() {
 
   // Sidebar's "+ New Project" link passes ?new=1 instead of a project id
   // (there's nothing to select yet) — open the Add Project modal for it, then
-  // drop the param so refreshing the page doesn't reopen the modal.
+  // drop the param so refreshing doesn't reopen it.
   useEffect(() => {
     if (searchParams.get("new") === "1") {
       openAddProject();
@@ -925,7 +927,11 @@ function Projects() {
   // keeps required-field highlighting off until the user actually tries to save.
   const [projectError, setProjectError] = useState("");
   const [submitAttempted, setSubmitAttempted] = useState(false);
-  const emptyP = { name: "", client: "", contact: "", email: "", location: "", address: "" };
+  // leadSource/referredBy are read-only provenance here — set once, at
+  // "Convert to Project" time on the Leads page, from the lead's own record.
+  // They can still be corrected via Edit Info, but a fresh project created
+  // straight from "+ New Project" simply won't have them.
+  const emptyP = { name: "", client: "", contact: "", email: "", location: "", address: "", leadSource: "", referredBy: "" };
   const [pForm, setPForm] = useState(emptyP);
 
   // Room modal
@@ -941,6 +947,7 @@ function Projects() {
   const [confirmDeleteBoxId, setConfirmDeleteBoxId] = useState(null);
   const [dimUnit, setDimUnit] = useState("mm"); // "mm" or "ft"
   const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState(null);
+  const [sftRowsHelpOpen, setSftRowsHelpOpen] = useState(false);
   const [confirmDeleteProjectId, setConfirmDeleteProjectId] = useState(null);
 
   const [cutSheetOpen, setCutSheetOpen] = useState(false);
@@ -1063,6 +1070,7 @@ function Projects() {
       name: p.name || "", client: p.client || "",
       contact: p.contact || "", email: p.email || "",
       location: p.location || "", address: p.address || "",
+      leadSource: p.leadSource || "", referredBy: p.referredBy || "",
     });
     setProjectError("");
     setSubmitAttempted(false);
@@ -1100,7 +1108,7 @@ function Projects() {
       }
     } else {
       const id = projects.length ? Math.max(...projects.map((p) => p.id)) + 1 : 1;
-      setProjects([...projects, { id, ...pForm }]);
+      setProjects([...projects, { id, ...pForm, createdAt: Date.now() }]);
       setSelectedProjectId(id);
     }
     setProjectModal(false);
@@ -1154,6 +1162,12 @@ function Projects() {
       setActiveRoomId(rooms.find((r) => r.id !== room.id)?.id ?? null);
     }
     setConfirmDeleteRoomId(null);
+  };
+
+  // ── Generic project field update ─────────────────────────────────────────────
+  const updateProjectField = (field, value) => {
+    if (!selectedProject) return;
+    setProjects((prev) => prev.map((p) => p.id === selectedProject.id ? { ...p, [field]: value } : p));
   };
 
   // ── Generic room field update ────────────────────────────────────────────────
@@ -1431,10 +1445,15 @@ function Projects() {
   };
 
   // Real sheet-nesting count per Wood/Laminate material for the active room —
-  // one source of truth shared by "Hardware & Consumables" (AUTO rows) and
-  // "3. Material Summary" so the two sections never disagree.
+  // one source of truth shared by "Material Details" (AUTO rows) and
+  // "3. Material Summary" so the two sections never disagree. Deliberately
+  // scoped to Wood/Laminate only (see computeAreaRows below for everything
+  // else referenced in the cut list) — nesting a 2100×600mm glass panel onto
+  // a "stock sheet" and calling the result its quantity made no sense for a
+  // material actually priced and bought per sqft.
   const computeSheetRows = () => {
-    const rows = generateAllBoxesCutSheet();
+    const isSheetGroup = (g) => g === "Wood" || g === "Laminate";
+    const rows = generateAllBoxesCutSheet().filter((r) => isSheetGroup((prices || []).find((p) => p.materialName === r.material)?.group));
     const getStockSize = (mat) => {
       const s = materialStockSettings?.[mat];
       return { sheetW: s?.sheetW || 2440, sheetH: s?.sheetH || 1220, sheetTexture: s?.sheetTexture ?? 1 };
@@ -1448,6 +1467,30 @@ function Projects() {
       const base = sheetCount[material] || 0;
       const extra = Math.max(0, Number(materialStockSettings?.[material]?.extraQty) || 0);
       return { material, group: priceEntry?.group || "Other", base, extra, requiredQty: base + extra, unit: priceEntry?.unit || "Sheet" };
+    });
+  };
+
+  // Materials referenced in the cut list that aren't Wood/Laminate sheets
+  // but ARE priced per sqft (e.g. glass, mirrors, stone tops picked as a
+  // part's Material/Side A/Side B) — real area used (Σ w×h×qty converted to
+  // sqft), not a sheet-nesting count, since these are bought/priced by area,
+  // not by whole standard sheets.
+  const computeAreaRows = () => {
+    const totals = {};
+    generateAllBoxesCutSheet().forEach((r) => {
+      if (!r.material || !+r.w || !+r.h || !+r.qty) return;
+      const priceEntry = (prices || []).find((p) => p.materialName === r.material);
+      const group = priceEntry?.group;
+      if (group === "Wood" || group === "Laminate") return; // handled by computeSheetRows
+      if (!/sq\.?\s?ft/i.test(priceEntry?.unit || "")) return; // only meaningful when priced per sqft
+      const areaSft = mmToFeet(+r.w) * mmToFeet(+r.h) * (+r.qty);
+      totals[r.material] = (totals[r.material] || 0) + areaSft;
+    });
+    return Object.entries(totals).map(([material, area]) => {
+      const priceEntry = (prices || []).find((p) => p.materialName === material);
+      const base = Math.round(area * 100) / 100;
+      const extra = Math.max(0, Number(materialStockSettings?.[material]?.extraQty) || 0);
+      return { material, group: priceEntry?.group || "Other", base, extra, requiredQty: Math.round((base + extra) * 100) / 100, unit: priceEntry?.unit || "Sq.ft" };
     });
   };
 
@@ -1468,6 +1511,7 @@ function Projects() {
   // ── Material Summary across ALL boxes in the active room ────────────────────
   const computeMatSummary = () => {
     const sheetRows = computeSheetRows();
+    const areaRows = computeAreaRows();
 
     const edgeSummed = {};
     boxes.forEach((box) => {
@@ -1479,14 +1523,21 @@ function Projects() {
       material, group: "Edge Beading", requiredQty, unit: "Mtr",
     }));
 
+    // Combined (one row per material, summed across every box in the room)
+    // vs Per Box (one row per box, so e.g. Wardrobe and Loft1 each show their
+    // own Sft instead of being merged into a single "Box" line) — per-room
+    // toggle, set via the room title row above.
+    const perBoxSft = activeRoom?.quotationSftMode === "perBox";
     const carpSummed = {};
     boxes.forEach((box) => {
       computeBoxCarpenterRows(box).forEach(({ material, qty }) => {
-        carpSummed[material] = (carpSummed[material] || 0) + qty;
+        const key = perBoxSft ? `${material}__${box.id}` : material;
+        if (!carpSummed[key]) carpSummed[key] = { material, requiredQty: 0, boxLabel: perBoxSft ? (box.name || `Box ${box.id}`) : null };
+        carpSummed[key].requiredQty += qty;
       });
     });
-    const carpRows = Object.entries(carpSummed).map(([material, requiredQty]) => ({
-      material, group: "Carpenter", requiredQty: Math.round(requiredQty * 100) / 100,
+    const carpRows = Object.values(carpSummed).map(({ material, requiredQty, boxLabel }) => ({
+      material, boxLabel, group: "Carpenter", requiredQty: Math.round(requiredQty * 100) / 100,
       unit: (prices || []).find((p) => p.materialName === material)?.unit || "Sq.ft",
     }));
 
@@ -1514,7 +1565,7 @@ function Projects() {
       ? [{ material: FEVICOL_NAME, group: fevicolPriceEntry?.group || "Glue", requiredQty: fevicolQty, unit: fevicolPriceEntry?.unit || "KG" }]
       : [];
 
-    return [...sheetRows, ...edgeRows, ...carpRows, ...hwRows, ...fevicolRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
+    return [...sheetRows, ...areaRows, ...edgeRows, ...carpRows, ...hwRows, ...fevicolRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
   };
 
   // ── Material Summary across EVERY room/box in the project (Summary tab) ─────
@@ -1558,14 +1609,39 @@ function Projects() {
       const s = materialStockSettings?.[mat];
       return { sheetW: s?.sheetW || 2440, sheetH: s?.sheetH || 1220, sheetTexture: s?.sheetTexture ?? 1 };
     };
-    const packed = packSheets(rows, getStockSize);
+    // Deliberately scoped to Wood/Laminate only (see areaRows below) —
+    // nesting a real-world sqft-priced material (glass, mirrors, ...) onto a
+    // "stock sheet" and calling the result its quantity made no sense.
+    const isSheetGroup = (g) => g === "Wood" || g === "Laminate";
+    const sheetableRows = rows.filter((r) => isSheetGroup((prices || []).find((p) => p.materialName === r.material)?.group));
+    const packed = packSheets(sheetableRows, getStockSize);
     const sheetCount = {};
     packed.forEach((s) => { sheetCount[s.material] = (sheetCount[s.material] || 0) + 1; });
-    const materials = [...new Set(rows.map((r) => r.material).filter(Boolean))];
+    const materials = [...new Set(sheetableRows.map((r) => r.material).filter(Boolean))];
     const sheetRows = materials.map((material) => {
       const priceEntry = (prices || []).find((p) => p.materialName === material);
       const extraSheets = Math.max(0, Number(materialStockSettings?.[material]?.extraQty) || 0);
       return { material, group: priceEntry?.group || "Other", requiredQty: (sheetCount[material] || 0) + extraSheets, unit: priceEntry?.unit || "Sheet" };
+    });
+
+    // Non-Wood/Laminate cut-list materials priced per sqft (glass, mirrors,
+    // stone tops, ...) — real area used (Σ w×h×qty in sqft), not a sheet
+    // count, since these are bought/priced by area, not whole sheets.
+    const areaTotals = {};
+    rows.forEach((r) => {
+      if (!r.material || !+r.w || !+r.h || !+r.qty) return;
+      const priceEntry = (prices || []).find((p) => p.materialName === r.material);
+      const group = priceEntry?.group;
+      if (group === "Wood" || group === "Laminate") return;
+      if (!/sq\.?\s?ft/i.test(priceEntry?.unit || "")) return;
+      const areaSft = mmToFeet(+r.w) * mmToFeet(+r.h) * (+r.qty);
+      areaTotals[r.material] = (areaTotals[r.material] || 0) + areaSft;
+    });
+    const areaRows = Object.entries(areaTotals).map(([material, area]) => {
+      const priceEntry = (prices || []).find((p) => p.materialName === material);
+      const extraArea = Math.max(0, Number(materialStockSettings?.[material]?.extraQty) || 0);
+      const base = Math.round(area * 100) / 100;
+      return { material, group: priceEntry?.group || "Other", requiredQty: Math.round((base + extraArea) * 100) / 100, unit: priceEntry?.unit || "Sq.ft" };
     });
 
     const edgeSummed = {};
@@ -1582,18 +1658,24 @@ function Projects() {
       material, group: "Edge Beading", requiredQty, unit: "Mtr",
     }));
 
+    // Each room carries its own Combined/Per Box choice (room.quotationSftMode) —
+    // a room with Per Box set shows each of its boxes as its own line here too,
+    // labeled with the room name so it's clear which room a box row belongs to.
     const carpSummed = {};
     rooms.forEach((room) => {
+      const perBoxSft = room.quotationSftMode === "perBox";
       const extra = Math.max(0, Number(room.carpenterExtraSft) || 0);
       (room.boxes || []).forEach((box) => {
         if (!box.boxType) return;
         const base = Number(BOX_VARS(box).Sft) || 0;
         const qty = Math.round((base + extra) * 100) / 100;
-        carpSummed[box.boxType] = (carpSummed[box.boxType] || 0) + qty;
+        const key = perBoxSft ? `${box.boxType}__${room.id}__${box.id}` : box.boxType;
+        if (!carpSummed[key]) carpSummed[key] = { material: box.boxType, requiredQty: 0, boxLabel: perBoxSft ? `${room.subProject} — ${box.name || box.id}` : null };
+        carpSummed[key].requiredQty += qty;
       });
     });
-    const carpRows = Object.entries(carpSummed).map(([material, requiredQty]) => ({
-      material, group: "Carpenter", requiredQty: Math.round(requiredQty * 100) / 100,
+    const carpRows = Object.values(carpSummed).map(({ material, requiredQty, boxLabel }) => ({
+      material, boxLabel, group: "Carpenter", requiredQty: Math.round(requiredQty * 100) / 100,
       unit: (prices || []).find((p) => p.materialName === material)?.unit || "Sq.ft",
     }));
 
@@ -1612,7 +1694,7 @@ function Projects() {
       return { material, group: priceEntry?.group || "Other", requiredQty, unit: priceEntry?.unit || "Nos" };
     });
 
-    return [...sheetRows, ...edgeRows, ...carpRows, ...hwRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
+    return [...sheetRows, ...areaRows, ...edgeRows, ...carpRows, ...hwRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
   };
 
   // ── Part CRUD for Sheets Calculation in Room ─────────────────────────────────
@@ -1756,7 +1838,7 @@ function Projects() {
         {!selectedProject ? (
           <div style={{ padding: 60, textAlign: "center", color: "#6b7280" }}>
             <p style={{ fontSize: 16, marginBottom: 20 }}>Select a project or create a new one.</p>
-            <button onClick={openAddProject}>+ Create Project</button>
+            <button onClick={() => openAddProject()}>+ Create Project</button>
           </div>
         ) : (
           <>
@@ -1764,7 +1846,26 @@ function Projects() {
             <div className="no-print" style={{ padding: "12px 24px 8px", borderBottom: "1px solid #e5e7eb", background: "#fff" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
                 <div>
-                  <h2 style={{ margin: "0 0 6px", fontSize: 20 }}>{selectedProject.name}</h2>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                    <h2 style={{ margin: 0, fontSize: 20 }}>{selectedProject.name}</h2>
+                    <select
+                      value={selectedProject.status || "inProgress"}
+                      onChange={(e) => updateProjectField("status", e.target.value)}
+                      style={{
+                        fontSize: 12, fontWeight: 700, padding: "3px 10px", borderRadius: 20, border: "none", cursor: "pointer",
+                        color: projectStatusInfo(selectedProject.status).color, background: projectStatusInfo(selectedProject.status).bg,
+                      }}
+                      title="Project status — also shown on the Dashboard"
+                    >
+                      {PROJECT_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                    </select>
+                    {selectedProject.leadSource && (
+                      <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20, color: "#6b7280", background: "#f3f4f6" }}>
+                        {leadSourceLabel(selectedProject.leadSource)}
+                        {selectedProject.leadSource === "reference" && selectedProject.referredBy ? ` — ${selectedProject.referredBy}` : ""}
+                      </span>
+                    )}
+                  </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 20px", fontSize: 13, color: "#374151" }}>
                     <span><strong>Client:</strong> {selectedProject.client || "—"}</span>
                     {selectedProject.contact && <span>📞 {selectedProject.contact}</span>}
@@ -1777,7 +1878,7 @@ function Projects() {
                   )}
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button onClick={openAddProject} style={{ background: "#2563eb", padding: "6px 14px", fontSize: 13 }}>
+                  <button onClick={() => openAddProject()} style={{ background: "#2563eb", padding: "6px 14px", fontSize: 13 }}>
                     + New Project
                   </button>
                   <button onClick={() => openEditProject(selectedProject)} style={{ background: "#6b7280", padding: "6px 14px", fontSize: 13 }}>
@@ -2005,12 +2106,15 @@ function Projects() {
                           {summaryRows.map((row, i) => {
                             const isLastOfGroup = i === summaryRows.length - 1 || summaryRows[i + 1].group !== row.group;
                             return (
-                              <Fragment key={`${row.group}::${row.material}`}>
+                              <Fragment key={`${row.group}::${row.material}::${row.boxLabel || ""}`}>
                                 <tr style={{ background: i % 2 === 0 ? "#f8fafc" : "#fff" }}>
                                   {row._groupFirst && (
                                     <td rowSpan={row._groupSpan} style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", borderRight: "1px solid #e5e7eb", color: "#6b7280", verticalAlign: "top", background: "#fff" }}>{row.group}</td>
                                   )}
-                                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", fontWeight: 600, color: "#111827" }}>{row.material}</td>
+                                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", fontWeight: 600, color: "#111827" }}>
+                                    {row.material}
+                                    {row.boxLabel && <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#6b7280" }}>— {row.boxLabel}</span>}
+                                  </td>
                                   <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#374151", fontWeight: 700 }}>{row.requiredQty}</td>
                                   <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280" }}>{row.unit}</td>
                                   {PROJ_MODELS.map((model) => {
@@ -2143,6 +2247,49 @@ function Projects() {
                       )}
                     </div>
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <label
+                        style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#6b7280", marginRight: 6, position: "relative" }}
+                      >
+                        <span style={{ fontWeight: 600 }}>Sft rows:</span>
+                        <select
+                          value={activeRoom.quotationSftMode || "combined"}
+                          onChange={(e) => updateRoomField("quotationSftMode", e.target.value)}
+                          style={{ fontSize: 11, padding: "3px 6px", borderRadius: 5 }}
+                        >
+                          <option value="combined">Combined</option>
+                          <option value="perBox">Per Box</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => setSftRowsHelpOpen((o) => !o)}
+                          style={{
+                            width: 16, height: 16, borderRadius: "50%", border: "1px solid #9ca3af", background: "#f3f4f6",
+                            color: "#6b7280", fontSize: 10, fontWeight: 700, lineHeight: "14px", padding: 0, cursor: "pointer",
+                          }}
+                          title="What does this do?"
+                        >?</button>
+                        {sftRowsHelpOpen && (
+                          <>
+                            <div
+                              onClick={() => setSftRowsHelpOpen(false)}
+                              style={{ position: "fixed", inset: 0, zIndex: 999 }}
+                            />
+                            <div
+                              style={{
+                                position: "absolute", top: "100%", right: 0, marginTop: 6, width: 260, zIndex: 1000,
+                                background: "#1f2937", color: "#fff", fontSize: 11, fontWeight: 400, lineHeight: 1.5,
+                                padding: "10px 12px", borderRadius: 8, boxShadow: "0 4px 14px rgba(0,0,0,0.25)",
+                              }}
+                            >
+                              Controls how this room's boxes appear in <strong>Material Summary</strong> and the <strong>Quotation</strong> tab.
+                              <br /><br />
+                              <strong>Combined</strong> — every box in the room is rolled into one row (one Sft total, one blended rate).
+                              <br />
+                              <strong>Per Box</strong> — each box (e.g. Wardrobe, Loft1) gets its own row with its own Sft, Width and Height.
+                            </div>
+                          </>
+                        )}
+                      </label>
                       <button onClick={() => openEditRoom(activeRoom)} style={{ background: "#6b7280", padding: "5px 12px", fontSize: 12 }}>Edit Room</button>
                       {confirmDeleteRoomId === activeRoom.id ? (
                         <>
@@ -2862,9 +3009,7 @@ function Projects() {
                                   labelPrefix,
                                   matOptions,
                                   laminateOptions,
-                                  extraButtons: subSheetId == null
-                                    ? <button onClick={() => setCutSheetOpen(true)} style={{ background: "#0369a1", padding: "4px 14px", fontSize: 12 }}>📋 Cut Sheet</button>
-                                    : null,
+                                  extraButtons: <button onClick={() => setCutSheetOpen(true)} style={{ background: "#0369a1", padding: "4px 14px", fontSize: 12 }} title="Shows the whole box's cut list — including every sub-sheet, not just this one">📋 Cut Sheet</button>,
                                 })}
                               </div>
                             );
@@ -2938,6 +3083,16 @@ function Projects() {
                       computeSheetRows().forEach((r) => {
                         allRows.push({
                           id: `sheet_${r.material}`, materialName: r.material, base: r.base, extra: r.extra,
+                          unit: r.unit, auto: true, autoType: "sheet",
+                          boxId: "all", boxName: "All Boxes",
+                        });
+                      });
+                      // Same "All Boxes" combined treatment as sheet rows, for
+                      // non-Wood/Laminate cut-list materials priced per sqft
+                      // (glass, mirrors, etc.) — real area used, not a sheet count.
+                      computeAreaRows().forEach((r) => {
+                        allRows.push({
+                          id: `area_${r.material}`, materialName: r.material, base: r.base, extra: r.extra,
                           unit: r.unit, auto: true, autoType: "sheet",
                           boxId: "all", boxName: "All Boxes",
                         });
@@ -3230,11 +3385,14 @@ function Projects() {
                                   </thead>
                                   <tbody>
                                     {summaryRows.map((row, i) => (
-                                      <tr key={`${row.group}::${row.material}`} style={{ background: i % 2 === 0 ? "#f8fafc" : "#fff" }}>
+                                      <tr key={`${row.group}::${row.material}::${row.boxLabel || ""}`} style={{ background: i % 2 === 0 ? "#f8fafc" : "#fff" }}>
                                         {row._groupFirst && (
                                           <td rowSpan={row._groupSpan} style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", borderRight: "1px solid #e5e7eb", color: "#6b7280", verticalAlign: "top", background: "#fff" }}>{row.group}</td>
                                         )}
-                                        <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", fontWeight: 600, color: "#111827" }}>{row.material}</td>
+                                        <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", fontWeight: 600, color: "#111827" }}>
+                                          {row.material}
+                                          {row.boxLabel && <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#6b7280" }}>— {row.boxLabel}</span>}
+                                        </td>
                                         <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#374151", fontWeight: 700 }}>{row.requiredQty}</td>
                                         <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280" }}>{row.unit}</td>
                                         {PROJ_MODELS.map((model) => {
@@ -3381,6 +3539,23 @@ function Projects() {
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Email ID</label>
                 <input type="email" value={pForm.email} onChange={(e) => updatePForm({ email: e.target.value })} placeholder="client@email.com" />
               </div>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Lead Source</label>
+                <select value={pForm.leadSource} onChange={(e) => updatePForm({ leadSource: e.target.value })}>
+                  <option value="">— Select —</option>
+                  {LEAD_SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </div>
+              {pForm.leadSource === "reference" && (
+                <div>
+                  <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Referred By</label>
+                  <input
+                    value={pForm.referredBy}
+                    onChange={(e) => updatePForm({ referredBy: e.target.value })}
+                    placeholder="e.g. Suresh (past client)"
+                  />
+                </div>
+              )}
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>City / Location *</label>
                 <input

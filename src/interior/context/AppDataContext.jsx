@@ -38,6 +38,12 @@ const defaultData = {
   // Mood Board (see subProjects[i].moodBoard, which rides along inside the
   // existing subProjects field rather than needing its own default here).
   designGallery: [],
+  // Enquiries received (Facebook, Instagram, Google Ads, Reference, Walk-in,
+  // ...) before they're confirmed as real work — deliberately separate from
+  // `projects`, which only gains an entry once a lead is explicitly converted
+  // via "Convert to Project" on the Leads page. See leadStatus.js for the
+  // shape of a lead entry and its status values.
+  leads: [],
 };
 
 // Debounce writes to the API so fast typing (a text input, a number field)
@@ -58,6 +64,7 @@ function AppDataProvider({ children }) {
   const [kerfWidth, setKerfWidth] = useState(defaultData.kerfWidth);
   const [companyProfile, setCompanyProfile] = useState(defaultData.companyProfile);
   const [designGallery, setDesignGallery] = useState(defaultData.designGallery);
+  const [leads, setLeads] = useState(defaultData.leads);
 
   // Gates the very first render (before the API has responded) and stops
   // the save effect from firing on the initial default state — otherwise
@@ -107,6 +114,7 @@ function AppDataProvider({ children }) {
         setKerfWidth(data.kerfWidth ?? 0);
         setCompanyProfile(data.companyProfile || {});
         setDesignGallery(data.designGallery || []);
+        setLeads(data.leads || []);
         // Only now does state genuinely reflect the server — safe to arm autosave.
         setIsLoaded(true);
       })
@@ -139,6 +147,7 @@ function AppDataProvider({ children }) {
         kerfWidth,
         companyProfile,
         designGallery,
+        leads,
       };
       saveState(dataToSave)
         .then(() => setSaveError(null))
@@ -163,6 +172,7 @@ function AppDataProvider({ children }) {
     kerfWidth,
     companyProfile,
     designGallery,
+    leads,
   ]);
 
   // Update a price entry and link any unlinked parts that reference it by name.
@@ -214,6 +224,7 @@ function AppDataProvider({ children }) {
     setMaterialStockSettings({});
     setKerfWidth(0);
     setDesignGallery([]);
+    setLeads([]);
     // The debounced save effect above picks this up and POSTs the cleared
     // state to MySQL — no direct API call needed here.
   };
@@ -228,6 +239,7 @@ function AppDataProvider({ children }) {
     setMaterialStockSettings({});
     setKerfWidth(0);
     setDesignGallery([]);
+    setLeads([]);
     // Same as resetAllData — the debounced save effect persists this.
   };
 
@@ -258,6 +270,8 @@ function AppDataProvider({ children }) {
         setCompanyProfile,
         designGallery,
         setDesignGallery,
+        leads,
+        setLeads,
         renamePrice,
         resetAllData,
         restoreSampleData,

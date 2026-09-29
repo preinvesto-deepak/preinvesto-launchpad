@@ -1,5 +1,6 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAppData } from "../context/AppDataContext";
+import { useUnsavedChanges } from "../context/UnsavedChangesContext";
 import { GROUP_OPTIONS } from "../data/priceData";
 
 const MODELS = ["economy", "standard", "premium"];
@@ -148,6 +149,7 @@ function ItemPickerModal({ materialName, prices, onSelect, onClose, initialGroup
 // ── Main Component ────────────────────────────────────────────────────────────
 function MaterialModels() {
   const { prices, materialModelRates, setMaterialModelRates, materialModelProfitPercent, setMaterialModelProfitPercent, projects, setProjects } = useAppData();
+  const { registerGuard } = useUnsavedChanges();
 
   const [searchGroup, setSearchGroup] = useState("");
   const [searchName, setSearchName] = useState("");
@@ -311,6 +313,19 @@ function MaterialModels() {
     setEdits({});
     alert("Material model rates saved as template.");
   };
+
+  // Registers this page's dirty state with the app-wide unsaved-changes
+  // guard, so navigating away (Sidebar, Back to Preinvesto, Sign out) while
+  // rate edits are still only in `edits` (not yet saved) prompts first
+  // instead of silently discarding them — see UnsavedChangesContext.
+  useEffect(() => {
+    return registerGuard({
+      isDirty: Object.keys(edits).length > 0,
+      label: "Material Models",
+      onSaveAndLeave: saveAll,
+      onDiscardAndLeave: () => setEdits({}),
+    });
+  }, [edits, materialModelRates]);
 
   const resetProjectMaterials = (projectId) => {
     if (!window.confirm("Reset this project's material models to the global template? This cannot be undone.")) return;

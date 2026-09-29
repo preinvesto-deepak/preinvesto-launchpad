@@ -1,10 +1,12 @@
-import { Routes, Route, useLocation, Link } from "react-router-dom";
+import { Routes, Route, useLocation, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, LogOut, UserCog, TriangleAlert } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { AppDataProvider, useAppData } from "./context/AppDataContext";
+import { UnsavedChangesProvider, useUnsavedChanges } from "./context/UnsavedChangesContext";
 import Sidebar from "./components/Sidebar";
 
 import Dashboard from "./pages/Dashboard";
+import Leads from "./pages/Leads";
 import Projects from "./pages/Projects";
 import SubProjects from "./pages/SubProjects";
 import TemplateMaster from "./pages/TemplateMaster";
@@ -20,6 +22,7 @@ import "./interior.css";
 
 const PAGE_TITLES: Record<string, string> = {
   "/interior": "Dashboard",
+  "/interior/leads": "Leads",
   "/interior/projects": "Projects & Rooms",
   "/interior/sub-projects": "Projects & Rooms",
   "/interior/template-master": "Templates",
@@ -49,6 +52,8 @@ function PageHeader() {
 /** Thin bar giving a way back to the main site and out of the session. */
 function InteriorTopBar() {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const { guardedNavigate } = useUnsavedChanges();
   return (
     <div
       className="no-print"
@@ -65,6 +70,7 @@ function InteriorTopBar() {
     >
       <Link
         to="/"
+        onClick={(e) => { e.preventDefault(); guardedNavigate(() => navigate("/")); }}
         style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--stone-700)", textDecoration: "none" }}
       >
         <ArrowLeft size={14} /> Back to Preinvesto
@@ -73,6 +79,7 @@ function InteriorTopBar() {
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <Link
           to="/interior/profile"
+          onClick={(e) => { e.preventDefault(); guardedNavigate(() => navigate("/interior/profile")); }}
           style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--stone-700)", textDecoration: "none" }}
           title="Your profile"
         >
@@ -80,7 +87,7 @@ function InteriorTopBar() {
           {user ? user.name : "Profile"}
         </Link>
         <button
-          onClick={logout}
+          onClick={() => guardedNavigate(logout)}
           style={{
             display: "flex",
             alignItems: "center",
@@ -145,29 +152,32 @@ const InteriorApp = () => {
 
   return (
     <AppDataProvider>
-      <div className="interior-app">
-        <InteriorTopBar />
-        <WorkspaceLoadBanner />
-        <div className="app-layout">
-          <Sidebar />
-          <div className="main-content" style={noPadTop ? { paddingTop: 0 } : {}}>
-            <PageHeader />
-            <Routes>
-              <Route index element={<Dashboard />} />
-              <Route path="projects" element={<Projects />} />
-              <Route path="sub-projects" element={<SubProjects />} />
-              <Route path="template-master" element={<TemplateMaster />} />
-              <Route path="design-gallery" element={<DesignGallery />} />
-              <Route path="items-pricing" element={<ItemsPricing />} />
-              <Route path="material-models" element={<MaterialModels />} />
-              <Route path="dimensions-entry" element={<DimensionsEntry />} />
-              <Route path="project-boq" element={<ProjectBOQ />} />
-              <Route path="project-quotation" element={<ProjectQuotation />} />
-              <Route path="profile" element={<Profile />} />
-            </Routes>
+      <UnsavedChangesProvider>
+        <div className="interior-app">
+          <InteriorTopBar />
+          <WorkspaceLoadBanner />
+          <div className="app-layout">
+            <Sidebar />
+            <div className="main-content" style={noPadTop ? { paddingTop: 0 } : {}}>
+              <PageHeader />
+              <Routes>
+                <Route index element={<Dashboard />} />
+                <Route path="leads" element={<Leads />} />
+                <Route path="projects" element={<Projects />} />
+                <Route path="sub-projects" element={<SubProjects />} />
+                <Route path="template-master" element={<TemplateMaster />} />
+                <Route path="design-gallery" element={<DesignGallery />} />
+                <Route path="items-pricing" element={<ItemsPricing />} />
+                <Route path="material-models" element={<MaterialModels />} />
+                <Route path="dimensions-entry" element={<DimensionsEntry />} />
+                <Route path="project-boq" element={<ProjectBOQ />} />
+                <Route path="project-quotation" element={<ProjectQuotation />} />
+                <Route path="profile" element={<Profile />} />
+              </Routes>
+            </div>
           </div>
         </div>
-      </div>
+      </UnsavedChangesProvider>
     </AppDataProvider>
   );
 };
