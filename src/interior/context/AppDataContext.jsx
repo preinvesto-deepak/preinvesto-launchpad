@@ -44,6 +44,17 @@ const defaultData = {
   // via "Convert to Project" on the Leads page. See leadStatus.js for the
   // shape of a lead entry and its status values.
   leads: [],
+  // Saved Leads views (List/Board tabs with their own filters) — see
+  // Leads.jsx's DEFAULT_LEAD_VIEWS for the one built-in "All Leads" view
+  // every account starts with.
+  leadViews: null,
+  // Customizable lead pipeline statuses — see Leads.jsx's DEFAULT_LEAD_STATUSES
+  // (leadStatus.js) for the built-in starter set every account begins with.
+  leadStatuses: null,
+  // { [tagName]: "#hex" } — a tag not in here falls back to leadPriority.js's
+  // hash-based tagColor(), so existing tags keep working unchanged until the
+  // user explicitly recolors one via the Tags popover's gear icon.
+  leadTagColors: null,
 };
 
 // Debounce writes to the API so fast typing (a text input, a number field)
@@ -65,6 +76,9 @@ function AppDataProvider({ children }) {
   const [companyProfile, setCompanyProfile] = useState(defaultData.companyProfile);
   const [designGallery, setDesignGallery] = useState(defaultData.designGallery);
   const [leads, setLeads] = useState(defaultData.leads);
+  const [leadViews, setLeadViews] = useState(defaultData.leadViews);
+  const [leadStatuses, setLeadStatuses] = useState(defaultData.leadStatuses);
+  const [leadTagColors, setLeadTagColors] = useState(defaultData.leadTagColors);
 
   // Gates the very first render (before the API has responded) and stops
   // the save effect from firing on the initial default state — otherwise
@@ -115,6 +129,9 @@ function AppDataProvider({ children }) {
         setCompanyProfile(data.companyProfile || {});
         setDesignGallery(data.designGallery || []);
         setLeads(data.leads || []);
+        setLeadViews(data.leadViews || null);
+        setLeadStatuses(data.leadStatuses || null);
+        setLeadTagColors(data.leadTagColors || null);
         // Only now does state genuinely reflect the server — safe to arm autosave.
         setIsLoaded(true);
       })
@@ -148,6 +165,9 @@ function AppDataProvider({ children }) {
         companyProfile,
         designGallery,
         leads,
+        leadViews,
+        leadStatuses,
+        leadTagColors,
       };
       saveState(dataToSave)
         .then(() => setSaveError(null))
@@ -173,6 +193,9 @@ function AppDataProvider({ children }) {
     companyProfile,
     designGallery,
     leads,
+    leadViews,
+    leadStatuses,
+    leadTagColors,
   ]);
 
   // Update a price entry and link any unlinked parts that reference it by name.
@@ -225,6 +248,9 @@ function AppDataProvider({ children }) {
     setKerfWidth(0);
     setDesignGallery([]);
     setLeads([]);
+    setLeadViews(null);
+    setLeadStatuses(null);
+    setLeadTagColors(null);
     // The debounced save effect above picks this up and POSTs the cleared
     // state to MySQL — no direct API call needed here.
   };
@@ -240,6 +266,9 @@ function AppDataProvider({ children }) {
     setKerfWidth(0);
     setDesignGallery([]);
     setLeads([]);
+    setLeadViews(null);
+    setLeadStatuses(null);
+    setLeadTagColors(null);
     // Same as resetAllData — the debounced save effect persists this.
   };
 
@@ -272,6 +301,12 @@ function AppDataProvider({ children }) {
         setDesignGallery,
         leads,
         setLeads,
+        leadViews,
+        setLeadViews,
+        leadStatuses,
+        setLeadStatuses,
+        leadTagColors,
+        setLeadTagColors,
         renamePrice,
         resetAllData,
         restoreSampleData,

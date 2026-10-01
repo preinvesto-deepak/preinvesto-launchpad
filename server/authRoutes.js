@@ -41,6 +41,11 @@ const INTERIOR_DEFAULTS = {
   // Deliberately separate from `projects`: a lead only becomes a project via
   // "Convert to Project" (see Leads.jsx), never automatically.
   leads: [],
+  // Saved Leads views (List/Board tabs + filters) — null means "use the
+  // built-in default view", same convention as AppDataContext.jsx.
+  leadViews: null,
+  leadStatuses: null,
+  leadTagColors: null,
 };
 
 export default function registerAuthRoutes(app, pool) {

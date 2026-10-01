@@ -30,6 +30,9 @@ $DEFAULTS = [
     'companyProfile'             => new stdClass(),
     'designGallery'              => [],
     'leads'                      => [],
+    'leadViews'                  => null,
+    'leadStatuses'                => null,
+    'leadTagColors'               => null,
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
