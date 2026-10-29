@@ -17,12 +17,14 @@ import ProjectBOQ from "./pages/ProjectBOQ";
 import ProjectQuotation from "./pages/ProjectQuotation";
 import Profile from "./pages/Profile";
 import DesignGallery from "./pages/DesignGallery";
+import Teams from "./pages/Teams";
 
 import "./interior.css";
 
 const PAGE_TITLES: Record<string, string> = {
   "/interior": "Dashboard",
   "/interior/leads": "Leads",
+  "/interior/teams": "Teams",
   "/interior/projects": "Projects & Rooms",
   "/interior/sub-projects": "Projects & Rooms",
   "/interior/template-master": "Templates",
@@ -163,6 +165,7 @@ const InteriorApp = () => {
               <Routes>
                 <Route index element={<Dashboard />} />
                 <Route path="leads" element={<Leads />} />
+                <Route path="teams" element={<Teams />} />
                 <Route path="projects" element={<Projects />} />
                 <Route path="sub-projects" element={<SubProjects />} />
                 <Route path="template-master" element={<TemplateMaster />} />

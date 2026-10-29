@@ -33,7 +33,8 @@ function ProjectBOQ() {
   const rateFor = (material) => {
     if (selectedModel !== "default") {
       const modelEntry = selectedProjectObj?.materialModelRates?.[material]?.[selectedModel];
-      if (modelEntry?.rate) return { rate: Number(modelEntry.rate), brand: modelEntry.brand || "", source: selectedModel };
+      // baseRate is the real rate; older cells also carry a profit-inflated `rate`.
+      if (modelEntry?.rate) return { rate: Number(modelEntry.baseRate || modelEntry.rate), brand: modelEntry.brand || "", source: selectedModel };
     }
     const rateData = prices.find((p) => p.materialName === material);
     return { rate: rateData ? Number(rateData.rate) : 0, brand: rateData?.brand || "", source: "default", priceFound: !!rateData };

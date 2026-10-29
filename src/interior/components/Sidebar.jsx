@@ -1,5 +1,6 @@
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useState } from "react";
+import { FolderKanban, Users } from "lucide-react";
 import { useAppData } from "../context/AppDataContext";
 import { useUnsavedChanges } from "../context/UnsavedChangesContext";
 
@@ -27,7 +28,29 @@ function Sidebar() {
     guardedNavigate(() => navigate(to));
   };
 
+  // Left icon rail: "Project" holds everything the app had before (Dashboard,
+  // Leads, Projects, Configure, Output, Account); "Teams" is the people side.
+  const onTeams = location.pathname.startsWith("/interior/teams");
+  const railItems = [
+    { key: "project", label: "Project", icon: FolderKanban, to: "/interior", active: !onTeams },
+    { key: "teams", label: "Teams", icon: Users, to: "/interior/teams", active: onTeams },
+  ];
+
   return (
+    <>
+    <div className="icon-rail no-print">
+      {railItems.map(({ key, label, icon: Icon, to, active }) => (
+        <button
+          key={key}
+          className={`icon-rail-item${active ? " active" : ""}`}
+          onClick={() => { if (!active) guardedNavigate(() => navigate(to)); }}
+          title={label}
+        >
+          <Icon size={18} />
+          <span>{label}</span>
+        </button>
+      ))}
+    </div>
     <div className="sidebar">
       {/* Brand */}
       <div className="sidebar-brand">
@@ -44,6 +67,14 @@ function Sidebar() {
         <input placeholder="Search…" />
       </div>
 
+      {onTeams ? (
+        <nav>
+          <ul>
+            <GroupLabel label="Teams" />
+            <li><NavLink to="/interior/teams" onClick={(e) => goTo(e, "/interior/teams")}>Team Members</NavLink></li>
+          </ul>
+        </nav>
+      ) : (
       <nav>
         <ul>
           <li><NavLink to="/interior" onClick={(e) => goTo(e, "/interior")}>Dashboard</NavLink></li>
@@ -154,7 +185,9 @@ function Sidebar() {
           <li><NavLink to="/interior/profile" onClick={(e) => goTo(e, "/interior/profile")}>Your Profile</NavLink></li>
         </ul>
       </nav>
+      )}
     </div>
+    </>
   );
 }
 

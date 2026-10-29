@@ -21,6 +21,47 @@
 }
 
 
+/* ── Icon rail (Project / Teams) ── */
+.interior-app .icon-rail {
+  width: 64px;
+  min-width: 64px;
+  background: #ffffff;
+  border-right: 1px solid rgba(231, 229, 228, 0.8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  flex-shrink: 0;
+}
+
+.interior-app .icon-rail-item {
+  width: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--stone-500);
+  font-size: 10px;
+}
+
+.interior-app .icon-rail-item:hover {
+  background: var(--stone-100);
+  color: var(--stone-800);
+}
+
+.interior-app .icon-rail-item.active {
+  background: var(--brand-light);
+  color: var(--brand);
+  font-weight: 600;
+}
+
 /* ── Sidebar ── */
 .interior-app .sidebar {
   width: 220px;

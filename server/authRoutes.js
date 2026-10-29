@@ -46,6 +46,8 @@ const INTERIOR_DEFAULTS = {
   leadViews: null,
   leadStatuses: null,
   leadTagColors: null,
+  teamMembers: [],
+  templateFolders: [],
 };
 
 export default function registerAuthRoutes(app, pool) {

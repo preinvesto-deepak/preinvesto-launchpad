@@ -305,11 +305,36 @@ function MaterialModal({ prices, onSelect, onClose }) {
 }
 
 // ─── Template Picker Modal ───────────────────────────────────────────────────
-function TemplatePickerModal({ templates = [], onSelect, onClose }) {
+function TemplatePickerModal({ templates = [], folders = [], onSelect, onClose }) {
   const [q, setQ] = useState("");
-  const filtered = templates.filter((t) =>
-    (t.templateName || "").toLowerCase().includes(q.toLowerCase())
-  );
+  const [folderId, setFolderId] = useState(null); // folder being browsed (null = top level)
+  const searching = q.trim() !== "";
+
+  // Same folder structure as the Templates page: a template sits in the
+  // folder named by its folderId; a missing/deleted folder means top level.
+  const folderById = (id) => folders.find((f) => f.id === id) || null;
+  const activeFolderId = folderId !== null && folderById(folderId) ? folderId : null;
+  const templateFolderOf = (t) => (t.folderId != null && folderById(t.folderId) ? t.folderId : null);
+  const subfoldersOf = (id) => folders.filter((f) => (f.parentId ?? null) === id);
+  const folderPath = (id) => {
+    const path = [];
+    let f = folderById(id);
+    while (f) { path.unshift(f); f = f.parentId != null ? folderById(f.parentId) : null; }
+    return path;
+  };
+  const deepTemplateCount = (id) =>
+    templates.filter((t) => templateFolderOf(t) === id).length +
+    subfoldersOf(id).reduce((n, f) => n + deepTemplateCount(f.id), 0);
+  const coverImageOf = (f) => {
+    const t = f.coverTemplateId != null ? templates.find((x) => x.id === f.coverTemplateId) : null;
+    return t && templateFolderOf(t) === f.id ? t.templateImage || null : null;
+  };
+
+  // Searching looks through every folder (flat); otherwise just this folder.
+  const filtered = searching
+    ? templates.filter((t) => (t.templateName || "").toLowerCase().includes(q.toLowerCase()))
+    : templates.filter((t) => templateFolderOf(t) === activeFolderId);
+  const visibleFolders = searching ? [] : subfoldersOf(activeFolderId);
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 28, width: 680, maxWidth: "95vw", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
@@ -317,11 +342,50 @@ function TemplatePickerModal({ templates = [], onSelect, onClose }) {
           <h3 style={{ margin: 0, fontSize: 16 }}>Apply a Template to this Room</h3>
           <button onClick={onClose} style={{ background: "#6b7280", padding: "5px 12px", fontSize: 13 }}>✕</button>
         </div>
-        <input autoFocus type="text" placeholder="Search templates…" value={q} onChange={(e) => setQ(e.target.value)} style={{ marginBottom: 16 }} />
-        {filtered.length === 0 && (
-          <p style={{ color: "#9ca3af", fontSize: 13 }}>No templates found. Create one in Template Master.</p>
+        <input autoFocus type="text" placeholder="Search templates…" value={q} onChange={(e) => setQ(e.target.value)} style={{ marginBottom: 12 }} />
+        {!searching && folders.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 13, marginBottom: 12 }}>
+            {[{ id: null, name: "Templates" }, ...folderPath(activeFolderId)].map((f, i, arr) => (
+              <span key={f.id ?? "root"} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {i > 0 && <span style={{ color: "#d1d5db" }}>/</span>}
+                {i === arr.length - 1 ? (
+                  <span style={{ fontWeight: 700, color: "#111827" }}>{f.name}</span>
+                ) : (
+                  <button onClick={() => setFolderId(f.id)} style={{ background: "none", border: "none", color: "#2563eb", padding: 0, fontSize: 13, cursor: "pointer" }}>{f.name}</button>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+        {filtered.length === 0 && visibleFolders.length === 0 && (
+          <p style={{ color: "#9ca3af", fontSize: 13 }}>
+            {searching ? "No templates found." : activeFolderId ? "This folder is empty." : "No templates found. Create one in Template Master."}
+          </p>
         )}
         <div style={{ overflowY: "auto", flex: 1, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 12, alignContent: "start" }}>
+          {visibleFolders.map((f) => {
+            const cover = coverImageOf(f);
+            const count = deepTemplateCount(f.id);
+            return (
+              <div
+                key={f.id}
+                onClick={() => setFolderId(f.id)}
+                style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", cursor: "pointer", textAlign: "center", background: "#fffbeb" }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#f59e0b")}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#e5e7eb")}
+              >
+                {cover ? (
+                  <img src={cover} alt="" style={{ width: "100%", aspectRatio: 4 / 3, objectFit: "cover", display: "block" }} />
+                ) : (
+                  <div style={{ width: "100%", aspectRatio: 4 / 3, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 38, borderBottom: "1px solid #fef3c7" }}>📁</div>
+                )}
+                <div style={{ padding: "10px 12px 12px" }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>📁 {f.name}</div>
+                  <div style={{ fontSize: 11, color: "#6b7280" }}>{count} template{count !== 1 ? "s" : ""}</div>
+                </div>
+              </div>
+            );
+          })}
           {filtered.map((t) => {
             const boxCount = (t.boxes || []).length;
             const firstBox = t.boxes?.[0];
@@ -556,7 +620,7 @@ function ProjItemPickerModal({ materialName, prices, onSelect, onClose, initialG
   );
 }
 
-function ProjectMaterialModels({ project, prices, globalRates, globalProfitPercent, setProjects }) {
+function ProjectMaterialModels({ project, prices, globalRates, setProjects }) {
   const [resetConfirm, setResetConfirm] = useState(false);
   const [activeGroup, setActiveGroup] = useState("All");
   const [searchGroup, setSearchGroup] = useState("");
@@ -565,7 +629,6 @@ function ProjectMaterialModels({ project, prices, globalRates, globalProfitPerce
   const [hideEmpty, setHideEmpty] = useState(false);
 
   const rates = project.materialModelRates || {};
-  const profitPercent = project.materialModelProfitPercent || { economy: 0, standard: 0, premium: 0 };
   const globalHasRates = Object.keys(globalRates || {}).length > 0;
 
   const groups = ["All", ...Array.from(new Set((prices || []).map((p) => p.group || p.category || "").filter(Boolean)))];
@@ -597,33 +660,29 @@ function ProjectMaterialModels({ project, prices, globalRates, globalProfitPerce
   };
   const displayItems = hideEmpty ? filtered.filter((item) => hasAnyData(item.materialName)) : filtered;
 
-  // Rate (excl GST) input edits the BASE (pre-profit) rate; the effective
-  // rate — what GST applies to, and what's actually used by the Quotation —
-  // is baseRate × (1 + profit%), same pattern as the global Material Models page.
+  // Rate (excl GST), GST % and Rate+GST keep each other in sync.
   const updateField = (matName, model, field, value) => {
     setProjects((prev) => prev.map((p) => {
       if (p.id !== project.id) return p;
       const currentRates = p.materialModelRates || {};
       const matRates = currentRates[matName] || emptyProjRates();
       const cell = matRates[model] || emptyM();
-      const profit = Number((p.materialModelProfitPercent || {})[model]) || 0;
       let updated = { ...cell, [field]: value };
       const gst = Number(field === "gst" ? value : updated.gst) || 0;
       if (field === "rate") {
         updated.baseRate = value;
         const base = Number(value) || 0;
-        const effective = base * (1 + profit / 100);
-        updated.rate = base > 0 ? String(roundTo2(effective)) : "";
-        if (base > 0) updated.rateWithGst = String(roundTo2(effective * (1 + gst / 100)));
+        updated.rate = base > 0 ? String(roundTo2(base)) : "";
+        if (base > 0) updated.rateWithGst = String(roundTo2(base * (1 + gst / 100)));
       } else if (field === "rateWithGst") {
         const rg = Number(value) || 0;
         if (rg > 0) {
-          const effective = rg / (1 + gst / 100);
-          updated.rate = String(roundTo2(effective));
-          updated.baseRate = String(roundTo2(effective / (1 + profit / 100)));
+          const rate = String(roundTo2(rg / (1 + gst / 100)));
+          updated.rate = rate;
+          updated.baseRate = rate;
         }
       } else if (field === "gst") {
-        const r = Number(updated.rate) || 0;
+        const r = Number(updated.baseRate !== undefined && updated.baseRate !== "" ? updated.baseRate : updated.rate) || 0;
         if (r > 0) updated.rateWithGst = String(roundTo2(r * (1 + Number(value) / 100)));
       }
       return { ...p, materialModelRates: { ...currentRates, [matName]: { ...matRates, [model]: updated } } };
@@ -636,8 +695,7 @@ function ProjectMaterialModels({ project, prices, globalRates, globalProfitPerce
     const baseRate = priceItem.rate > 0 ? String(priceItem.rate) : "";
     setProjects((prev) => prev.map((p) => {
       if (p.id !== project.id) return p;
-      const profit = Number((p.materialModelProfitPercent || {})[model]) || 0;
-      const rate = baseRate ? String(roundTo2(Number(baseRate) * (1 + profit / 100))) : "";
+      const rate = baseRate;
       const rateWithGst = rate ? String(roundTo2(Number(rate) * (1 + gst / 100))) : "";
       const currentRates = p.materialModelRates || {};
       const matRates = currentRates[materialName] || emptyProjRates();
@@ -652,42 +710,10 @@ function ProjectMaterialModels({ project, prices, globalRates, globalProfitPerce
     setPicker(null);
   };
 
-  // Profit % changed — recompute rate/rateWithGst from baseRate for every
-  // material that has one, so nothing compounds on top of an already
-  // profit-inflated rate.
-  const applyProfitChange = (model, newProfitPercent) => {
-    const profit = Number(newProfitPercent) || 0;
-    setProjects((prev) => prev.map((p) => {
-      if (p.id !== project.id) return p;
-      const currentRates = p.materialModelRates || {};
-      const nextRates = { ...currentRates };
-      displayItems.forEach((item) => {
-        const matRates = nextRates[item.materialName];
-        const cell = matRates?.[model];
-        if (!cell) return;
-        const base = cell.baseRate !== undefined && cell.baseRate !== "" ? cell.baseRate : cell.rate;
-        if (base === "" || base === undefined) return;
-        const rate = roundTo2(Number(base) * (1 + profit / 100));
-        const rateWithGst = roundTo2(rate * (1 + (Number(cell.gst) || 0) / 100));
-        nextRates[item.materialName] = { ...matRates, [model]: { ...cell, baseRate: base, rate: String(rate), rateWithGst: String(rateWithGst) } };
-      });
-      return {
-        ...p,
-        materialModelRates: nextRates,
-        materialModelProfitPercent: { ...(p.materialModelProfitPercent || { economy: 0, standard: 0, premium: 0 }), [model]: newProfitPercent },
-      };
-    }));
-  };
-
   const resetToGlobal = () => {
     const snapshot = JSON.parse(JSON.stringify(globalRates || {}));
-    // Rates alone aren't enough — they were computed using the GLOBAL Profit %,
-    // so this project's own Profit % override has to reset alongside them or
-    // the two go out of sync (rates say one profit margin, the displayed
-    // Profit % input says another).
-    const profitSnapshot = JSON.parse(JSON.stringify(globalProfitPercent || { economy: 0, standard: 0, premium: 0 }));
     setProjects((prev) => prev.map((p) =>
-      p.id === project.id ? { ...p, materialModelRates: snapshot, materialModelProfitPercent: profitSnapshot } : p
+      p.id === project.id ? { ...p, materialModelRates: snapshot } : p
     ));
     setResetConfirm(false);
   };
@@ -747,22 +773,6 @@ function ProjectMaterialModels({ project, prices, globalRates, globalProfitPerce
         ))}
       </div>
 
-      {/* ── Profit % row — applied on top of every material's base rate below,
-          before GST, so every Rate/Rate+GST in the table includes it. ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "220px 1fr 1fr 1fr", gap: 0, padding: "10px 24px", background: "#fffbeb", borderBottom: "2px solid #fde68a" }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", display: "flex", alignItems: "center" }}>Profit %</div>
-        {PROJ_MODELS.map((model) => (
-          <div key={model} style={{ borderLeft: "2px solid #fde68a", paddingLeft: 10, paddingRight: 8, display: "flex", alignItems: "center", gap: 6 }}>
-            <input
-              type="number" placeholder="0" value={profitPercent[model] ?? 0}
-              onChange={(e) => applyProfitChange(model, e.target.value)}
-              style={{ ...inp, width: 70, fontWeight: 700, color: PROJ_MODEL_COLORS[model], borderColor: "#f59e0b" }}
-            />
-            <span style={{ fontSize: 11, color: "#92400e" }}>added to every rate below</span>
-          </div>
-        ))}
-      </div>
-
       {/* ── Items ── */}
       <div style={{ padding: "0 24px 40px" }}>
         {displayItems.length === 0 ? (
@@ -781,9 +791,32 @@ function ProjectMaterialModels({ project, prices, globalRates, globalProfitPerce
               {/* 3 model columns */}
               {PROJ_MODELS.map((model) => {
                 const rawCell = matRates[model] || emptyM();
-                // Legacy entries saved before Profit % existed have no
-                // baseRate — treat their existing rate as the base.
-                const cell = { ...rawCell, baseRate: rawCell.baseRate !== undefined && rawCell.baseRate !== "" ? rawCell.baseRate : rawCell.rate };
+                // Cells saved back when Profit % existed carry a profit-inflated
+                // `rate`/`rateWithGst` next to the real `baseRate` — the base is
+                // the rate now, so show that (and its GST-inclusive value).
+                const hasBase = rawCell.baseRate !== undefined && rawCell.baseRate !== "";
+                const baseRate = hasBase ? rawCell.baseRate : rawCell.rate;
+                let cell = {
+                  ...rawCell, baseRate, rate: baseRate,
+                  rateWithGst: hasBase && Number(baseRate) > 0
+                    ? String(roundTo2(Number(baseRate) * (1 + (Number(rawCell.gst) || 0) / 100)))
+                    : rawCell.rateWithGst,
+                };
+                // A cell's brand ties it to an Items Pricing row (same name +
+                // brand lookup the Project Quotation uses), and tied cells show
+                // that row's CURRENT rate/GST — so the tab never disagrees with
+                // the Quotation. Only a cell matching no row keeps its own numbers.
+                const live = (rawCell.priceId && prices.find((p) => p.id === rawCell.priceId))
+                  || (rawCell.brand && prices.find((p) => p.materialName === item.materialName && (p.brand || "") === rawCell.brand));
+                if (live) {
+                  const liveRate = live.rate > 0 ? String(live.rate) : "";
+                  const liveGst = live.gst !== undefined && live.gst !== null ? String(live.gst) : cell.gst;
+                  cell = {
+                    ...cell, baseRate: liveRate, rate: liveRate, gst: liveGst,
+                    rateWithGst: liveRate ? String(roundTo2(Number(liveRate) * (1 + (Number(liveGst) || 0) / 100))) : "",
+                  };
+                }
+                const lockedToPricing = !!live;
                 const globalBrand = globalRates?.[item.materialName]?.[model]?.brand || "";
                 const projBrand = cell.brand || "";
                 const brandDiffers = globalBrand !== "" && projBrand !== globalBrand;
@@ -804,29 +837,27 @@ function ProjectMaterialModels({ project, prices, globalRates, globalProfitPerce
                     </div>
                     <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>Rate (excl GST, excl Profit)</div>
+                        <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>Rate (excl GST)</div>
                         <input type="number" placeholder="0.00" value={cell.baseRate || ""}
+                          readOnly={lockedToPricing} title={lockedToPricing ? "From Items Pricing — edit it there" : undefined}
                           onChange={(e) => updateField(item.materialName, model, "rate", e.target.value)}
                           style={{ ...inp, width: "100%" }} />
                       </div>
                       <div style={{ width: 46 }}>
                         <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>GST %</div>
                         <input type="number" placeholder="18" value={cell.gst !== undefined ? cell.gst : "18"}
+                          readOnly={lockedToPricing} title={lockedToPricing ? "From Items Pricing — edit it there" : undefined}
                           onChange={(e) => updateField(item.materialName, model, "gst", e.target.value)}
                           style={{ ...inp, width: 46 }} />
                       </div>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>Rate+GST (incl. Profit)</div>
+                        <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>Rate+GST</div>
                         <input type="number" placeholder="0.00" value={cell.rateWithGst || ""}
+                          readOnly={lockedToPricing} title={lockedToPricing ? "From Items Pricing — edit it there" : undefined}
                           onChange={(e) => updateField(item.materialName, model, "rateWithGst", e.target.value)}
                           style={{ ...inp, width: "100%", background: cell.rateWithGst ? "#f0fdf4" : undefined }} />
                       </div>
                     </div>
-                    {Number(profitPercent[model]) > 0 && cell.baseRate !== "" && (
-                      <div style={{ fontSize: 10, color: "#92400e" }}>
-                        Rate incl. Profit: ₹{cell.rate} <span style={{ color: "#9ca3af" }}>(base ₹{cell.baseRate} + {profitPercent[model]}%)</span>
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -872,10 +903,10 @@ function Projects() {
     setSelectedTemplateId,
     prices,
     materialModelRates,
-    materialModelProfitPercent,
     materialStockSettings,
     setMaterialStockSettings,
     templates,
+    templateFolders,
     designGallery,
   } = useAppData();
 
@@ -1932,7 +1963,6 @@ function Projects() {
                 project={selectedProject}
                 prices={prices}
                 globalRates={materialModelRates}
-                globalProfitPercent={materialModelProfitPercent}
                 setProjects={setProjects}
               />
             )}
@@ -3633,6 +3663,7 @@ function Projects() {
       {templatePickerOpen && (
         <TemplatePickerModal
           templates={templates}
+          folders={templateFolders}
           onSelect={(t) => {
             setTemplatePickerOpen(false);
             if (boxes.length > 0) {

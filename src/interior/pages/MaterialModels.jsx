@@ -28,16 +28,6 @@ function calcWithoutGst(rateWithGst, gst) {
   if (isNaN(r) || isNaN(g)) return "";
   return (r / (1 + g / 100)).toFixed(2);
 }
-// Base (pre-profit) rate × (1 + profit%) → the effective rate that GST is
-// then calculated on, and the value actually saved/used everywhere downstream
-// (BOQ/Quotation) — so profit flows through automatically once saved.
-function applyProfit(baseRate, profitPercent) {
-  const b = parseFloat(baseRate);
-  const p = parseFloat(profitPercent) || 0;
-  if (isNaN(b)) return "";
-  return (b * (1 + p / 100)).toFixed(2);
-}
-
 // ── Item Picker Modal ─────────────────────────────────────────────────────────
 function ItemPickerModal({ materialName, prices, onSelect, onClose, initialGroup }) {
   const [search, setSearch] = useState("");
@@ -148,7 +138,7 @@ function ItemPickerModal({ materialName, prices, onSelect, onClose, initialGroup
 
 // ── Main Component ────────────────────────────────────────────────────────────
 function MaterialModels() {
-  const { prices, materialModelRates, setMaterialModelRates, materialModelProfitPercent, setMaterialModelProfitPercent, projects, setProjects } = useAppData();
+  const { prices, materialModelRates, setMaterialModelRates, projects, setProjects } = useAppData();
   const { registerGuard } = useUnsavedChanges();
 
   const [searchGroup, setSearchGroup] = useState("");
@@ -187,34 +177,37 @@ function MaterialModels() {
     return true;
   });
 
-  // A cell picked via the 🔍 button carries a priceId — resolve it against
-  // the CURRENT Items Pricing row (not the frozen snapshot taken at pick
-  // time), so an edit made there shows up here immediately without needing
-  // to re-pick. Falls back to the stored values if that row was deleted, or
-  // if the cell was never linked (typed by hand, or predates this feature).
-  const resolveCell = (cell, model) => {
-    if (!cell.priceId) return cell;
-    const live = prices.find((p) => p.id === cell.priceId);
+  // A cell is tied to an Items Pricing row either by the priceId its 🔍 pick
+  // stored, or — for older/typed cells — by material name + brand. Tied cells
+  // always show the CURRENT Items Pricing numbers (same lookup the Project
+  // Quotation uses), so an edit there shows up here without re-picking. Only
+  // a cell with no matching row keeps its own typed/saved numbers.
+  const resolveCell = (cell, model, materialName) => {
+    const live = (cell.priceId && prices.find((p) => p.id === cell.priceId))
+      || (cell.brand && prices.find((p) => p.materialName === materialName && (p.brand || "") === cell.brand));
     if (!live) return cell;
-    const baseRate = live.rate > 0 ? String(live.rate) : "";
+    const rate = live.rate > 0 ? String(live.rate) : "";
     const gst = live.gst !== undefined && live.gst !== null ? String(live.gst) : cell.gst;
-    const profit = Number(materialModelProfitPercent?.[model]) || 0;
-    const rate = baseRate !== "" ? applyProfit(baseRate, profit) : "";
     const rateWithGst = rate !== "" ? calcWithGst(rate, gst) : "";
-    return { ...cell, brand: live.brand || cell.brand, baseRate, gst, rate, rateWithGst };
+    return { ...cell, brand: live.brand || cell.brand, baseRate: rate, gst, rate, rateWithGst, fromItemsPricing: true };
   };
 
-  // Get current rates for an item (edits > saved > empty). Legacy entries
-  // saved before Profit % existed have no baseRate — treat their existing
-  // rate as the base (equivalent to having been saved at 0% profit).
+  // Get current rates for an item (edits > saved > empty). Cells saved back
+  // when Profit % existed carry a profit-inflated `rate` next to the real
+  // `baseRate` — the base is the rate now, so show/save that instead.
   const getRates = (name) => {
     const r = edits[name] ?? materialModelRates[name] ?? emptyRates();
-    const withBase = {};
+    const out = {};
     MODELS.forEach((model) => {
-      const cell = resolveCell(r[model] || emptyModel(), model);
-      withBase[model] = { ...cell, baseRate: cell.baseRate !== undefined && cell.baseRate !== "" ? cell.baseRate : cell.rate };
+      const cell = resolveCell(r[model] || emptyModel(), model, name);
+      const hasBase = cell.baseRate !== undefined && cell.baseRate !== "";
+      const rate = hasBase ? cell.baseRate : cell.rate;
+      out[model] = {
+        ...cell, rate, baseRate: rate,
+        rateWithGst: hasBase && rate !== "" ? calcWithGst(rate, cell.gst) : cell.rateWithGst,
+      };
     });
-    return withBase;
+    return out;
   };
 
   // "Same priced" = every tier has a rate set, and all of them are equal —
@@ -233,7 +226,6 @@ function MaterialModels() {
 
   const setField = (name, model, field, value) => {
     const current = getRates(name);
-    const profit = Number(materialModelProfitPercent?.[model]) || 0;
     // Any manual edit freezes the cell — it stops tracking Items Pricing
     // updates from here on, so this typed value doesn't get silently
     // overwritten on the next render.
@@ -241,18 +233,14 @@ function MaterialModels() {
       ...current,
       [model]: { ...current[model], [field]: value, priceId: null },
     };
-    // auto-calc — the "Rate (excl GST)" input edits the BASE (pre-profit)
-    // rate; the effective rate (what GST applies to, and what gets saved) is
-    // baseRate × (1 + profit%).
+    // auto-calc — Rate (excl GST) / Rate+GST / GST % keep each other in sync.
     if (field === "rate") {
       updated[model].baseRate = value;
-      const effectiveRate = applyProfit(value, profit);
-      updated[model].rate = effectiveRate;
-      updated[model].rateWithGst = calcWithGst(effectiveRate, current[model].gst);
+      updated[model].rateWithGst = calcWithGst(value, current[model].gst);
     } else if (field === "rateWithGst") {
-      const effectiveRate = calcWithoutGst(value, current[model].gst);
-      updated[model].rate = effectiveRate;
-      updated[model].baseRate = profit !== -100 ? (parseFloat(effectiveRate) / (1 + profit / 100)).toFixed(2) : effectiveRate;
+      const rate = calcWithoutGst(value, current[model].gst);
+      updated[model].rate = rate;
+      updated[model].baseRate = rate;
     } else if (field === "gst") {
       if (current[model].rate !== "") {
         updated[model].rateWithGst = calcWithGst(current[model].rate, value);
@@ -266,10 +254,9 @@ function MaterialModels() {
   const onPickerSelect = (priceItem) => {
     const { materialName, model } = picker;
     const current = getRates(materialName);
-    const profit = Number(materialModelProfitPercent?.[model]) || 0;
     const gst = priceItem.gst ?? 18;
     const baseRate = priceItem.rate > 0 ? String(priceItem.rate) : "";
-    const rate = baseRate ? applyProfit(baseRate, profit) : "";
+    const rate = baseRate;
     const rateWithGst = rate ? calcWithGst(rate, gst) : "";
     setEdits((prev) => ({
       ...prev,
@@ -283,32 +270,16 @@ function MaterialModels() {
     setPicker(null);
   };
 
-  // Profit % changed for a model — recompute rate/rateWithGst from baseRate
-  // for every material that currently has one, so the table (and Save
-  // Template) reflects the new profit immediately without compounding on
-  // top of an already-inflated rate. Linked cells resolve their base rate
-  // live first, same as getRates, so this can't recompute off a stale value.
-  const applyProfitChange = (model, newProfitPercent) => {
-    setMaterialModelProfitPercent((prev) => ({ ...prev, [model]: newProfitPercent }));
-    const profit = Number(newProfitPercent) || 0;
-    setEdits((prevEdits) => {
-      const next = { ...prevEdits };
-      uniqueItems.forEach((item) => {
-        const name = item.materialName;
-        const current = next[name] ?? materialModelRates[name] ?? emptyRates();
-        const cell = resolveCell(current[model] || emptyModel(), model);
-        const base = cell.baseRate !== undefined && cell.baseRate !== "" ? cell.baseRate : cell.rate;
-        if (base === "" || base === undefined) return;
-        const rate = applyProfit(base, profit);
-        const rateWithGst = calcWithGst(rate, cell.gst);
-        next[name] = { ...current, [model]: { ...cell, baseRate: base, rate, rateWithGst } };
-      });
-      return next;
-    });
-  };
-
   const saveAll = () => {
-    const merged = { ...materialModelRates, ...edits };
+    // fromItemsPricing is a display-time flag (see resolveCell), never stored.
+    const stripFlag = (rates) => Object.fromEntries(Object.entries(rates).map(([name, byModel]) => [
+      name,
+      Object.fromEntries(Object.entries(byModel).map(([model, cell]) => {
+        const { fromItemsPricing, ...rest } = cell || {};
+        return [model, rest];
+      })),
+    ]));
+    const merged = stripFlag({ ...materialModelRates, ...edits });
     setMaterialModelRates(merged);
     setEdits({});
     alert("Material model rates saved as template.");
@@ -431,22 +402,6 @@ function MaterialModels() {
         ))}
       </div>
 
-      {/* ── Profit % row — applied on top of every material's base rate below,
-          before GST, so every Rate/Rate+GST in the table includes it. ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "220px 1fr 1fr 1fr", gap: 0, padding: "10px 24px", background: "#fffbeb", borderBottom: "2px solid #fde68a" }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", display: "flex", alignItems: "center" }}>Profit %</div>
-        {MODELS.map((model) => (
-          <div key={model} style={{ borderLeft: "2px solid #fde68a", paddingLeft: 10, paddingRight: 8, display: "flex", alignItems: "center", gap: 6 }}>
-            <input
-              type="number" placeholder="0" value={materialModelProfitPercent?.[model] ?? 0}
-              onChange={(e) => applyProfitChange(model, e.target.value)}
-              style={{ ...smInp, width: 70, fontWeight: 700, color: MODEL_COLORS[model], borderColor: "#f59e0b" }}
-            />
-            <span style={{ fontSize: 11, color: "#92400e" }}>added to every rate below</span>
-          </div>
-        ))}
-      </div>
-
       {/* ── Items ─────────────────────────────────────────────────────────── */}
       <div style={{ padding: "0 24px 40px" }}>
         {displayItems.length === 0 ? (
@@ -486,29 +441,27 @@ function MaterialModels() {
                       </div>
                       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>Rate (excl GST, excl Profit)</div>
+                          <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>Rate (excl GST)</div>
                           <input type="number" placeholder="0.00" value={m.baseRate}
+                            readOnly={m.fromItemsPricing} title={m.fromItemsPricing ? "From Items Pricing — edit it there" : undefined}
                             onChange={(e) => setField(item.materialName, model, "rate", e.target.value)}
                             style={smInp} />
                         </div>
                         <div style={{ width: 46 }}>
                           <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>GST %</div>
                           <input type="number" placeholder="18" value={m.gst}
+                            readOnly={m.fromItemsPricing} title={m.fromItemsPricing ? "From Items Pricing — edit it there" : undefined}
                             onChange={(e) => setField(item.materialName, model, "gst", e.target.value)}
                             style={{ ...smInp, width: 46 }} />
                         </div>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>Rate+GST (incl. Profit)</div>
+                          <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>Rate+GST</div>
                           <input type="number" placeholder="0.00" value={m.rateWithGst}
+                            readOnly={m.fromItemsPricing} title={m.fromItemsPricing ? "From Items Pricing — edit it there" : undefined}
                             onChange={(e) => setField(item.materialName, model, "rateWithGst", e.target.value)}
                             style={{ ...smInp, background: m.rateWithGst ? "#f0fdf4" : undefined }} />
                         </div>
                       </div>
-                      {Number(materialModelProfitPercent?.[model]) > 0 && m.baseRate !== "" && (
-                        <div style={{ fontSize: 10, color: "#92400e" }}>
-                          Rate incl. Profit: ₹{m.rate} <span style={{ color: "#9ca3af" }}>(base ₹{m.baseRate} + {materialModelProfitPercent[model]}%)</span>
-                        </div>
-                      )}
                     </div>
                   );
                 })}

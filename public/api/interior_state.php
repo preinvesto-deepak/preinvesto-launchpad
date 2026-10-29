@@ -33,6 +33,8 @@ $DEFAULTS = [
     'leadViews'                  => null,
     'leadStatuses'                => null,
     'leadTagColors'               => null,
+    'teamMembers'                 => [],
+    'templateFolders'             => [],
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {

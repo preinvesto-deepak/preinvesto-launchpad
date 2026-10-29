@@ -11,28 +11,28 @@ const QUOT_MODELS = ["economy", "standard", "premium"];
 const QUOT_MODEL_LABELS = { economy: "Economy", standard: "Standard", premium: "Premium" };
 const QUOT_MODEL_COLORS = { economy: "#059669", standard: "#2563eb", premium: "#7c3aed" };
 
-// Rate lookup shared by wood/laminate, edge banding, and hardware — project
-// Material Models rate for the selected variant, falling back to Items
-// Pricing. When falling back, Profit % for that model is applied on top —
-// the project's own Profit % if it's been set there, else the global
-// Material Models template's Profit % (the Material Models table already
-// bakes profit into any explicit per-material override it saves, so that
-// branch doesn't need it again here — only the un-overridden fallback does).
-function rateFor(material, model, projectObj, prices, globalProfitPercent) {
-  if (model) {
-    const modelEntry = projectObj?.materialModelRates?.[material]?.[model];
-    if (modelEntry?.rate) return Number(modelEntry.rate);
-  }
-  const rateData = prices.find((p) => p.materialName === material);
-  const base = rateData ? Number(rateData.rate) : 0;
-  let profit = 0;
-  if (model) {
-    const projectProfit = (projectObj?.materialModelProfitPercent || {})[model];
-    profit = projectProfit !== undefined && projectProfit !== null && projectProfit !== ""
-      ? Number(projectProfit) || 0
-      : Number((globalProfitPercent || {})[model]) || 0;
-  }
-  return base * (1 + profit / 100);
+// Rate lookup shared by wood/laminate, edge banding, and hardware.
+//
+// The project's Material Models cell only decides WHICH Items Pricing row
+// (brand) a tier uses — the numbers themselves come live from that row, so
+// editing Items Pricing is reflected here without re-picking or resetting
+// the project. The cell's saved rate is a last resort for hand-typed cells
+// that don't match any Items Pricing row.
+function priceRowFor(material, model, projectObj, prices) {
+  const sameName = prices.filter((p) => p.materialName === material);
+  const cell = model ? projectObj?.materialModelRates?.[material]?.[model] : null;
+  const linked = (cell?.priceId && sameName.find((p) => p.id === cell.priceId))
+    || (cell?.brand && sameName.find((p) => (p.brand || "") === cell.brand));
+  if (linked) return { row: linked, matchedCell: true, cell };
+  return { row: sameName[0] || null, matchedCell: false, cell };
+}
+
+function rateFor(material, model, projectObj, prices) {
+  const { row, matchedCell, cell } = priceRowFor(material, model, projectObj, prices);
+  // Hand-typed cell that matches no Items Pricing row: its own saved base rate
+  // (older cells also stored a profit-inflated `rate`, which no longer applies).
+  if (!matchedCell && (cell?.baseRate || cell?.rate)) return Number(cell.baseRate || cell.rate);
+  return row ? Number(row.rate) : 0;
 }
 
 // Room's Area (sq ft) = Σ (H ft × W ft) of every box — the box's own
@@ -80,8 +80,8 @@ function getStockSizeFor(materialStockSettings, mat) {
 // boxes/parts, priced via the project's Material Models rates (falling back
 // to global Items Pricing) — including Transportation and Carpenter, both
 // item-priced from whatever was picked in Items Pricing/Box Type.
-function computeRoomCost(room, model, projectObj, prices, materialStockSettings, globalProfitPercent) {
-  const rate = (mat) => rateFor(mat, model, projectObj, prices, globalProfitPercent);
+function computeRoomCost(room, model, projectObj, prices, materialStockSettings) {
+  const rate = (mat) => rateFor(mat, model, projectObj, prices);
   const rows = buildRoomRows(room, prices);
   const getStockSize = (mat) => getStockSizeFor(materialStockSettings, mat);
   const sheetCounts = computeSheetCounts(
@@ -139,8 +139,8 @@ function computeRoomCost(room, model, projectObj, prices, materialStockSettings,
 // rate, plus an equal share of that material's project-wide wastage; see
 // the comment there). Edge banding/hardware/carpenter have no such
 // base-vs-wastage split, so their own amounts are used directly as weights.
-function computeBoxOwnCost(box, room, model, projectObj, prices, materialStockSettings, globalProfitPercent) {
-  const rate = (mat) => rateFor(mat, model, projectObj, prices, globalProfitPercent);
+function computeBoxOwnCost(box, room, model, projectObj, prices, materialStockSettings) {
+  const rate = (mat) => rateFor(mat, model, projectObj, prices);
 
   const { material: edgeMat, lengthMm } = buildBoxEdgeBanding(box, prices);
   const edgeAmount = edgeMat && lengthMm ? (Math.round((lengthMm / 1000) * 100) / 100) * rate(edgeMat) : 0;
@@ -205,6 +205,12 @@ function computeRoomMrpSavings(room, prices, materialStockSettings) {
   return { mrpTotal, netTotal, savings: mrpTotal - netTotal };
 }
 
+// "5 yrs" / "1 yr" / a dash when the item has no warranty set.
+function fmtWarranty(years, empty = "—") {
+  const y = Number(years) || 0;
+  return y > 0 ? `${y} yr${y === 1 ? "" : "s"}` : empty;
+}
+
 // Itemized MRP-vs-Discount breakdown for Hardware & Consumables only (edge
 // banding, hardware, handles, glue, addons, tape, hinges/sliders,
 // transportation, carpenter — everything except the Wood/Laminate sheet
@@ -218,11 +224,11 @@ function computeRoomMrpSavings(room, prices, materialStockSettings) {
 // no MRP set just shows 0 discount instead of being silently dropped.
 //
 // "Your Rate" uses the SAME model-aware rate lookup as every other amount
-// in the quotation (Material Models override for this model, falling back
-// to Items Pricing + that model's Profit %) — so Economy/Standard/Premium
+// in the quotation (the project's Material Models brand for this model, with
+// the numbers taken live from Items Pricing) — so Economy/Standard/Premium
 // genuinely show different savings, matching what that tier actually
 // charges, instead of all three collapsing to Items Pricing's flat base rate.
-function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj, globalProfitPercent) {
+function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj) {
   const byMaterial = {};
   projectRooms.forEach((room) => {
     const edgeTotals = buildRoomEdgeBanding(room, prices);
@@ -242,10 +248,14 @@ function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj,
 
   return Object.entries(byMaterial)
     .map(([material, qty]) => {
-      const p = prices.find((pr) => pr.materialName === material);
+      // Several brands can share one material name (e.g. Ebco and Hettich
+      // "0 Crank Hinges"), each with its own MRP/GST — same row the rate
+      // below comes from, so the MRP compared against belongs to the brand
+      // actually being charged.
+      const p = priceRowFor(material, model, projectObj, prices).row;
       if (!p || p.showInQuotation === false || !qty) return null;
       const mrp = Number(p.mrp) || 0;
-      const rate = rateFor(material, model, projectObj, prices, globalProfitPercent);
+      const rate = rateFor(material, model, projectObj, prices);
       const gstMult = 1 + (Number(p.gst) || 0) / 100;
       const netAmount = qty * rate * gstMult;
       // MRP is already GST-inclusive (that's what MRP means), so no gstMult
@@ -257,7 +267,10 @@ function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj,
       const discountPercent = mrp > 0 ? ((mrp - rate * gstMult) / mrp) * 100 : 0;
       return {
         material, group: p.group || "Other", unit: p.unit || "",
-        qty: roundTo2(qty), mrp, rate, discountPercent: roundTo2(discountPercent),
+        warranty: Number(p.warranty) > 0 ? Number(p.warranty) : 0,
+        // `rate` is shown in the "Your Rate" column, so it's GST-inclusive
+        // like MRP and the amounts (qty × rate = Your Amount).
+        qty: roundTo2(qty), mrp, rate: roundTo2(rate * gstMult), discountPercent: roundTo2(discountPercent),
         mrpAmount, netAmount, savings: mrpAmount - netAmount,
       };
     })
@@ -281,7 +294,7 @@ function buildProjectCutListRows(projectRooms, prices) {
 }
 
 function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
-  const { projects, setProjects, subProjects, prices, materialStockSettings, materialModelProfitPercent, companyProfile } = useAppData();
+  const { projects, setProjects, subProjects, prices, materialStockSettings, companyProfile } = useAppData();
 
   const [selectedProject, setSelectedProject] = useState(initialProjectName || projects[0]?.name || "");
 
@@ -443,9 +456,9 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
   // still land exactly on the real (nested) cost; only which box carries how
   // much of the wastage changes.
   const buildLineItems = (rooms, model) => {
-    const rate = (mat) => rateFor(mat, model, selectedProjectObj, prices, materialModelProfitPercent);
+    const rate = (mat) => rateFor(mat, model, selectedProjectObj, prices);
     const roomCosts = rooms.map((room) =>
-      computeRoomCost(room, model, selectedProjectObj, prices, materialStockSettings, materialModelProfitPercent)
+      computeRoomCost(room, model, selectedProjectObj, prices, materialStockSettings)
     );
 
     const projectWoodByMaterial = {}; // real cost, summed across every room's own nesting
@@ -514,7 +527,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
       }
       const roomTotalArea = roomAreaSft(room);
       const boxOwnCosts = boxes.map((box) =>
-        computeBoxOwnCost(box, room, model, selectedProjectObj, prices, materialStockSettings, materialModelProfitPercent)
+        computeBoxOwnCost(box, room, model, selectedProjectObj, prices, materialStockSettings)
       );
       const CATS = ["edgeAmount", "hardwareAmount", "transportationAmount", "laborAmount"];
       const catSums = {};
@@ -584,7 +597,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
   const lineItems = useMemo(
     () => buildLineItems(quotationRooms, selectedModel),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [quotationRooms, prices, selectedModel, selectedProjectObj, materialStockSettings, materialModelProfitPercent]
+    [quotationRooms, prices, selectedModel, selectedProjectObj, materialStockSettings]
   );
 
   // MRP-vs-net savings across every room — items only, not model-adjusted
@@ -600,9 +613,9 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
   // Itemized Hardware & Consumables MRP/Discount breakdown — feeds the
   // Quotation's dedicated savings page (see computeHardwareMrpSavingsItems).
   const hardwareMrpItems = useMemo(
-    () => computeHardwareMrpSavingsItems(quotationRooms, prices, selectedModel, selectedProjectObj, materialModelProfitPercent),
+    () => computeHardwareMrpSavingsItems(quotationRooms, prices, selectedModel, selectedProjectObj),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [quotationRooms, prices, selectedModel, selectedProjectObj, materialModelProfitPercent]
+    [quotationRooms, prices, selectedModel, selectedProjectObj]
   );
   const hardwareSavingsTotal = hardwareMrpItems.reduce((s, r) => s + r.savings, 0);
 
@@ -653,7 +666,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
       const prop = ct > 0 ? item.costTotal / ct : 0;
       return { ...item, sellingAmount: gt * prop };
     });
-    const hardwareItems = computeHardwareMrpSavingsItems(quotationRooms, prices, model, selectedProjectObj, materialModelProfitPercent);
+    const hardwareItems = computeHardwareMrpSavingsItems(quotationRooms, prices, model, selectedProjectObj);
     return { model, items: withSelling, ct, st, net, gst, gt, adv, hardwareItems };
   };
 
@@ -663,7 +676,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
   const compareVariants = useMemo(
     () => QUOT_MODELS.map((m) => buildVariant(m)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [quotationRooms, prices, selectedProjectObj, materialStockSettings, materialModelProfitPercent, markupPercent, discountAmount, gstPercent, advancePercent]
+    [quotationRooms, prices, selectedProjectObj, materialStockSettings, markupPercent, discountAmount, gstPercent, advancePercent]
   );
 
   const variantPageHTML = (v, pageBreakBefore) => {
@@ -751,7 +764,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
         <table border="1" cellpadding="7" cellspacing="0" width="100%" style="font-size:12px">
           <thead>
             <tr>
-              ${["Group", "Item", "Qty", "Unit", "MRP (₹)", "Your Rate (₹)", "Discount %", "MRP Amount", "Your Amount", "You Save"]
+              ${["Group", "Item", "Qty", "Unit", "Warranty", "MRP (₹)", "Your Rate (₹)", "Discount %", "MRP Amount", "Your Amount", "You Save"]
                 .map((h) => `<th style="background:#1e3a5f;color:#fff">${h}</th>`)
                 .join("")}
             </tr>
@@ -765,6 +778,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                 <td>${row.material}</td>
                 <td style="text-align:center">${row.qty}</td>
                 <td style="text-align:center">${row.unit}</td>
+                <td style="text-align:center">${fmtWarranty(row.warranty)}</td>
                 <td style="text-align:right">${row.mrp > 0 ? `₹${row.mrp.toLocaleString("en-IN")}` : "—"}</td>
                 <td style="text-align:right">₹${row.rate.toLocaleString("en-IN")}</td>
                 <td style="text-align:center;color:${row.mrp > 0 ? "#059669" : "#9ca3af"};font-weight:700">${row.mrp > 0 ? `${row.discountPercent}%` : "—"}</td>
@@ -777,7 +791,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
           </tbody>
           <tfoot>
             <tr style="background:#ecfdf5;font-weight:700">
-              <td colspan="7" style="text-align:right">Total You Save on Hardware &amp; Consumables</td>
+              <td colspan="8" style="text-align:right">Total You Save on Hardware &amp; Consumables</td>
               <td style="text-align:right">${fmtCurrency(v.hardwareItems.reduce((s, r) => s + r.mrpAmount, 0))}</td>
               <td style="text-align:right">${fmtCurrency(v.hardwareItems.reduce((s, r) => s + r.netAmount, 0))}</td>
               <td style="text-align:right;color:#059669">${fmtCurrency(v.hardwareItems.reduce((s, r) => s + r.savings, 0))}</td>
@@ -954,15 +968,15 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
       autoTable(doc, {
         startY: 22,
         margin: { left: margin, right: margin },
-        head: [["Group", "Item", "Qty", "Unit", "MRP", "Your Rate", "Disc %", "MRP Amt", "Your Amt", "You Save"]],
+        head: [["Group", "Item", "Qty", "Unit", "Warranty", "MRP", "Your Rate", "Disc %", "MRP Amt", "Your Amt", "You Save"]],
         body: v.hardwareItems.map((r) => [
-          r.group, r.material, r.qty, r.unit,
+          r.group, r.material, r.qty, r.unit, fmtWarranty(r.warranty, "-"),
           r.mrp > 0 ? fmtPdf(r.mrp) : "-", fmtPdf(r.rate),
           r.mrp > 0 ? `${r.discountPercent}%` : "-",
           r.mrp > 0 ? fmtPdf(r.mrpAmount) : "-", fmtPdf(r.netAmount),
           r.mrp > 0 ? fmtPdf(r.savings) : "-",
         ]),
-        foot: [["", "", "", "", "", "", "Total", fmtPdf(v.hardwareItems.reduce((s, r) => s + r.mrpAmount, 0)), fmtPdf(v.hardwareItems.reduce((s, r) => s + r.netAmount, 0)), fmtPdf(v.hardwareItems.reduce((s, r) => s + r.savings, 0))]],
+        foot: [["", "", "", "", "", "", "", "Total", fmtPdf(v.hardwareItems.reduce((s, r) => s + r.mrpAmount, 0)), fmtPdf(v.hardwareItems.reduce((s, r) => s + r.netAmount, 0)), fmtPdf(v.hardwareItems.reduce((s, r) => s + r.savings, 0))]],
         styles: { fontSize: 7 },
         headStyles: { fillColor: [30, 58, 95] },
         footStyles: { fillColor: [236, 253, 245], textColor: [5, 150, 105], fontStyle: "bold" },
@@ -1344,7 +1358,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                 <table border="1" cellPadding="7" cellSpacing="0" width="100%" style={{ fontSize: 12 }}>
                   <thead>
                     <tr>
-                      {["Group", "Item", "Qty", "Unit", "MRP (₹)", "Your Rate (₹)", "Discount %", "MRP Amount", "Your Amount", "You Save"].map((h) => (
+                      {["Group", "Item", "Qty", "Unit", "Warranty", "MRP (₹)", "Your Rate (₹)", "Discount %", "MRP Amount", "Your Amount", "You Save"].map((h) => (
                         <th key={h} style={{ background: "#1e3a5f", color: "#fff" }}>{h}</th>
                       ))}
                     </tr>
@@ -1356,6 +1370,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                         <td>{row.material}</td>
                         <td style={{ textAlign: "center" }}>{row.qty}</td>
                         <td style={{ textAlign: "center" }}>{row.unit}</td>
+                        <td style={{ textAlign: "center" }}>{fmtWarranty(row.warranty)}</td>
                         <td style={{ textAlign: "right" }}>{row.mrp > 0 ? `₹${row.mrp.toLocaleString("en-IN")}` : "—"}</td>
                         <td style={{ textAlign: "right" }}>₹{row.rate.toLocaleString("en-IN")}</td>
                         <td style={{ textAlign: "center", color: row.mrp > 0 ? "#059669" : "#9ca3af", fontWeight: 700 }}>{row.mrp > 0 ? `${row.discountPercent}%` : "—"}</td>
@@ -1367,7 +1382,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                   </tbody>
                   <tfoot>
                     <tr style={{ background: "#ecfdf5", fontWeight: 700 }}>
-                      <td colSpan={7} style={{ textAlign: "right" }}>Total You Save on Hardware &amp; Consumables</td>
+                      <td colSpan={8} style={{ textAlign: "right" }}>Total You Save on Hardware &amp; Consumables</td>
                       <td style={{ textAlign: "right" }}>{formatCurrency(hardwareMrpItems.reduce((s, r) => s + r.mrpAmount, 0))}</td>
                       <td style={{ textAlign: "right" }}>{formatCurrency(hardwareMrpItems.reduce((s, r) => s + r.netAmount, 0))}</td>
                       <td style={{ textAlign: "right", color: "#059669" }}>{formatCurrency(hardwareMrpItems.reduce((s, r) => s + r.savings, 0))}</td>

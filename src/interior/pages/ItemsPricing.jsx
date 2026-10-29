@@ -14,6 +14,9 @@ const emptyForm = {
   // showInQuotation controls whether this item's MRP-vs-final savings shows
   // up in the Project Quotation's savings summary.
   mrp: "", discountPercent: "", showInQuotation: true,
+  // Manufacturer/supplier warranty, in years (blank = none). Shown next to the
+  // item in the Project Quotation when its "show in Project Quotation" box is ticked.
+  warranty: "",
 };
 
 // Standard panel thicknesses (mm) used to match a Ply material to a
@@ -299,6 +302,7 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
       mrp: Number(form.mrp) || 0,
       discountPercent: Number(form.discountPercent) || 0,
       showInQuotation: form.showInQuotation !== false,
+      warranty: Number(form.warranty) > 0 ? Number(form.warranty) : 0,
     });
   };
 
@@ -421,6 +425,10 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
           <div>
             <label style={lbl}>Model / Code</label>
             <input style={inp} type="text" placeholder="e.g. BWR-710" value={form.modelNumber} onChange={set("modelNumber")} />
+          </div>
+          <div>
+            <label style={lbl}>Warranty (Years)</label>
+            <input style={inp} type="number" min={0} step="0.5" placeholder="e.g. 5" value={form.warranty} onChange={set("warranty")} />
           </div>
 
           {form.group === "Wood" && (
@@ -609,6 +617,7 @@ function ItemDetailModal({ item, onClose, onEdit }) {
           {row("Unit", item.unit)}
           {row("Brand", item.brand)}
           {row("Model / Code", item.modelNumber)}
+          {Number(item.warranty) > 0 && row("Warranty", `${item.warranty} year${Number(item.warranty) === 1 ? "" : "s"}`)}
           {row("Ply Thickness", item.plyThickness ? `${item.plyThickness} mm` : "")}
           {row("Suitable Ply Thickness", (item.suitableThickness || []).length ? item.suitableThickness.map((t) => `${t}mm`).join(", ") : "")}
           {row("Sheet Size", item.woodDimW && item.woodDimH ? `${item.woodDimW}' × ${item.woodDimH}' = ${item.woodDimW * item.woodDimH} sqft` : "")}
@@ -804,8 +813,8 @@ function ItemsPricing() {
   })();
 
   const TABLE_HEADERS = sortBy === "name"
-    ? ["", "Brand", "Spec", "Unit", "Model / Code", "MRP (₹)", "Rate (₹)", "GST %", "Rate+GST (₹)", "Quote", ""]
-    : ["", "Name", "Spec", "Unit", "Model / Code", "MRP (₹)", "Rate (₹)", "GST %", "Rate+GST (₹)", "Quote", ""];
+    ? ["", "Brand", "Spec", "Unit", "Model / Code", "Warranty", "MRP (₹)", "Rate (₹)", "GST %", "Rate+GST (₹)", "Quote", ""]
+    : ["", "Name", "Spec", "Unit", "Model / Code", "Warranty", "MRP (₹)", "Rate (₹)", "GST %", "Rate+GST (₹)", "Quote", ""];
 
   return (
     <div style={{ margin: "0 -24px -24px -24px", display: "flex", flexDirection: "column" }}>
@@ -914,6 +923,9 @@ function ItemsPricing() {
                             <td style={{ padding: "7px 10px", fontSize: 12, color: "#6b7280" }}>{item.materialSpec || "—"}</td>
                             <td style={{ padding: "7px 10px", fontSize: 13 }}>{item.unit}</td>
                             <td style={{ padding: "7px 10px", fontSize: 12, color: "#6b7280" }}>{item.modelNumber || "—"}</td>
+                            <td style={{ padding: "7px 10px", fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>
+                              {Number(item.warranty) > 0 ? `${item.warranty} yr${Number(item.warranty) === 1 ? "" : "s"}` : <span style={{ color: "#d1d5db" }}>—</span>}
+                            </td>
                             <td style={{ padding: "7px 10px", fontSize: 12, textAlign: "right", color: "#9ca3af", textDecoration: item.mrp > 0 ? "line-through" : "none" }}>
                               {item.mrp > 0 ? `₹${Number(item.mrp).toLocaleString("en-IN")}` : <span style={{ color: "#d1d5db" }}>—</span>}
                             </td>

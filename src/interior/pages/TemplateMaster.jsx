@@ -600,8 +600,16 @@ function SectionHeader({ title, open, onToggle, action, style: extraStyle }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 function TemplateMaster() {
-  const { templates, setTemplates, prices, materialStockSettings, setMaterialStockSettings, materialModelRates } = useAppData();
+  const { templates, setTemplates, templateFolders, setTemplateFolders, prices, materialStockSettings, setMaterialStockSettings, materialModelRates } = useAppData();
   const { registerGuard, guardedNavigate } = useUnsavedChanges();
+
+  // Folder browsing — currentFolderId is the folder whose contents the grid
+  // shows (null = top level). folderModal: { mode: "new" | "rename", id? };
+  // moveTemplateId: the template whose "Move to folder" picker is open.
+  const [currentFolderId, setCurrentFolderId] = useState(null);
+  const [folderModal, setFolderModal] = useState(null);
+  const [folderNameDraft, setFolderNameDraft] = useState("");
+  const [moveTemplateId, setMoveTemplateId] = useState(null);
 
   // Left panel
   const [search, setSearch] = useState("");
@@ -681,8 +689,30 @@ function TemplateMaster() {
   const boxes = draft?.boxes || [];
   const activeBox = boxes.find((b) => b.id === activeBoxId) ?? boxes[0] ?? null;
 
-  // Filtered list (left panel)
-  const filtered = templates.filter((t) => {
+  // Folder helpers. A folder that no longer exists (deleted elsewhere) falls
+  // back to the top level instead of leaving the grid on a dead folder.
+  const folders = templateFolders || [];
+  const folderById = (id) => folders.find((f) => f.id === id) || null;
+  const activeFolderId = currentFolderId !== null && folderById(currentFolderId) ? currentFolderId : null;
+  const folderPath = (id) => {
+    const path = [];
+    let f = folderById(id);
+    while (f) { path.unshift(f); f = f.parentId != null ? folderById(f.parentId) : null; }
+    return path;
+  };
+  const templateFolderOf = (t) => (t.folderId != null && folderById(t.folderId) ? t.folderId : null);
+  const subfoldersOf = (id) => folders.filter((f) => (f.parentId ?? null) === id);
+  const templatesIn = (id) => templates.filter((t) => templateFolderOf(t) === id);
+  // Every template/subfolder under a folder, at any depth — for the counts on
+  // a folder tile.
+  const deepCounts = (id) => {
+    let tCount = templatesIn(id).length;
+    let fCount = 0;
+    subfoldersOf(id).forEach((f) => { const c = deepCounts(f.id); tCount += c.tCount; fCount += 1 + c.fCount; });
+    return { tCount, fCount };
+  };
+
+  const matchesSearch = (t) => {
     const q = search.toLowerCase();
     return (
       (t.templateName || "").toLowerCase().includes(q) ||
@@ -693,7 +723,68 @@ function TemplateMaster() {
           (b.doorType || "").toLowerCase().includes(q)
       )
     );
-  });
+  };
+  // Searching looks through EVERY folder (flat results, so a template is
+  // findable without knowing where it was filed); otherwise the grid shows
+  // just the current folder's own templates.
+  const searching = search.trim() !== "";
+  const filtered = searching ? templates.filter(matchesSearch) : templatesIn(activeFolderId);
+  const visibleFolders = searching ? [] : subfoldersOf(activeFolderId);
+
+  const saveFolderModal = () => {
+    const name = folderNameDraft.trim();
+    if (!name) return;
+    if (folderModal.mode === "rename") {
+      setTemplateFolders((prev) => prev.map((f) => (f.id === folderModal.id ? { ...f, name } : f)));
+    } else {
+      const id = folders.length ? Math.max(...folders.map((f) => f.id)) + 1 : 1;
+      setTemplateFolders((prev) => [...prev, { id, name, parentId: activeFolderId }]);
+    }
+    setFolderModal(null);
+  };
+
+  // Deleting a folder never deletes templates: its templates and subfolders
+  // move up to the folder's own parent.
+  const deleteFolder = (id) => {
+    const f = folderById(id);
+    if (!f) return;
+    const { tCount, fCount } = deepCounts(id);
+    const msg = tCount || fCount
+      ? `Delete folder "${f.name}"? Its ${tCount} template${tCount !== 1 ? "s" : ""} and ${fCount} subfolder${fCount !== 1 ? "s" : ""} will move up one level — nothing is deleted.`
+      : `Delete empty folder "${f.name}"?`;
+    if (!window.confirm(msg)) return;
+    const parent = f.parentId ?? null;
+    setTemplates((prev) => prev.map((t) => (t.folderId === id ? { ...t, folderId: parent } : t)));
+    setTemplateFolders((prev) => prev.filter((x) => x.id !== id).map((x) => (x.parentId === id ? { ...x, parentId: parent } : x)));
+    if (currentFolderId === id) setCurrentFolderId(parent);
+  };
+
+  // A folder's picture is the photo of one template chosen from the folder
+  // itself (folder.coverTemplateId). It only counts while that template still
+  // sits directly in the folder — moved out or deleted, the tile falls back
+  // to the plain 📁 icon.
+  const folderCoverTemplate = (f) => {
+    const t = f.coverTemplateId != null ? templates.find((x) => x.id === f.coverTemplateId) : null;
+    return t && templateFolderOf(t) === f.id ? t : null;
+  };
+  const toggleFolderCover = (folderId, templateId) => {
+    setTemplateFolders((prev) => prev.map((f) => (
+      f.id === folderId ? { ...f, coverTemplateId: f.coverTemplateId === templateId ? null : templateId } : f
+    )));
+  };
+
+  const moveTemplateToFolder = (templateId, folderId) => {
+    setTemplates((prev) => prev.map((t) => (t.id === templateId ? { ...t, folderId } : t)));
+    setMoveTemplateId(null);
+  };
+
+  // Folder tree flattened with depth, for the "Move to folder" picker.
+  const folderOptions = (() => {
+    const out = [];
+    const walk = (parentId, depth) => subfoldersOf(parentId).forEach((f) => { out.push({ folder: f, depth }); walk(f.id, depth + 1); });
+    walk(null, 0);
+    return out;
+  })();
 
   // Edge banding for ONE box — auto-matched per Ply row to a compatible Edge
   // Band product (by thickness) instead of one manually-picked material for
@@ -1005,7 +1096,11 @@ function TemplateMaster() {
   // ── Save ──────────────────────────────────────────────────────────────────────
   const saveTemplate = () => {
     if (!draft) return;
-    setTemplates((prev) => prev.map((t) => t.id === draft.id ? { ...draft } : t));
+    // The draft is a snapshot taken when the template was opened, so its
+    // folderId can be stale (e.g. the template was moved to another folder
+    // after that) — which folder a template lives in is not something the
+    // editor changes, so keep the live one instead of overwriting it.
+    setTemplates((prev) => prev.map((t) => t.id === draft.id ? { ...draft, folderId: t.folderId } : t));
     setIsDirty(false);
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 2000);
@@ -1033,7 +1128,7 @@ function TemplateMaster() {
   const createTemplate = () => {
     if (!newName.trim()) { alert("Template name is required."); return; }
     const id = templates.length ? Math.max(...templates.map((t) => t.id)) + 1 : 1;
-    const t = emptyTemplate(id, newName.trim());
+    const t = { ...emptyTemplate(id, newName.trim()), folderId: activeFolderId };
     setTemplates((prev) => [...prev, t]);
     setSelectedId(id);
     setActiveBoxId(1);
@@ -1291,6 +1386,12 @@ function TemplateMaster() {
                 style={{ padding: "7px 12px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 7, width: 220 }}
               />
               <button
+                onClick={() => { setFolderNameDraft(""); setFolderModal({ mode: "new" }); }}
+                style={{ background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", padding: "8px 16px", fontSize: 13, whiteSpace: "nowrap" }}
+              >
+                + New Folder
+              </button>
+              <button
                 onClick={() => guardedNavigate(() => { setNewName(""); setShowNewModal(true); })}
                 style={{ background: "#2563eb", padding: "8px 16px", fontSize: 13, whiteSpace: "nowrap" }}
               >
@@ -1299,16 +1400,63 @@ function TemplateMaster() {
             </div>
           </div>
 
+          {/* Breadcrumb — Templates / Folder / Subfolder (hidden while searching,
+              since search results span every folder) */}
+          {!searching && (
+            <div style={{ padding: "10px 24px 0", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 13 }}>
+              {[{ id: null, name: "Templates" }, ...folderPath(activeFolderId)].map((f, i, arr) => (
+                <span key={f.id ?? "root"} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {i > 0 && <span style={{ color: "#d1d5db" }}>/</span>}
+                  {i === arr.length - 1 ? (
+                    <span style={{ fontWeight: 700, color: "#111827" }}>{f.name}</span>
+                  ) : (
+                    <button onClick={() => setCurrentFolderId(f.id)} style={{ background: "none", border: "none", color: "#2563eb", padding: 0, fontSize: 13, cursor: "pointer" }}>{f.name}</button>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+
           {/* Tile grid */}
           <div style={{ padding: "16px 24px 24px" }}>
-            {filtered.length === 0 ? (
+            {filtered.length === 0 && visibleFolders.length === 0 ? (
               <div style={{ textAlign: "center", padding: 60, color: "#9ca3af" }}>
                 <div style={{ fontSize: 48, marginBottom: 12 }}>📐</div>
-                <p style={{ fontSize: 15, marginBottom: 16 }}>{search ? `No results for "${search}"` : "No templates yet."}</p>
+                <p style={{ fontSize: 15, marginBottom: 16 }}>{search ? `No results for "${search}"` : activeFolderId ? "This folder is empty." : "No templates yet."}</p>
                 {!search && <button onClick={() => guardedNavigate(() => { setNewName(""); setShowNewModal(true); })}>+ Create First Template</button>}
               </div>
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 }}>
+                {visibleFolders.map((f) => {
+                  const { tCount, fCount } = deepCounts(f.id);
+                  const cover = folderCoverTemplate(f);
+                  const coverImage = cover?.templateImage || null;
+                  return (
+                    <div
+                      key={f.id}
+                      onClick={() => setCurrentFolderId(f.id)}
+                      style={{ border: "1px solid #e5e7eb", borderRadius: 12, cursor: "pointer", background: "#fffbeb", overflow: "hidden", position: "relative" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#f59e0b"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#e5e7eb"; }}
+                    >
+                      {coverImage ? (
+                        <img src={coverImage} alt="" style={{ width: "100%", aspectRatio: TEMPLATE_IMAGE_RATIO, objectFit: "cover", display: "block" }} />
+                      ) : (
+                        <div style={{ width: "100%", aspectRatio: TEMPLATE_IMAGE_RATIO, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 44, borderBottom: "1px solid #fef3c7" }}>📁</div>
+                      )}
+                      <div style={{ padding: "9px 14px" }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📁 {f.name}</div>
+                        <div style={{ fontSize: 12, color: "#9ca3af" }}>
+                          {tCount} template{tCount !== 1 ? "s" : ""}{fCount > 0 ? ` · ${fCount} subfolder${fCount !== 1 ? "s" : ""}` : ""}
+                        </div>
+                      </div>
+                      <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 4, background: "rgba(255,255,255,0.85)", borderRadius: 6 }} onClick={(e) => e.stopPropagation()}>
+                        <button title="Rename folder" onClick={() => { setFolderNameDraft(f.name); setFolderModal({ mode: "rename", id: f.id }); }} style={{ background: "none", border: "none", padding: "2px 5px", fontSize: 13, cursor: "pointer", color: "#6b7280" }}>✎</button>
+                        <button title="Delete folder" onClick={() => deleteFolder(f.id)} style={{ background: "none", border: "none", padding: "2px 5px", fontSize: 13, cursor: "pointer", color: "#dc2626" }}>🗑</button>
+                      </div>
+                    </div>
+                  );
+                })}
                 {filtered.map((t) => {
                   const boxCount = (t.boxes || []).length;
                   return (
@@ -1338,6 +1486,24 @@ function TemplateMaster() {
                       <div style={{ padding: "9px 14px", display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
                         <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.templateName}</div>
                         <div style={{ fontSize: 12, color: "#9ca3af", flexShrink: 0 }}>{boxCount} box{boxCount !== 1 ? "es" : ""}</div>
+                      </div>
+                      <div style={{ padding: "0 14px 9px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }} onClick={(e) => e.stopPropagation()}>
+                        <span style={{ fontSize: 11, color: "#9ca3af", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {searching ? `📁 ${["Templates", ...folderPath(templateFolderOf(t)).map((f) => f.name)].join(" / ")}` : ""}
+                        </span>
+                        <span style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                          {!searching && activeFolderId !== null && (() => {
+                            const isCover = folderById(activeFolderId)?.coverTemplateId === t.id;
+                            return (
+                              <button
+                                onClick={() => toggleFolderCover(activeFolderId, t.id)}
+                                title={isCover ? "This is the folder's image — click to remove" : "Use this template's photo as the folder's image"}
+                                style={{ background: isCover ? "#fef3c7" : "none", border: `1px solid ${isCover ? "#f59e0b" : "#e5e7eb"}`, color: isCover ? "#b45309" : "#6b7280", padding: "2px 8px", fontSize: 11, cursor: "pointer" }}
+                              >{isCover ? "★ Folder image" : "☆ Folder image"}</button>
+                            );
+                          })()}
+                          <button onClick={() => setMoveTemplateId(t.id)} style={{ background: "none", border: "1px solid #e5e7eb", color: "#6b7280", padding: "2px 8px", fontSize: 11, cursor: "pointer" }}>Move…</button>
+                        </span>
                       </div>
                     </div>
                   );
@@ -2731,6 +2897,64 @@ function TemplateMaster() {
           onClose={() => setAllCutSheetOpen(false)}
         />
       )}
+
+      {/* ── New / Rename Folder Modal ── */}
+      {folderModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setFolderModal(null)}>
+          <div style={{ background: "#fff", borderRadius: 14, padding: 28, width: 420, maxWidth: "96vw", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: "0 0 6px" }}>{folderModal.mode === "rename" ? "Rename Folder" : "New Folder"}</h3>
+            {folderModal.mode === "new" && (
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 14 }}>
+                Created inside: {["Templates", ...folderPath(activeFolderId).map((f) => f.name)].join(" / ")}
+              </div>
+            )}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: "block", fontWeight: 600, fontSize: 13, marginBottom: 4 }}>Folder Name *</label>
+              <input
+                autoFocus type="text" value={folderNameDraft}
+                onChange={(e) => setFolderNameDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") saveFolderModal(); if (e.key === "Escape") setFolderModal(null); }}
+                placeholder="e.g. Wardrobes"
+                style={{ width: "100%", boxSizing: "border-box" }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setFolderModal(null)} style={{ background: "#6b7280", padding: "8px 18px" }}>Cancel</button>
+              <button onClick={saveFolderModal} disabled={!folderNameDraft.trim()} style={{ padding: "8px 18px" }}>{folderModal.mode === "rename" ? "Save" : "Create Folder"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Move Template To Folder Modal ── */}
+      {moveTemplateId !== null && (() => {
+        const t = templates.find((x) => x.id === moveTemplateId);
+        if (!t) return null;
+        const here = templateFolderOf(t);
+        const row = (label, id, depth) => (
+          <button
+            key={id ?? "root"} onClick={() => moveTemplateToFolder(t.id, id)} disabled={here === id}
+            style={{ display: "block", width: "100%", textAlign: "left", background: here === id ? "#f3f4f6" : "none", border: "none", borderBottom: "1px solid #f3f4f6", color: here === id ? "#9ca3af" : "#111827", padding: `8px 12px 8px ${12 + depth * 18}px`, fontSize: 13, cursor: here === id ? "default" : "pointer", borderRadius: 0 }}
+          >
+            {id === null ? "📐" : "📁"} {label}{here === id ? " (current)" : ""}
+          </button>
+        );
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setMoveTemplateId(null)}>
+            <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: 380, maxWidth: "96vw", maxHeight: "80vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }} onClick={(e) => e.stopPropagation()}>
+              <h3 style={{ margin: "0 0 4px" }}>Move "{t.templateName}"</h3>
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>Choose the folder to file it in.</div>
+              <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" }}>
+                {row("Templates (top level)", null, 0)}
+                {folderOptions.map(({ folder, depth }) => row(folder.name, folder.id, depth + 1))}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+                <button onClick={() => setMoveTemplateId(null)} style={{ background: "#6b7280", padding: "8px 18px" }}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── New Template Modal ── */}
       {showNewModal && (

@@ -55,6 +55,14 @@ const defaultData = {
   // hash-based tagColor(), so existing tags keep working unchanged until the
   // user explicitly recolors one via the Tags popover's gear icon.
   leadTagColors: null,
+  // Teams page — people the business works with (carpenters, designers,
+  // site supervisors...). Plain contact records: { id, name, role, phone,
+  // email, createdAt } — not login accounts.
+  teamMembers: [],
+  // Templates page folders — a tree via parentId (null = top level):
+  // { id, name, parentId }. A template sits in a folder via its own
+  // `folderId` (missing/null = top level), so existing templates need no migration.
+  templateFolders: [],
 };
 
 // Debounce writes to the API so fast typing (a text input, a number field)
@@ -79,6 +87,8 @@ function AppDataProvider({ children }) {
   const [leadViews, setLeadViews] = useState(defaultData.leadViews);
   const [leadStatuses, setLeadStatuses] = useState(defaultData.leadStatuses);
   const [leadTagColors, setLeadTagColors] = useState(defaultData.leadTagColors);
+  const [teamMembers, setTeamMembers] = useState(defaultData.teamMembers);
+  const [templateFolders, setTemplateFolders] = useState(defaultData.templateFolders);
 
   // Gates the very first render (before the API has responded) and stops
   // the save effect from firing on the initial default state — otherwise
@@ -132,6 +142,8 @@ function AppDataProvider({ children }) {
         setLeadViews(data.leadViews || null);
         setLeadStatuses(data.leadStatuses || null);
         setLeadTagColors(data.leadTagColors || null);
+        setTeamMembers(data.teamMembers || []);
+        setTemplateFolders(data.templateFolders || []);
         // Only now does state genuinely reflect the server — safe to arm autosave.
         setIsLoaded(true);
       })
@@ -168,6 +180,8 @@ function AppDataProvider({ children }) {
         leadViews,
         leadStatuses,
         leadTagColors,
+        teamMembers,
+        templateFolders,
       };
       saveState(dataToSave)
         .then(() => setSaveError(null))
@@ -196,6 +210,8 @@ function AppDataProvider({ children }) {
     leadViews,
     leadStatuses,
     leadTagColors,
+    teamMembers,
+    templateFolders,
   ]);
 
   // Update a price entry and link any unlinked parts that reference it by name.
@@ -251,6 +267,8 @@ function AppDataProvider({ children }) {
     setLeadViews(null);
     setLeadStatuses(null);
     setLeadTagColors(null);
+    setTeamMembers([]);
+    setTemplateFolders([]);
     // The debounced save effect above picks this up and POSTs the cleared
     // state to MySQL — no direct API call needed here.
   };
@@ -269,6 +287,8 @@ function AppDataProvider({ children }) {
     setLeadViews(null);
     setLeadStatuses(null);
     setLeadTagColors(null);
+    setTeamMembers([]);
+    setTemplateFolders([]);
     // Same as resetAllData — the debounced save effect persists this.
   };
 
@@ -307,6 +327,10 @@ function AppDataProvider({ children }) {
         setLeadStatuses,
         leadTagColors,
         setLeadTagColors,
+        teamMembers,
+        setTeamMembers,
+        templateFolders,
+        setTemplateFolders,
         renamePrice,
         resetAllData,
         restoreSampleData,
