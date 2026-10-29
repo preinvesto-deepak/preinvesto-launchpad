@@ -8,6 +8,10 @@
 
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import multer from 'multer';
 
 const SESSION_TTL_DAYS = 30;
 const RESET_TTL_MINUTES = 60;
@@ -375,6 +379,44 @@ export default function registerAuthRoutes(app, pool) {
     }
   }));
 
+  // ---- Project Design files (CAD PDFs, final renders) ---------------------
+  // Signed-in users only. The extension comes from the detected type, never
+  // from the uploaded filename, and the name is random so URLs can't be guessed.
+  const designDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public/uploads/design');
+  const DESIGN_TYPES = { 'application/pdf': '.pdf', 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
+  const DESIGN_MAX_MB = 25;
+  const designUpload = multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => { fs.mkdirSync(designDir, { recursive: true }); cb(null, designDir); },
+      filename: (_req, file, cb) => cb(null, `${Date.now()}_${crypto.randomBytes(12).toString('hex')}${DESIGN_TYPES[file.mimetype]}`),
+    }),
+    limits: { fileSize: DESIGN_MAX_MB * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => cb(null, !!DESIGN_TYPES[file.mimetype]),
+  }).single('file');
+
+  app.post(paths('upload_design_file'), withUser((req, res) => {
+    designUpload(req, res, (err) => {
+      if (err) {
+        const tooBig = err.code === 'LIMIT_FILE_SIZE';
+        return res.status(400).json({ success: false, error: tooBig ? `File too large. Maximum ${DESIGN_MAX_MB}MB.` : 'Upload failed.' });
+      }
+      if (!req.file) {
+        return res.status(400).json({ success: false, error: 'Only PDF, JPG, PNG or WEBP files are allowed.' });
+      }
+      if (req.file.mimetype === 'application/pdf') {
+        const head = Buffer.alloc(5);
+        const fd = fs.openSync(req.file.path, 'r');
+        fs.readSync(fd, head, 0, 5, 0);
+        fs.closeSync(fd);
+        if (head.toString('latin1') !== '%PDF-') {
+          fs.unlinkSync(req.file.path);
+          return res.status(400).json({ success: false, error: 'That file is not a valid PDF.' });
+        }
+      }
+      res.json({ success: true, url: `/uploads/design/${req.file.filename}`, size: req.file.size });
+    });
+  }));
+
   // ---- Customer share links ----------------------------------------------
   // The owner publishes a customer-safe snapshot of one project (rendered
   // quotation, mood boards, ...) under an unguessable code. The public view
@@ -394,6 +436,7 @@ export default function registerAuthRoutes(app, pool) {
            user_id       VARCHAR(36) NOT NULL,
            project_id    VARCHAR(64) NOT NULL,
            pin_hash      VARCHAR(255) NULL,
+           pin_plain     VARCHAR(8)  NULL,
            enabled       TINYINT(1)  NOT NULL DEFAULT 1,
            snapshot_json LONGTEXT    NOT NULL,
            fail_count    INT         NOT NULL DEFAULT 0,
@@ -404,7 +447,11 @@ export default function registerAuthRoutes(app, pool) {
            UNIQUE KEY uq_share_project (user_id, project_id),
            CONSTRAINT fk_share_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
-      ).catch((err) => { shareTableReady = null; throw err; });
+      ).then(async () => {
+        // Tables made before the owner could view the PIN lack this column.
+        const [cols] = await pool.query("SHOW COLUMNS FROM interior_shares LIKE 'pin_plain'");
+        if (cols.length === 0) await pool.query('ALTER TABLE interior_shares ADD COLUMN pin_plain VARCHAR(8) NULL AFTER pin_hash');
+      }).catch((err) => { shareTableReady = null; throw err; });
     }
     return shareTableReady;
   };
@@ -413,12 +460,15 @@ export default function registerAuthRoutes(app, pool) {
     code: row.code,
     enabled: !!row.enabled,
     hasPin: !!row.pin_hash,
+    // Shown to the signed-in owner only (never by the public view endpoint).
+    // null for a PIN set before this was kept — resetting it fills it in.
+    pin: row.pin_plain || null,
     updatedAt: row.updated_at,
   });
 
   const loadShare = async (userId, projectId) => {
     const [rows] = await pool.query(
-      'SELECT code, enabled, pin_hash, updated_at FROM interior_shares WHERE user_id = ? AND project_id = ? LIMIT 1',
+      'SELECT code, enabled, pin_hash, pin_plain, updated_at FROM interior_shares WHERE user_id = ? AND project_id = ? LIMIT 1',
       [userId, String(projectId)]
     );
     return rows[0] || null;
@@ -456,14 +506,14 @@ export default function registerAuthRoutes(app, pool) {
         if (existing) {
           const sets = ['snapshot_json = ?'];
           const args = [json];
-          if (pin !== undefined && pin !== null) { sets.push('pin_hash = ?', 'fail_count = 0', 'locked_until = NULL'); args.push(await hashPin(String(pin))); }
+          if (pin !== undefined && pin !== null) { sets.push('pin_hash = ?', 'pin_plain = ?', 'fail_count = 0', 'locked_until = NULL'); args.push(await hashPin(String(pin)), String(pin) || null); }
           await pool.query(`UPDATE interior_shares SET ${sets.join(', ')} WHERE code = ?`, [...args, existing.code]);
         } else {
           const code = crypto.randomBytes(16).toString('hex');
           const hash = pin ? await hashPin(String(pin)) : null;
           await pool.query(
-            'INSERT INTO interior_shares (code, user_id, project_id, pin_hash, snapshot_json) VALUES (?, ?, ?, ?, ?)',
-            [code, user.id, projectId, hash, json]
+            'INSERT INTO interior_shares (code, user_id, project_id, pin_hash, pin_plain, snapshot_json) VALUES (?, ?, ?, ?, ?, ?)',
+            [code, user.id, projectId, hash, pin ? String(pin) : null, json]
           );
         }
         return res.json({ success: true, share: shareMeta(await loadShare(user.id, projectId)) });
@@ -474,8 +524,8 @@ export default function registerAuthRoutes(app, pool) {
       if (action === 'setpin') {
         // '' removes the PIN; digits set/reset it and clear any lockout.
         await pool.query(
-          'UPDATE interior_shares SET pin_hash = ?, fail_count = 0, locked_until = NULL WHERE code = ?',
-          [await hashPin(String(pin ?? '')), existing.code]
+          'UPDATE interior_shares SET pin_hash = ?, pin_plain = ?, fail_count = 0, locked_until = NULL WHERE code = ?',
+          [await hashPin(String(pin ?? '')), pin ? String(pin) : null, existing.code]
         );
       } else if (action === 'toggle') {
         await pool.query('UPDATE interior_shares SET enabled = ? WHERE code = ?', [enabled ? 1 : 0, existing.code]);

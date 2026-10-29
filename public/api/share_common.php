@@ -21,6 +21,7 @@ function ensure_share_table(): void {
            user_id       VARCHAR(36)  NOT NULL,
            project_id    VARCHAR(64)  NOT NULL,
            pin_hash      VARCHAR(255) NULL,
+           pin_plain     VARCHAR(8)   NULL,
            enabled       TINYINT(1)   NOT NULL DEFAULT 1,
            snapshot_json LONGTEXT     NOT NULL,
            fail_count    INT          NOT NULL DEFAULT 0,
@@ -33,6 +34,11 @@ function ensure_share_table(): void {
          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
     );
     if (!$ok) json_fail(500, 'Could not prepare sharing.');
+    // Tables made before the owner could view the PIN lack this column.
+    $col = db()->query("SHOW COLUMNS FROM interior_shares LIKE 'pin_plain'");
+    if ($col && $col->num_rows === 0) {
+        db()->query('ALTER TABLE interior_shares ADD COLUMN pin_plain VARCHAR(8) NULL AFTER pin_hash');
+    }
     $done = true;
 }
 
@@ -42,13 +48,16 @@ function share_meta(?array $row): ?array {
         'code'      => $row['code'],
         'enabled'   => (bool)$row['enabled'],
         'hasPin'    => !empty($row['pin_hash']),
+        // Shown to the signed-in owner only (never by the public view endpoint).
+        // null for a PIN set before this was kept - resetting it fills it in.
+        'pin'       => !empty($row['pin_plain']) ? $row['pin_plain'] : null,
         'updatedAt' => $row['updated_at'],
     ];
 }
 
 function load_share(string $userId, string $projectId): ?array {
     $stmt = db()->prepare(
-        'SELECT code, enabled, pin_hash, updated_at FROM interior_shares WHERE user_id = ? AND project_id = ? LIMIT 1'
+        'SELECT code, enabled, pin_hash, pin_plain, updated_at FROM interior_shares WHERE user_id = ? AND project_id = ? LIMIT 1'
     );
     $stmt->bind_param('ss', $userId, $projectId);
     $stmt->execute();

@@ -8,7 +8,7 @@ import { packSheets, findOversizedPieces } from "../utils/binPack";
 import { GROUP_OPTIONS } from "../data/priceData";
 import { PROJECT_STATUSES, projectStatusInfo } from "../data/projectStatus";
 import { LEAD_SOURCES, leadSourceLabel } from "../data/leadSource";
-import MoodBoardCanvas from "../components/MoodBoardCanvas";
+import ProjectDesignTab from "../components/ProjectDesignTab";
 
 // Annotates a group-sorted row list with rowSpan info so the "Group" cell can
 // be rendered once per group (merged) instead of repeated on every row.
@@ -1932,7 +1932,7 @@ function Projects() {
 
             {/* ── Project-level Tab Bar ── */}
             <div className="no-print" style={{ borderBottom: "2px solid #e5e7eb", padding: "0 24px", display: "flex", alignItems: "flex-end", gap: 0, background: "#fff" }}>
-              {[["mood-board", "🖼️ Mood Board"], ["rooms", "🏠 Rooms & Boxes"], ["material-models", "📋 Material Models"], ["summary", "📊 Summary"], ["quotation", "🧾 Quotation"]].map(([tab, label]) => {
+              {[["design", "📐 Design"], ["rooms", "🏠 Rooms & Boxes"], ["material-models", "📋 Material Models"], ["summary", "📊 Summary"], ["quotation", "🧾 Quotation"]].map(([tab, label]) => {
                 const active = projectTab === tab;
                 return (
                   <button
@@ -1974,53 +1974,17 @@ function Projects() {
               </div>
             )}
 
-            {/* ── Mood Board Tab — freeform per-room canvas built from Design
-                Gallery images (Configure > Design Gallery). Its own room
-                switcher, since a project can have several rooms and a mood
-                board is scoped to one room at a time (room.moodBoard). ── */}
-            {projectTab === "mood-board" && (
-              <>
-                <div className="no-print" style={{ borderBottom: "2px solid #e5e7eb", padding: "0 24px", display: "flex", alignItems: "flex-end", gap: 2, flexWrap: "wrap", background: "#fff" }}>
-                  {rooms.map((room) => {
-                    const isActive = activeRoom?.id === room.id || (!activeRoomId && rooms[0]?.id === room.id);
-                    return (
-                      <button
-                        key={room.id}
-                        onClick={() => setActiveRoomId(room.id)}
-                        style={{
-                          padding: "7px 16px", border: "none",
-                          borderBottom: isActive ? "3px solid #2563eb" : "3px solid transparent",
-                          background: "none", color: isActive ? "#2563eb" : "#374151",
-                          fontWeight: isActive ? 700 : 400, cursor: "pointer", fontSize: 14,
-                          marginBottom: -2, whiteSpace: "nowrap",
-                        }}
-                      >
-                        {room.subProject || room.name}
-                      </button>
-                    );
-                  })}
-                  <button
-                    onClick={openAddRoom}
-                    style={{ padding: "10px 14px", border: "none", background: "none", color: "#2563eb", cursor: "pointer", fontSize: 13, marginLeft: 4, whiteSpace: "nowrap" }}
-                  >
-                    + Room
-                  </button>
-                </div>
-                <div style={{ padding: "20px 24px" }}>
-                  {activeRoom ? (
-                    <MoodBoardCanvas
-                      room={activeRoom}
-                      designGallery={designGallery}
-                      onChange={(moodBoard) => updateRoomField("moodBoard", moodBoard)}
-                    />
-                  ) : (
-                    <div style={{ textAlign: "center", padding: 48, border: "2px dashed #e5e7eb", borderRadius: 12, color: "#6b7280" }}>
-                      <p style={{ fontSize: 15, marginBottom: 16 }}>No rooms added yet.</p>
-                      <button onClick={openAddRoom}>+ Add First Room</button>
-                    </div>
-                  )}
-                </div>
-              </>
+            {/* ── Design Tab — per room: Mood Board (build + finalize), CAD PDFs
+                (shown inline) and final renders, all with version history ── */}
+            {projectTab === "design" && (
+              <ProjectDesignTab
+                project={selectedProject}
+                rooms={rooms}
+                designGallery={designGallery}
+                onAddRoom={openAddRoom}
+                updateProject={(fn) => setProjects((prev) => prev.map((p) => (p.id === selectedProject.id ? fn(p) : p)))}
+                updateRoom={(roomId, fn) => setSubProjects((prev) => prev.map((s) => (s.id === roomId ? fn(s) : s)))}
+              />
             )}
 
             {/* ── Project Summary Tab — total material required + costed across

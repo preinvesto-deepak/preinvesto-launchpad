@@ -7,6 +7,7 @@ import { roundTo2, formatCurrency, mmToFeet } from "../utils/unitConversions";
 import { buildRoomRows, buildRoomEdgeBanding, buildRoomHardware, buildRoomCarpenter, buildBoxRows, buildBoxEdgeBanding, buildBoxCarpenterRow } from "../utils/projectRows";
 import { computeSheetCounts } from "../utils/binPack";
 import ShareWithCustomerModal from "../components/ShareWithCustomerModal";
+import { normEntry, finalMoodBoard } from "../utils/designFiles";
 
 const QUOT_MODELS = ["economy", "standard", "premium"];
 const QUOT_MODEL_LABELS = { economy: "Economy", standard: "Standard", premium: "Premium" };
@@ -857,9 +858,34 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     images: (node.images || []).map((i) => ({ url: i.url, name: i.name || "" })),
     children: (node.children || []).map(slimGalleryNode),
   });
-  const moodBoardRooms = projectRooms
-    .filter((r) => (r.moodBoard?.items || []).length > 0)
-    .map((r) => ({ name: r.subProject || r.name, count: r.moodBoard.items.length }));
+  // Design tab content the customer may see: only FINALIZED mood boards, and
+  // only drawings/renders ticked "Show to customer" — current version only,
+  // never history or drafts.
+  const liveEntries = (list) => (list || []).filter((e) => !e.archived);
+  const shownEntries = (list) => liveEntries(list).filter((e) => e.customerVisible);
+  const entryOut = (e) => {
+    const n = normEntry(e);
+    const v = n.versions[n.versions.length - 1];
+    return { title: n.title, name: v.name, url: v.url };
+  };
+  const designInfo = {
+    mood: projectRooms
+      .map((r) => ({
+        name: r.subProject || r.name,
+        finalized: !!finalMoodBoard(r),
+        version: (r.moodBoardVersions || []).length,
+        hasDraft: (r.moodBoard?.items || []).length > 0,
+      }))
+      .filter((m) => m.finalized || m.hasDraft),
+    cad: {
+      shown: projectRooms.reduce((n, r) => n + shownEntries(r.cadFiles).length, 0) + shownEntries(selectedProjectObj?.cadFiles).length,
+      total: projectRooms.reduce((n, r) => n + liveEntries(r.cadFiles).length, 0) + liveEntries(selectedProjectObj?.cadFiles).length,
+    },
+    renders: {
+      shown: projectRooms.reduce((n, r) => n + shownEntries(r.renders).length, 0),
+      total: projectRooms.reduce((n, r) => n + liveEntries(r.renders).length, 0),
+    },
+  };
   const galleryFolders = (designGallery || []).map((f) => ({ id: f.id, name: f.name, count: countGalleryImages(f) }));
 
   const buildShareSnapshot = (o) => {
@@ -869,7 +895,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
       company: { name: companyName, logo: companyProfile.logo || "", mobile: companyMobile, email: companyEmail },
       project: { name: selectedProject, customer: customerName, address: customerAddress },
       quotation: null,
-      moodBoards: null,
+      design: null,
       gallery: null,
     };
     if (o.quotation) {
@@ -880,13 +906,20 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
         }),
       };
     }
-    if (o.moodBoards) {
-      snap.moodBoards = projectRooms
-        .filter((r) => (r.moodBoard?.items || []).length > 0)
-        .map((r) => ({
-          room: r.subProject || r.name,
-          items: r.moodBoard.items.map((i) => ({ imageUrl: i.imageUrl, x: i.x, y: i.y, w: i.w, h: i.h, zIndex: i.zIndex || 1 })),
-        }));
+    if (o.design) {
+      const rooms = projectRooms
+        .map((r) => {
+          const fin = finalMoodBoard(r);
+          return {
+            room: r.subProject || r.name,
+            mood: o.designMood && fin ? { items: fin.items } : null,
+            cad: o.designCad ? shownEntries(r.cadFiles).map(entryOut) : [],
+            renders: o.designRenders ? shownEntries(r.renders).map(entryOut) : [],
+          };
+        })
+        .filter((x) => x.mood || x.cad.length || x.renders.length);
+      const projectCad = o.designCad ? shownEntries(selectedProjectObj?.cadFiles).map(entryOut) : [];
+      snap.design = rooms.length || projectCad.length ? { rooms, projectCad } : null;
     }
     if (o.gallery) {
       snap.gallery = (designGallery || []).filter((f) => (o.galleryFolders || []).includes(f.id)).map(slimGalleryNode);
@@ -1242,40 +1275,40 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                 </tr>
               ))}
               <tr style={{ background: "#1e3a5f" }}>
-                <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Sub Total</td>
+                <td colSpan={6} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Sub Total</td>
                 {compareVariants.map((v) => (
                   <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 12, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>{formatCurrency(v.st)}</td>
                 ))}
               </tr>
               {Number(discountAmount) > 0 && (
                 <tr style={{ background: "#f1f5f9" }}>
-                  <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 600, color: "#374151", fontSize: 12 }}>Discount</td>
+                  <td colSpan={6} style={{ padding: "8px 14px", fontWeight: 600, color: "#374151", fontSize: 12 }}>Discount</td>
                   {compareVariants.map((v) => (
                     <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", color: "#374151", fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>- {formatCurrency(discountAmount)}</td>
                   ))}
                 </tr>
               )}
               <tr style={{ background: "#f1f5f9" }}>
-                <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 600, color: "#374151", fontSize: 12 }}>GST {gstPercent}%</td>
+                <td colSpan={6} style={{ padding: "8px 14px", fontWeight: 600, color: "#374151", fontSize: 12 }}>GST {gstPercent}%</td>
                 {compareVariants.map((v) => (
                   <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", color: "#374151", fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>{formatCurrency(v.gst)}</td>
                 ))}
               </tr>
               <tr style={{ background: "#334e68" }}>
-                <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Grand Total</td>
+                <td colSpan={6} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Grand Total</td>
                 {compareVariants.map((v) => (
                   <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 13, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>{formatCurrency(v.gt)}</td>
                 ))}
               </tr>
               <tr style={{ background: "#f1f5f9" }}>
-                <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 600, color: "#374151", fontSize: 12 }}>Advance {advancePercent}%</td>
+                <td colSpan={6} style={{ padding: "8px 14px", fontWeight: 600, color: "#374151", fontSize: 12 }}>Advance {advancePercent}%</td>
                 {compareVariants.map((v) => (
                   <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", color: "#374151", fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>{formatCurrency(v.adv)}</td>
                 ))}
               </tr>
               {hardwareSavingsTotal > 0 && (
                 <tr style={{ background: "#ecfdf5" }}>
-                  <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 700, color: "#065f46", fontSize: 12 }}>You Save (Hardware &amp; Consumables)</td>
+                  <td colSpan={6} style={{ padding: "8px 14px", fontWeight: 700, color: "#065f46", fontSize: 12 }}>You Save (Hardware &amp; Consumables)</td>
                   {compareVariants.map((v) => (
                     <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#059669", fontSize: 13, borderLeft: "1px solid #d1fae5" }}>
                       {formatCurrency(v.hardwareItems.reduce((s, r) => s + r.savings, 0))}
@@ -1579,7 +1612,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
         <ShareWithCustomerModal
           projectId={selectedProjectObj.id}
           projectName={selectedProject}
-          moodBoardRooms={moodBoardRooms}
+          designInfo={designInfo}
           galleryFolders={galleryFolders}
           savedOptions={selectedProjectObj.quotationSettings?.shareOptions}
           onOptionsChange={(o) => persistField("shareOptions", o)}

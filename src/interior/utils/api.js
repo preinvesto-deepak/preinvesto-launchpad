@@ -59,3 +59,25 @@ export async function uploadGalleryImage(blob, filename = "image.jpg") {
   const body = await res.json();
   return body.url;
 }
+
+/**
+ * Uploads a project Design file (CAD PDF or final-render image). Like the
+ * gallery, the project only keeps the returned URL — never the file data.
+ * Returns { url, size }.
+ */
+export async function uploadDesignFile(file) {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const res = await authFetch("/api/upload_design_file.php", {
+    method: "POST",
+    body: form,
+  });
+  if (res.status === 401) {
+    throw new Error("Your session has expired. Please sign in again.");
+  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.success) {
+    throw new Error(body.error || `Failed to upload ${file.name} (${res.status})`);
+  }
+  return { url: body.url, size: body.size };
+}

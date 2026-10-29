@@ -63,6 +63,73 @@ function MoodBoardView({ board }) {
   );
 }
 
+// A shared CAD drawing: shown in place in an embedded viewer.
+function CadView({ file }) {
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb", flexWrap: "wrap" }}>
+        <span style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>📐 {file.title}</span>
+        <a href={file.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#1e3a5f" }}>Open in new tab ↗</a>
+      </div>
+      <iframe title={file.title} src={`${file.url}#toolbar=1&navpanes=0&view=FitH`} loading="lazy" style={{ width: "100%", height: 620, border: "none", display: "block" }} />
+    </div>
+  );
+}
+
+// Design tab: a tab per room, and inside each room its Mood Board, CAD
+// Drawings and Final Render (only the ones that were shared).
+function DesignView({ design, onOpen }) {
+  const rooms = [
+    ...design.rooms.map((r, i) => ({ id: String(i), label: r.room, data: r })),
+    ...(design.projectCad.length ? [{ id: "project", label: "Whole project", data: { mood: null, cad: design.projectCad, renders: [] } }] : []),
+  ];
+  const [roomId, setRoomId] = useState("");
+  const [section, setSection] = useState("");
+  const room = rooms.find((x) => x.id === roomId) || rooms[0];
+  const d = room.data;
+  const sections = [
+    d.mood && { id: "mood", label: "Mood Board" },
+    d.cad.length > 0 && { id: "cad", label: `CAD Drawings (${d.cad.length})` },
+    d.renders.length > 0 && { id: "render", label: `Final Render (${d.renders.length})` },
+  ].filter(Boolean);
+  const active = sections.find((x) => x.id === section) ? section : sections[0]?.id;
+
+  return (
+    <div>
+      {rooms.length > 1 && (
+        <div className="cv-noprint" style={{ display: "flex", gap: 4, flexWrap: "wrap", borderBottom: "2px solid #e5e7eb", marginBottom: 16 }}>
+          {rooms.map((x) => (
+            <button key={x.id} onClick={() => setRoomId(x.id)} style={{ background: "none", border: "none", borderBottom: room.id === x.id ? "3px solid #1e3a5f" : "3px solid transparent", marginBottom: -2, padding: "8px 14px", fontSize: 15, fontWeight: 700, color: room.id === x.id ? "#1e3a5f" : "#6b7280", cursor: "pointer" }}>{x.label}</button>
+          ))}
+        </div>
+      )}
+      <h2 style={{ margin: "0 0 12px", fontSize: 19, color: "#1e3a5f" }}>{room.label}</h2>
+      <div className="cv-noprint" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        {sections.map((x) => (
+          <button key={x.id} onClick={() => setSection(x.id)} style={{ border: "1px solid " + (active === x.id ? "#1e3a5f" : "#d1d5db"), background: active === x.id ? "#1e3a5f" : "#fff", color: active === x.id ? "#fff" : "#374151", borderRadius: 20, padding: "6px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{x.label}</button>
+        ))}
+      </div>
+
+      {active === "mood" && <MoodBoardView board={{ room: "", items: d.mood.items }} />}
+      {active === "cad" && d.cad.map((c, j) => <CadView key={j} file={c} />)}
+      {active === "render" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          {d.renders.map((img, j) => (
+            <figure key={j} style={{ margin: 0 }}>
+              {/* One render per row at full page width; capped to the window height so the whole image is visible without scrolling. */}
+              <button onClick={() => onOpen(img.url)} style={{ display: "block", width: "100%", border: "1px solid #e5e7eb", background: "#fff", padding: 0, borderRadius: 8, overflow: "hidden", cursor: "zoom-in" }}>
+                <img src={img.url} alt={img.title} style={{ display: "block", width: "100%", height: "auto", maxHeight: "calc(100vh - 220px)", minHeight: 240, objectFit: "contain" }} />
+              </button>
+              {img.title && <figcaption style={{ fontSize: 13, color: "#6b7280", marginTop: 6 }}>{img.title}</figcaption>}
+            </figure>
+          ))}
+        </div>
+      )}
+      {sections.length === 0 && <p style={{ color: "#6b7280" }}>Nothing has been shared for this room yet.</p>}
+    </div>
+  );
+}
+
 function GalleryFolder({ node, depth, onOpen }) {
   return (
     <div style={{ marginBottom: 22, marginLeft: depth ? 14 : 0 }}>
@@ -145,7 +212,7 @@ function CustomerView() {
   useEffect(() => {
     if (!data) return;
     document.title = `${data.project?.name || "Project"} — ${data.company?.name || ""}`.trim();
-    const first = data.quotation ? "quotation" : data.moodBoards?.length ? "mood" : data.gallery?.length ? "gallery" : "";
+    const first = data.quotation ? "quotation" : data.design ? "design" : data.moodBoards?.length ? "mood" : data.gallery?.length ? "gallery" : "";
     setTab((t) => t || first);
   }, [data]);
 
@@ -193,6 +260,8 @@ function CustomerView() {
 
   const tabs = [
     data.quotation && { id: "quotation", label: "Quotation" },
+    data.design && { id: "design", label: "Design" },
+    // Older published links carried mood boards on their own tab.
     data.moodBoards?.length > 0 && { id: "mood", label: "Mood Board" },
     data.gallery?.length > 0 && { id: "gallery", label: "Design Gallery" },
   ].filter(Boolean);
@@ -233,6 +302,7 @@ function CustomerView() {
             <QuotationFrame html={data.quotation.html} frameRef={frameRef} />
           </div>
         )}
+        {active === "design" && <DesignView design={data.design} onOpen={setLightbox} />}
         {active === "mood" && data.moodBoards.map((b, i) => <MoodBoardView key={i} board={b} />)}
         {active === "gallery" && data.gallery.map((n, i) => <GalleryFolder key={i} node={n} depth={0} onOpen={setLightbox} />)}
       </main>

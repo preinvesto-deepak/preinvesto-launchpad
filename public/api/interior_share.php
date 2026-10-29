@@ -44,8 +44,9 @@ if ($action === 'publish') {
     if ($existing) {
         if ($hasPin) {
             $hash = $pinHash($pin);
-            $stmt = db()->prepare('UPDATE interior_shares SET snapshot_json = ?, pin_hash = ?, fail_count = 0, locked_until = NULL WHERE code = ?');
-            $stmt->bind_param('sss', $json, $hash, $existing['code']);
+            $plain = $pin === '' ? null : $pin;
+            $stmt = db()->prepare('UPDATE interior_shares SET snapshot_json = ?, pin_hash = ?, pin_plain = ?, fail_count = 0, locked_until = NULL WHERE code = ?');
+            $stmt->bind_param('ssss', $json, $hash, $plain, $existing['code']);
         } else {
             $stmt = db()->prepare('UPDATE interior_shares SET snapshot_json = ? WHERE code = ?');
             $stmt->bind_param('ss', $json, $existing['code']);
@@ -53,8 +54,9 @@ if ($action === 'publish') {
     } else {
         $code = bin2hex(random_bytes(16));
         $hash = ($hasPin && $pin !== '') ? $pinHash($pin) : null;
-        $stmt = db()->prepare('INSERT INTO interior_shares (code, user_id, project_id, pin_hash, snapshot_json) VALUES (?, ?, ?, ?, ?)');
-        $stmt->bind_param('sssss', $code, $userId, $projectId, $hash, $json);
+        $plain = ($hasPin && $pin !== '') ? $pin : null;
+        $stmt = db()->prepare('INSERT INTO interior_shares (code, user_id, project_id, pin_hash, pin_plain, snapshot_json) VALUES (?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('ssssss', $code, $userId, $projectId, $hash, $plain, $json);
     }
     if (!$stmt->execute()) json_fail(500, 'Could not publish the share link.');
     $stmt->close();
@@ -64,9 +66,10 @@ if ($action === 'publish') {
 if (!$existing) json_fail(404, 'This project has no share link yet.');
 
 if ($action === 'setpin') {
-    $hash = $pinHash($pin ?? '');
-    $stmt = db()->prepare('UPDATE interior_shares SET pin_hash = ?, fail_count = 0, locked_until = NULL WHERE code = ?');
-    $stmt->bind_param('ss', $hash, $existing['code']);
+    $hash  = $pinHash($pin ?? '');
+    $plain = ($pin ?? '') === '' ? null : $pin;
+    $stmt  = db()->prepare('UPDATE interior_shares SET pin_hash = ?, pin_plain = ?, fail_count = 0, locked_until = NULL WHERE code = ?');
+    $stmt->bind_param('sss', $hash, $plain, $existing['code']);
 } elseif ($action === 'toggle') {
     $on   = !empty($body['enabled']) ? 1 : 0;
     $stmt = db()->prepare('UPDATE interior_shares SET enabled = ? WHERE code = ?');

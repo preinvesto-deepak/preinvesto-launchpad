@@ -31,19 +31,21 @@ export const DEFAULT_SHARE_OPTIONS = {
   savings: true,
   hardware: true,
   cutList: false,
-  moodBoards: true,
+  design: true,
+  designMood: true,
+  designCad: true,
+  designRenders: true,
   gallery: false,
   galleryFolders: [],
 };
 
-function ShareWithCustomerModal({ projectId, projectName, moodBoardRooms, galleryFolders, savedOptions, onOptionsChange, buildSnapshot, onClose }) {
+function ShareWithCustomerModal({ projectId, projectName, designInfo, galleryFolders, savedOptions, onOptionsChange, buildSnapshot, onClose }) {
   const [opts, setOpts] = useState({ ...DEFAULT_SHARE_OPTIONS, ...(savedOptions || {}) });
   const [share, setShare] = useState(undefined); // undefined = loading, null = none yet
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [pinDraft, setPinDraft] = useState(randomPin());
-  const [shownPin, setShownPin] = useState(""); // only known right after it is set
   const [confirmStop, setConfirmStop] = useState(false);
 
   useEffect(() => {
@@ -68,14 +70,15 @@ function ShareWithCustomerModal({ projectId, projectName, moodBoardRooms, galler
   };
 
   const pinOk = pinDraft === "" || /^\d{4,8}$/.test(pinDraft);
-  const nothingSelected = !opts.quotation && !(opts.moodBoards && moodBoardRooms.length) && !(opts.gallery && opts.galleryFolders.length);
+  const finalRooms = designInfo.mood.filter((m) => m.finalized);
+  const designAny = opts.design && ((opts.designMood && finalRooms.length > 0) || (opts.designCad && designInfo.cad.shown > 0) || (opts.designRenders && designInfo.renders.shown > 0));
+  const nothingSelected = !opts.quotation && !designAny && !(opts.gallery && opts.galleryFolders.length);
 
   const publish = (withPin) => run(async () => {
     const body = { action: "publish", projectId, snapshot: buildSnapshot(opts) };
     if (withPin !== undefined) body.pin = withPin;
     const s = await callShare("POST", body, projectId);
     setShare(s);
-    if (withPin) setShownPin(withPin);
   }, share ? "Shared view updated — the customer now sees your latest changes." : "Link created.");
 
   const act = (body, okMsg) => run(async () => setShare(await callShare("POST", { projectId, ...body }, projectId)), okMsg);
@@ -115,9 +118,33 @@ function ShareWithCustomerModal({ projectId, projectName, moodBoardRooms, galler
               </div>
             )}
             <label style={checkRow}>
-              <input type="checkbox" style={checkbox} checked={opts.moodBoards} onChange={(e) => setOpt({ moodBoards: e.target.checked })} />
-              <span><strong>Mood Boards</strong> {moodBoardRooms.length === 0 ? <em style={{ color: "#9ca3af" }}>(no room has a mood board yet)</em> : <span style={{ color: "#6b7280" }}>— {moodBoardRooms.map((r) => `${r.name} (${r.count})`).join(", ")}</span>}</span>
+              <input type="checkbox" style={checkbox} checked={opts.design} onChange={(e) => setOpt({ design: e.target.checked })} />
+              <span><strong>Design</strong> (from the project's Design tab — current versions only, never history)</span>
             </label>
+            {opts.design && (
+              <div style={{ marginLeft: 24 }}>
+                <label style={checkRow}>
+                  <input type="checkbox" style={checkbox} checked={opts.designMood} onChange={(e) => setOpt({ designMood: e.target.checked })} />
+                  <span>Mood boards <span style={{ color: "#6b7280" }}>— finalized only</span></span>
+                </label>
+                {opts.designMood && (
+                  <p style={{ margin: "0 0 4px 24px", fontSize: 11, color: designInfo.mood.length ? "#6b7280" : "#9ca3af" }}>
+                    {designInfo.mood.length === 0
+                      ? "No room has a mood board yet."
+                      : designInfo.mood.map((m) => (m.finalized ? `${m.name}: finalized v${m.version}` : `${m.name}: draft — not shown until finalized`)).join(" · ")}
+                  </p>
+                )}
+                <label style={checkRow}>
+                  <input type="checkbox" style={checkbox} checked={opts.designCad} onChange={(e) => setOpt({ designCad: e.target.checked })} />
+                  <span>CAD drawings <span style={{ color: "#6b7280" }}>— {designInfo.cad.shown} of {designInfo.cad.total} marked "Show to customer"</span></span>
+                </label>
+                <label style={checkRow}>
+                  <input type="checkbox" style={checkbox} checked={opts.designRenders} onChange={(e) => setOpt({ designRenders: e.target.checked })} />
+                  <span>Final renders <span style={{ color: "#6b7280" }}>— {designInfo.renders.shown} of {designInfo.renders.total} marked "Show to customer"</span></span>
+                </label>
+                <p style={{ margin: "2px 0 4px", fontSize: 11, color: "#9ca3af" }}>Tick "Show to customer" on each drawing or render in the Design tab to include it.</p>
+              </div>
+            )}
             <label style={checkRow}>
               <input type="checkbox" style={checkbox} checked={opts.gallery} onChange={(e) => setOpt({ gallery: e.target.checked })} />
               <span><strong>Design Gallery</strong> folders</span>
@@ -176,7 +203,7 @@ function ShareWithCustomerModal({ projectId, projectName, moodBoardRooms, galler
                   <button style={ghost} disabled={busy} onClick={() => { if (window.confirm("Make a new link? The old link will stop working.")) act({ action: "regenerate" }, "New link made — the old one no longer works."); }}>New link</button>
                   {!confirmStop
                     ? <button style={{ ...ghost, color: "#b91c1c" }} onClick={() => setConfirmStop(true)}>Stop sharing…</button>
-                    : <button style={btn("#dc2626")} disabled={busy} onClick={() => { setConfirmStop(false); act({ action: "delete" }, "Sharing stopped and the link removed."); setShownPin(""); }}>Yes, stop sharing &amp; delete link</button>}
+                    : <button style={btn("#dc2626")} disabled={busy} onClick={() => { setConfirmStop(false); act({ action: "delete" }, "Sharing stopped and the link removed."); }}>Yes, stop sharing &amp; delete link</button>}
                 </div>
               </div>
 
@@ -185,21 +212,25 @@ function ShareWithCustomerModal({ projectId, projectName, moodBoardRooms, galler
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <input type="text" inputMode="numeric" maxLength={8} placeholder="New PIN (4–8 digits)" value={pinDraft} onChange={(e) => setPinDraft(e.target.value.replace(/\D/g, ""))} style={{ width: 200 }} />
                   <button style={ghost} onClick={() => setPinDraft(randomPin())}>Random</button>
-                  <button style={btn("#2563eb", { opacity: busy || !/^\d{4,8}$/.test(pinDraft) ? 0.5 : 1 })} disabled={busy || !/^\d{4,8}$/.test(pinDraft)} onClick={() => run(async () => { setShare(await callShare("POST", { action: "setpin", projectId, pin: pinDraft }, projectId)); setShownPin(pinDraft); }, share.hasPin ? "PIN reset." : "PIN set.")}>
+                  <button style={btn("#2563eb", { opacity: busy || !/^\d{4,8}$/.test(pinDraft) ? 0.5 : 1 })} disabled={busy || !/^\d{4,8}$/.test(pinDraft)} onClick={() => act({ action: "setpin", pin: pinDraft }, share.hasPin ? "PIN reset." : "PIN set.")}>
                     {share.hasPin ? "Reset PIN" : "Set PIN"}
                   </button>
-                  {share.hasPin && <button style={ghost} disabled={busy} onClick={() => { act({ action: "setpin", pin: "" }, "PIN removed."); setShownPin(""); }}>Remove PIN</button>}
+                  {share.hasPin && <button style={ghost} disabled={busy} onClick={() => act({ action: "setpin", pin: "" }, "PIN removed.")}>Remove PIN</button>}
                 </div>
-                {shownPin ? (
+                {share.hasPin && share.pin && (
                   <div style={{ marginTop: 10, padding: 10, background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 6, fontSize: 13 }}>
-                    PIN: <strong style={{ letterSpacing: 2 }}>{shownPin}</strong> — note it down, it can't be shown again later (you can always reset it).
-                    <div style={{ marginTop: 8 }}>
-                      <button style={btn("#059669", { padding: "5px 12px", fontSize: 12 })} onClick={() => copy(`Your project details: ${link}\nPIN: ${shownPin}`, "Link and PIN message")}>Copy link + PIN message</button>
+                    Current PIN: <strong style={{ letterSpacing: 2, fontSize: 16 }}>{share.pin}</strong>
+                    <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button style={btn("#059669", { padding: "5px 12px", fontSize: 12 })} onClick={() => copy(share.pin, "PIN")}>Copy PIN</button>
+                      <button style={btn("#059669", { padding: "5px 12px", fontSize: 12 })} onClick={() => copy(`Your project details: ${link}
+PIN: ${share.pin}`, "Link and PIN message")}>Copy link + PIN message</button>
                     </div>
                   </div>
-                ) : share.hasPin && (
-                  <p style={{ margin: "8px 0 0", fontSize: 11, color: "#9ca3af" }}>For safety the PIN is stored scrambled, so it can't be displayed. If you forgot it, just reset it above. 5 wrong tries lock the link for 15 minutes; resetting the PIN unlocks it.</p>
                 )}
+                {share.hasPin && !share.pin && (
+                  <p style={{ margin: "8px 0 0", fontSize: 12, color: "#b45309" }}>This PIN was set before PINs could be shown here. Reset it above to see and copy it from now on.</p>
+                )}
+                <p style={{ margin: "8px 0 0", fontSize: 11, color: "#9ca3af" }}>Only you can see this PIN, after signing in. 5 wrong tries lock the link for 15 minutes; resetting the PIN unlocks it.</p>
               </div>
             </>
           )}
