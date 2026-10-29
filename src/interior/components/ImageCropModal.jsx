@@ -20,26 +20,34 @@ function ImageCropModal({ src, frameW = 420, frameH = 315, outputScale = 2, onCo
   const [cropError, setCropError] = useState("");
   const imgRef = useState(() => ({ current: null }))[0];
   const [natSize, setNatSize] = useState(null); // { w, h } in natural pixels
-  const [zoom, setZoom] = useState(1); // multiplier over the "fills the frame" scale
+  const [zoom, setZoom] = useState(1); // multiplier over the "whole image fits the frame" scale
   const [offset, setOffset] = useState({ x: 0, y: 0 }); // top-left of the image, in frame px
   const [dragging, setDragging] = useState(false);
   const dragStart = useState(() => ({ current: null }))[0];
 
-  const minScale = natSize ? Math.max(frameW / natSize.w, frameH / natSize.h) : 1;
+  // Zoom 1 = the WHOLE image fits inside the frame (any spare space on the
+  // short side is padded with white in the saved photo), so nothing is cut
+  // off until the user zooms in on purpose. Zoom up to 3× the "fills the
+  // frame" size lets them crop in tighter.
+  const minScale = natSize ? Math.min(frameW / natSize.w, frameH / natSize.h) : 1;
+  const coverScale = natSize ? Math.max(frameW / natSize.w, frameH / natSize.h) : 1;
+  const maxZoom = Math.max(3, (coverScale / minScale) * 3);
   const scale = minScale * zoom;
   const scaledW = natSize ? natSize.w * scale : 0;
   const scaledH = natSize ? natSize.h * scale : 0;
 
-  // Keeps the frame always fully covered by the image — offset can't drift
-  // past an edge and leave blank space inside the crop area.
-  const clamp = (value, scaledDim, frameDim) => Math.min(0, Math.max(frameDim - scaledDim, value));
+  // While the image is larger than the frame along an axis, offset can't
+  // drift past an edge and leave blank space; while it's smaller, it stays
+  // centered on that axis.
+  const clamp = (value, scaledDim, frameDim) =>
+    scaledDim <= frameDim ? (frameDim - scaledDim) / 2 : Math.min(0, Math.max(frameDim - scaledDim, value));
 
   const handleImgLoad = () => {
     const el = imgRef.current;
     const w = el.naturalWidth;
     const h = el.naturalHeight;
     setNatSize({ w, h });
-    const ms = Math.max(frameW / w, frameH / h);
+    const ms = Math.min(frameW / w, frameH / h);
     setOffset({ x: (frameW - w * ms) / 2, y: (frameH - h * ms) / 2 });
   };
 
@@ -78,14 +86,13 @@ function ImageCropModal({ src, frameW = 420, frameH = 315, outputScale = 2, onCo
     canvas.width = outputW;
     canvas.height = outputH;
     const ctx = canvas.getContext("2d");
-    // Map the visible frame back to natural-pixel coordinates in the source
-    // image, so the exported crop matches what was shown, 1:1.
-    const sx = -offset.x / scale;
-    const sy = -offset.y / scale;
-    const sW = frameW / scale;
-    const sH = frameH / scale;
+    // Draw the image where it sits in the frame (scaled up to output size);
+    // anything outside the frame is clipped, and any uncovered space stays
+    // white — so the saved photo matches what was shown, 1:1.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, outputW, outputH);
     try {
-      ctx.drawImage(imgRef.current, sx, sy, sW, sH, 0, 0, outputW, outputH);
+      ctx.drawImage(imgRef.current, offset.x * outputScale, offset.y * outputScale, scaledW * outputScale, scaledH * outputScale);
       // A source loaded from another origin without CORS headers "taints"
       // the canvas — toBlob then throws a SecurityError instead of
       // rejecting, so this whole step has to be guarded, not just awaited.
@@ -107,7 +114,7 @@ function ImageCropModal({ src, frameW = 420, frameH = 315, outputScale = 2, onCo
         <div
           style={{
             width: frameW, height: frameH, overflow: "hidden", position: "relative",
-            borderRadius: 8, background: "#f3f4f6", cursor: dragging ? "grabbing" : "grab",
+            borderRadius: 8, background: "#fff", outline: "1px solid #e5e7eb", cursor: dragging ? "grabbing" : "grab",
             touchAction: "none", userSelect: "none",
           }}
           onPointerDown={handlePointerDown}
@@ -127,7 +134,7 @@ function ImageCropModal({ src, frameW = 420, frameH = 315, outputScale = 2, onCo
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
           <span style={{ fontSize: 12, color: "#6b7280" }}>Zoom</span>
           <input
-            type="range" min={1} max={3} step={0.01} value={zoom}
+            type="range" min={1} max={maxZoom} step={0.01} value={zoom}
             onChange={(e) => handleZoomChange(Number(e.target.value))}
             disabled={!natSize}
             style={{ flex: 1 }}

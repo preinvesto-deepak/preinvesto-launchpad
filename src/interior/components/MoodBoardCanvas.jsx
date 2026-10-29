@@ -33,7 +33,7 @@ function PickerFolderCard({ node, onOpen }) {
       <div style={{ width: 104, height: 26, background: "#ddd6fe", borderRadius: "16px 16px 0 0", marginLeft: 16 }} />
       <div style={{ width: "100%", height: 216, background: "#ddd6fe", borderRadius: "0 20px 20px 20px", overflow: "hidden", position: "relative", marginTop: -1, boxShadow: "0 3px 8px rgba(0,0,0,0.1)" }}>
         {cover ? (
-          <img src={cover.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <img src={cover.url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
         ) : (
           <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 60, opacity: 0.7 }}>📁</div>
         )}
@@ -120,7 +120,7 @@ function ImagePickerModal({ designGallery, onPick, onClose }) {
                       onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.03)")}
                       onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
                     >
-                      <img src={img.url} alt={img.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      <img src={img.url} alt={img.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
                     </div>
                   ))}
                 </div>
@@ -254,7 +254,7 @@ function MoodBoardCanvas({ room, designGallery, onChange }) {
               boxShadow: "0 2px 6px rgba(0,0,0,0.15)", cursor: "move",
             }}
           >
-            <img src={item.imageUrl} draggable={false} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} />
+            <img src={item.imageUrl} draggable={false} alt="" style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "none" }} />
             <div
               className="no-print"
               onPointerDown={(e) => onResizePointerDown(e, item)}

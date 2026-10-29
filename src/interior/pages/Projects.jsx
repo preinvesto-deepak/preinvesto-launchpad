@@ -2794,18 +2794,18 @@ function Projects() {
 
                             return (
                               <div key={subSheetId ?? "main"} style={{ border: "1px solid #ede9fe", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "12px 12px 4px", background: "#fff" }}>
-                                {subSheetId != null && (
-                                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
-                                    <label style={{ fontSize: 12, fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>Name</label>
-                                    <input
-                                      type="text"
-                                      value={sheet.name || ""}
-                                      onChange={(e) => updateSheetField(subSheetId, "name", e.target.value)}
-                                      placeholder="Name (e.g. Draw)"
-                                      style={{ fontWeight: 700, fontSize: 13, color: "#4c1d95", border: "1px solid #ddd6fe", borderRadius: 6, padding: "4px 10px", background: "#faf5ff", width: 180 }}
-                                    />
-                                  </div>
-                                )}
+                                {/* The main sheet "1." is the box itself, so its Name is the
+                                    box's own name (same field as the box rename above). */}
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+                                  <label style={{ fontSize: 12, fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>Name</label>
+                                  <input
+                                    type="text"
+                                    value={sheet.name || ""}
+                                    onChange={(e) => updateSheetField(subSheetId, "name", e.target.value)}
+                                    placeholder={subSheetId == null ? "Name (e.g. Wardrobe)" : "Name (e.g. Draw)"}
+                                    style={{ fontWeight: 700, fontSize: 13, color: "#4c1d95", border: "1px solid #ddd6fe", borderRadius: 6, padding: "4px 10px", background: "#faf5ff", width: 180 }}
+                                  />
+                                </div>
 
                                 {/* ── Type of Work / Door Type (inline row) ── */}
                                 <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
@@ -3056,8 +3056,8 @@ function Projects() {
                                 const sectionKey = subSheetId == null ? "sheets" : `sheet_${subSheetId}`;
                                 const isOpen = !!openSections[sectionKey];
                                 const title = subSheetId == null
-                                  ? "1. Sheet Calculation and Cut List"
-                                  : `${numbering} Sheet Calculation and Cut List — ${sheet.name || "Sub Sheet"}`;
+                                  ? `1. Sheet Calculation and Cut List${sheet.name ? ` — ${sheet.name}` : ""}`
+                                  :`${numbering} Sheet Calculation and Cut List — ${sheet.name || "Sub Sheet"}`;
                                 return (
                                   <Fragment key={subSheetId ?? "main"}>
                                     <SectionHeader

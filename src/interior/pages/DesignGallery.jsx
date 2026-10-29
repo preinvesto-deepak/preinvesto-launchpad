@@ -81,7 +81,7 @@ function FolderCard({ node, onOpen, onDelete }) {
         }}
       >
         {cover ? (
-          <img src={cover.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.currentTarget.style.opacity = 0; }} />
+          <img src={cover.url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.opacity = 0; }} />
         ) : (
           <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34, opacity: 0.7 }}>📁</div>
         )}
@@ -339,7 +339,7 @@ function DesignGallery() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14 }}>
               {currentNode.images.map((img) => (
                 <div key={img.id} style={{ position: "relative", aspectRatio: "4 / 3", border: img.isDisplay ? "2px solid #2563eb" : "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-                  <img src={img.url} alt={img.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.currentTarget.style.opacity = 0.3; }} />
+                  <img src={img.url} alt={img.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.opacity = 0.3; }} />
                   {img.isDisplay && (
                     <div style={{ position: "absolute", top: 6, left: 6, background: "#2563eb", borderRadius: "50%", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }}>★</div>
                   )}

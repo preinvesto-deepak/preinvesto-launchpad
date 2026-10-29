@@ -374,4 +374,167 @@ export default function registerAuthRoutes(app, pool) {
       res.status(500).json({ success: false, error: 'Could not save changes.' });
     }
   }));
+
+  // ---- Customer share links ----------------------------------------------
+  // The owner publishes a customer-safe snapshot of one project (rendered
+  // quotation, mood boards, ...) under an unguessable code. The public view
+  // endpoint serves ONLY that snapshot — never the owner's workspace — so
+  // cost rates, profit and other customers' data can't leak through a link.
+  const PIN_RE = /^\d{4,8}$/;
+  const CODE_RE = /^[a-f0-9]{32}$/;
+  const MAX_PIN_FAILS = 5;
+  const LOCK_MINUTES = 15;
+
+  let shareTableReady = null;
+  const ensureShareTable = () => {
+    if (!shareTableReady) {
+      shareTableReady = pool.query(
+        `CREATE TABLE IF NOT EXISTS interior_shares (
+           code          CHAR(32)    NOT NULL,
+           user_id       VARCHAR(36) NOT NULL,
+           project_id    VARCHAR(64) NOT NULL,
+           pin_hash      VARCHAR(255) NULL,
+           enabled       TINYINT(1)  NOT NULL DEFAULT 1,
+           snapshot_json LONGTEXT    NOT NULL,
+           fail_count    INT         NOT NULL DEFAULT 0,
+           locked_until  DATETIME    NULL,
+           created_at    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+           updated_at    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+           PRIMARY KEY (code),
+           UNIQUE KEY uq_share_project (user_id, project_id),
+           CONSTRAINT fk_share_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+      ).catch((err) => { shareTableReady = null; throw err; });
+    }
+    return shareTableReady;
+  };
+
+  const shareMeta = (row) => row && ({
+    code: row.code,
+    enabled: !!row.enabled,
+    hasPin: !!row.pin_hash,
+    updatedAt: row.updated_at,
+  });
+
+  const loadShare = async (userId, projectId) => {
+    const [rows] = await pool.query(
+      'SELECT code, enabled, pin_hash, updated_at FROM interior_shares WHERE user_id = ? AND project_id = ? LIMIT 1',
+      [userId, String(projectId)]
+    );
+    return rows[0] || null;
+  };
+
+  app.get(paths('interior_share'), withUser(async (req, res, user) => {
+    try {
+      await ensureShareTable();
+      const projectId = String(req.query.projectId || '');
+      if (!projectId) return res.status(400).json({ success: false, error: 'projectId is required' });
+      res.json({ success: true, share: shareMeta(await loadShare(user.id, projectId)) });
+    } catch (err) {
+      console.error('interior_share GET failed:', err.message);
+      res.status(500).json({ success: false, error: 'Could not load the share settings.' });
+    }
+  }));
+
+  app.post(paths('interior_share'), withUser(async (req, res, user) => {
+    try {
+      await ensureShareTable();
+      const { action, snapshot, pin, enabled } = req.body || {};
+      const projectId = String((req.body || {}).projectId || '');
+      if (!projectId) return res.status(400).json({ success: false, error: 'projectId is required' });
+
+      const existing = await loadShare(user.id, projectId);
+      const hashPin = async (p) => (p === '' ? null : bcrypt.hash(p, 10));
+      const badPin = pin !== undefined && pin !== null && pin !== '' && !PIN_RE.test(String(pin));
+      if (badPin) return res.status(400).json({ success: false, error: 'PIN must be 4 to 8 digits.' });
+
+      if (action === 'publish') {
+        if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+          return res.status(400).json({ success: false, error: 'Nothing to publish.' });
+        }
+        const json = JSON.stringify(snapshot);
+        if (existing) {
+          const sets = ['snapshot_json = ?'];
+          const args = [json];
+          if (pin !== undefined && pin !== null) { sets.push('pin_hash = ?', 'fail_count = 0', 'locked_until = NULL'); args.push(await hashPin(String(pin))); }
+          await pool.query(`UPDATE interior_shares SET ${sets.join(', ')} WHERE code = ?`, [...args, existing.code]);
+        } else {
+          const code = crypto.randomBytes(16).toString('hex');
+          const hash = pin ? await hashPin(String(pin)) : null;
+          await pool.query(
+            'INSERT INTO interior_shares (code, user_id, project_id, pin_hash, snapshot_json) VALUES (?, ?, ?, ?, ?)',
+            [code, user.id, projectId, hash, json]
+          );
+        }
+        return res.json({ success: true, share: shareMeta(await loadShare(user.id, projectId)) });
+      }
+
+      if (!existing) return res.status(404).json({ success: false, error: 'This project has no share link yet.' });
+
+      if (action === 'setpin') {
+        // '' removes the PIN; digits set/reset it and clear any lockout.
+        await pool.query(
+          'UPDATE interior_shares SET pin_hash = ?, fail_count = 0, locked_until = NULL WHERE code = ?',
+          [await hashPin(String(pin ?? '')), existing.code]
+        );
+      } else if (action === 'toggle') {
+        await pool.query('UPDATE interior_shares SET enabled = ? WHERE code = ?', [enabled ? 1 : 0, existing.code]);
+      } else if (action === 'regenerate') {
+        await pool.query('UPDATE interior_shares SET code = ? WHERE code = ?', [crypto.randomBytes(16).toString('hex'), existing.code]);
+      } else if (action === 'delete') {
+        await pool.query('DELETE FROM interior_shares WHERE code = ?', [existing.code]);
+        return res.json({ success: true, share: null });
+      } else {
+        return res.status(400).json({ success: false, error: 'Unknown action.' });
+      }
+      res.json({ success: true, share: shareMeta(await loadShare(user.id, projectId)) });
+    } catch (err) {
+      console.error('interior_share POST failed:', err.message);
+      res.status(500).json({ success: false, error: 'Could not update the share link.' });
+    }
+  }));
+
+  // Public — no login. Customer opens /view/<code>; POST so the PIN never
+  // lands in a URL, server log or browser history.
+  app.post(paths('interior_share_view'), async (req, res) => {
+    try {
+      await ensureShareTable();
+      const { code, pin } = req.body || {};
+      if (typeof code !== 'string' || !CODE_RE.test(code)) {
+        return res.status(404).json({ success: false, error: 'This link is not available.' });
+      }
+      const [rows] = await pool.query(
+        'SELECT enabled, pin_hash, snapshot_json, fail_count, locked_until, (locked_until > NOW()) AS locked FROM interior_shares WHERE code = ? LIMIT 1',
+        [code]
+      );
+      const row = rows[0];
+      if (!row || !row.enabled) {
+        return res.status(404).json({ success: false, error: 'This link is not available.' });
+      }
+      if (row.pin_hash) {
+        if (row.locked) {
+          return res.status(429).json({ success: false, error: `Too many wrong PINs. Please try again in ${LOCK_MINUTES} minutes.` });
+        }
+        if (pin === undefined || pin === null || pin === '') {
+          return res.json({ success: true, pinRequired: true });
+        }
+        const ok = await bcrypt.compare(String(pin), row.pin_hash);
+        if (!ok) {
+          const fails = row.fail_count + 1;
+          if (fails >= MAX_PIN_FAILS) {
+            await pool.query('UPDATE interior_shares SET fail_count = 0, locked_until = DATE_ADD(NOW(), INTERVAL ? MINUTE) WHERE code = ?', [LOCK_MINUTES, code]);
+            return res.status(429).json({ success: false, error: `Too many wrong PINs. Please try again in ${LOCK_MINUTES} minutes.` });
+          }
+          await pool.query('UPDATE interior_shares SET fail_count = ? WHERE code = ?', [fails, code]);
+          return res.status(401).json({ success: false, error: `Incorrect PIN. ${MAX_PIN_FAILS - fails} attempt(s) left.` });
+        }
+        if (row.fail_count) await pool.query('UPDATE interior_shares SET fail_count = 0 WHERE code = ?', [code]);
+      }
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ success: true, data: JSON.parse(row.snapshot_json) });
+    } catch (err) {
+      console.error('interior_share_view failed:', err.message);
+      res.status(500).json({ success: false, error: 'Could not open this link. Please try again.' });
+    }
+  });
 }

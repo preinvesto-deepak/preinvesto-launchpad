@@ -6,6 +6,7 @@ import { useAppData } from "../context/AppDataContext";
 import { roundTo2, formatCurrency, mmToFeet } from "../utils/unitConversions";
 import { buildRoomRows, buildRoomEdgeBanding, buildRoomHardware, buildRoomCarpenter, buildBoxRows, buildBoxEdgeBanding, buildBoxCarpenterRow } from "../utils/projectRows";
 import { computeSheetCounts } from "../utils/binPack";
+import ShareWithCustomerModal from "../components/ShareWithCustomerModal";
 
 const QUOT_MODELS = ["economy", "standard", "premium"];
 const QUOT_MODEL_LABELS = { economy: "Economy", standard: "Standard", premium: "Premium" };
@@ -294,7 +295,8 @@ function buildProjectCutListRows(projectRooms, prices) {
 }
 
 function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
-  const { projects, setProjects, subProjects, prices, materialStockSettings, companyProfile } = useAppData();
+  const { projects, setProjects, subProjects, prices, materialStockSettings, companyProfile, designGallery } = useAppData();
+  const [shareOpen, setShareOpen] = useState(false);
 
   const [selectedProject, setSelectedProject] = useState(initialProjectName || projects[0]?.name || "");
 
@@ -679,7 +681,10 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     [quotationRooms, prices, selectedProjectObj, materialStockSettings, markupPercent, discountAmount, gstPercent, advancePercent]
   );
 
-  const variantPageHTML = (v, pageBreakBefore) => {
+  // opts only ever REMOVES sections (used by the customer share link, which
+  // lets the owner hide the cut list / hardware page / savings box) — the
+  // normal Print and PDF paths pass nothing and are unchanged.
+  const variantPageHTML = (v, pageBreakBefore, opts = {}) => {
     const modelLabel = v.model ? `${QUOT_MODEL_LABELS[v.model]} Variant` : "Default (Cost Rates)";
     const modelColor = v.model ? QUOT_MODEL_COLORS[v.model] : "#2563eb";
     const qtnSuffix = v.model ? `-${v.model.toUpperCase()[0]}` : "";
@@ -727,7 +732,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
               .join("")}
           </tbody>
         </table>
-        ${mrpSavings.mrpTotal > 0 ? `
+        ${!opts.omitSavings && mrpSavings.mrpTotal > 0 ? `
         <div style="padding:12px 14px;border:1px solid #a7f3d0;background:#ecfdf5;border-radius:8px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center">
           <div>
             <div style="font-size:13px;font-weight:700;color:#065f46">You save ${fmtCurrency(mrpSavings.savings)} vs MRP</div>
@@ -754,7 +759,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
           <div style="width:45%;text-align:right"><p><strong>Authorized Signatory</strong></p><div style="border-top:1px solid #000;margin-top:50px"/></div>
         </div>
       </div>
-      ${includeHardwareDiscount && v.hardwareItems.length > 0 ? `
+      ${includeHardwareDiscount && !opts.omitHardware && v.hardwareItems.length > 0 ? `
       <div style="page-break-before:always;padding:30px;font-family:sans-serif">
         <div style="display:flex;gap:12px;align-items:center;margin-bottom:4px">
           ${companyProfile.logo ? `<img src="${companyProfile.logo}" alt="" style="width:72px;height:72px;object-fit:contain;flex-shrink:0" />` : ""}
@@ -799,7 +804,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
           </tfoot>
         </table>
       </div>` : ""}
-      ${includeCutList && cutListRows.length > 0 ? `
+      ${includeCutList && !opts.omitCutList && cutListRows.length > 0 ? `
       <div style="page-break-before:always;padding:30px;font-family:sans-serif">
         <div style="display:flex;gap:12px;align-items:center;margin-bottom:4px">
           ${companyProfile.logo ? `<img src="${companyProfile.logo}" alt="" style="width:72px;height:72px;object-fit:contain;flex-shrink:0" />` : ""}
@@ -839,6 +844,54 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
   // autoPrint=true fires the iframe's print dialog once its content loads.
   const showPreview = (bodyHTML, title, autoPrint) => {
     setPreviewDoc({ title, html: bodyHTML, autoPrint });
+  };
+
+  // ── Customer share link ──────────────────────────────────────────────────
+  // The customer never gets the owner's workspace — only this snapshot, built
+  // here from what was ticked in the Share dialog. Quotation is the finished
+  // customer-facing HTML (selling rates only, no cost/profit data).
+  const countGalleryImages = (node) =>
+    (node.images || []).length + (node.children || []).reduce((s, c) => s + countGalleryImages(c), 0);
+  const slimGalleryNode = (node) => ({
+    name: node.name,
+    images: (node.images || []).map((i) => ({ url: i.url, name: i.name || "" })),
+    children: (node.children || []).map(slimGalleryNode),
+  });
+  const moodBoardRooms = projectRooms
+    .filter((r) => (r.moodBoard?.items || []).length > 0)
+    .map((r) => ({ name: r.subProject || r.name, count: r.moodBoard.items.length }));
+  const galleryFolders = (designGallery || []).map((f) => ({ id: f.id, name: f.name, count: countGalleryImages(f) }));
+
+  const buildShareSnapshot = (o) => {
+    const snap = {
+      v: 1,
+      publishedAt: new Date().toISOString(),
+      company: { name: companyName, logo: companyProfile.logo || "", mobile: companyMobile, email: companyEmail },
+      project: { name: selectedProject, customer: customerName, address: customerAddress },
+      quotation: null,
+      moodBoards: null,
+      gallery: null,
+    };
+    if (o.quotation) {
+      snap.quotation = {
+        label: `${QUOT_MODEL_LABELS[selectedModel]} Variant`,
+        html: variantPageHTML(buildVariant(selectedModel), false, {
+          omitSavings: !o.savings, omitHardware: !o.hardware, omitCutList: !o.cutList,
+        }),
+      };
+    }
+    if (o.moodBoards) {
+      snap.moodBoards = projectRooms
+        .filter((r) => (r.moodBoard?.items || []).length > 0)
+        .map((r) => ({
+          room: r.subProject || r.name,
+          items: r.moodBoard.items.map((i) => ({ imageUrl: i.imageUrl, x: i.x, y: i.y, w: i.w, h: i.h, zIndex: i.zIndex || 1 })),
+        }));
+    }
+    if (o.gallery) {
+      snap.gallery = (designGallery || []).filter((f) => (o.galleryFolders || []).includes(f.id)).map(slimGalleryNode);
+    }
+    return snap;
   };
 
   // One-click PDF download — writes real PDF bytes with jsPDF and triggers a
@@ -1096,6 +1149,15 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
         </div>
         )}
       </div>
+
+      {selectedProjectObj && (
+        <div className="no-print" style={{ marginBottom: 20, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <button onClick={() => setShareOpen(true)} style={{ background: "#0f766e", color: "#fff", border: "none", padding: "8px 16px", fontSize: 13, borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+            🔗 Share with customer
+          </button>
+          <span style={{ fontSize: 12, color: "#9ca3af" }}>Private read-only link (optional PIN) to this quotation and mood boards.</span>
+        </div>
+      )}
 
       {/* ─── Compare Pricing Models — checkmark above each column picks the
           model whose Quotation/Hardware savings/Cut List renders below, and
@@ -1511,6 +1573,19 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
             />
           </div>
         </div>
+      )}
+
+      {shareOpen && selectedProjectObj && (
+        <ShareWithCustomerModal
+          projectId={selectedProjectObj.id}
+          projectName={selectedProject}
+          moodBoardRooms={moodBoardRooms}
+          galleryFolders={galleryFolders}
+          savedOptions={selectedProjectObj.quotationSettings?.shareOptions}
+          onOptionsChange={(o) => persistField("shareOptions", o)}
+          buildSnapshot={buildShareSnapshot}
+          onClose={() => setShareOpen(false)}
+        />
       )}
     </div>
   );

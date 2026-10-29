@@ -36,6 +36,8 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 // Lazy so the Interior tool's bundle (and jsPDF/xlsx) only loads for the
 // people who actually open it, not every visitor to the marketing site.
 const InteriorApp = lazy(() => import("./interior/InteriorApp"));
+// Public, read-only customer page opened from an owner's share link — no login.
+const CustomerView = lazy(() => import("./interior/pages/CustomerView"));
 
 // Redirects to /admin login if not admin, preserving intended destination
 const AdminRoute = ({ children }: { children: React.ReactNode }) => {
@@ -108,6 +110,7 @@ const App = () => (
             <Route path="/reset-password" element={<ResetPassword />} />
             {/* Now lives inside the Interior tool's own layout (sidebar visible). */}
             <Route path="/profile" element={<Navigate to="/interior/profile" replace />} />
+            <Route path="/view/:code" element={<CustomerView />} />
             <Route
               path="/interior/*"
               element={<RequireAuth><InteriorApp /></RequireAuth>}
