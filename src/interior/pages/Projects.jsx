@@ -9,6 +9,8 @@ import { GROUP_OPTIONS } from "../data/priceData";
 import { PROJECT_STATUSES, projectStatusInfo } from "../data/projectStatus";
 import { LEAD_SOURCES, leadSourceLabel } from "../data/leadSource";
 import ProjectDesignTab from "../components/ProjectDesignTab";
+import MaterialModelPicker from "../components/MaterialModelPicker";
+import { useSheetClipboard } from "../utils/sheetClipboard";
 
 // Annotates a group-sorted row list with rowSpan info so the "Group" cell can
 // be rendered once per group (merged) instead of repeated on every row.
@@ -150,7 +152,7 @@ const SHEET_COPY_FIELDS = [
   "matOutsideLaminate", "matOutsideLaminateId",
   "matInsideLaminate", "matInsideLaminateId",
   "matEdgeBeading", "matEdgeBeadingId",
-  "customMaterials",
+  "customMaterials", "materialLabels", "fieldLabels",
   "doorsH", "doorsV", "backParts", "partitions", "shelves",
   "customFields", "refs", "parts",
 ];
@@ -991,8 +993,10 @@ function Projects() {
   const [openSections, setOpenSections] = useState({ sheets: false, hardware: false, summary: false });
   const toggleSection = (key) => setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
 
-  // One-slot clipboard for the Copy/Paste buttons on each Sheet Calculation.
-  const [copiedSheet, setCopiedSheet] = useState(null);
+  // One-slot clipboard for the Copy/Paste buttons on each Sheet Calculation —
+  // shared with Templates and kept across page changes, so a sheet copied here
+  // can be pasted into a template or another project.
+  const [copiedSheet, setCopiedSheet] = useSheetClipboard();
   // Extra length added to each edge band product's calculated meterage before
   // rounding, to cover cutting wastage/offcuts — editable, defaults to 0.
   // Persisted on the room (not just local state) so Project BOQ/Quotation compute
@@ -1813,7 +1817,8 @@ function Projects() {
       const v = sheet[f];
       fields[f] = v === undefined ? v : JSON.parse(JSON.stringify(v));
     });
-    setCopiedSheet({ fields, sourceLabel: subSheetId == null ? (activeBox.boxName || activeBox.name || "1.") : (sheet.name || "Sub Sheet") });
+    const where = `Project "${selectedProject?.name || "Untitled"}" › ${activeRoom?.subProject || activeRoom?.name || "Room"} › ${activeBox.boxName || activeBox.name || "Box"}`;
+    setCopiedSheet({ fields, sourceLabel: subSheetId == null ? where : `${where} › ${sheet.name || "Sub Sheet"}` });
   };
 
   const pasteSheetData = (subSheetId) => {
@@ -3641,8 +3646,8 @@ function Projects() {
       )}
 
       {boxMatPicker && (
-        <ProjItemPickerModal
-          materialName={boxMatPicker.label}
+        <MaterialModelPicker
+          label={boxMatPicker.label}
           prices={prices}
           onSelect={(p) => {
             const f = boxMatPicker.field;
@@ -3668,8 +3673,8 @@ function Projects() {
       )}
 
       {hardwarePicker && (
-        <ProjItemPickerModal
-          materialName="Material Details"
+        <MaterialModelPicker
+          label="Material Details"
           prices={prices}
           initialGroup={hardwarePicker.group}
           onSelect={(p) => {

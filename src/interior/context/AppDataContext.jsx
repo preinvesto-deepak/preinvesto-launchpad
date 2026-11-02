@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { projectList } from "../data/projectData";
 import { subProjectList } from "../data/subProjectData";
 import { dimensionEntries } from "../data/dimensionData";
@@ -106,6 +106,18 @@ function AppDataProvider({ children }) {
   const [loadError, setLoadError] = useState(null);
   const [saveError, setSaveError] = useState(null);
   const saveTimer = useRef(null);
+  // Save bookkeeping. `latestRef` is always the newest workspace snapshot;
+  // `dirtyRef` means "there are changes the server doesn't have yet" (a
+  // timer waiting, a request in flight, or a failed request); `inFlightRef`
+  // holds the running save's promise so saves never overlap (two POSTs racing
+  // could land out of order and overwrite newer data with older).
+  const latestRef = useRef(null);
+  const dirtyRef = useRef(false);
+  const inFlightRef = useRef(null);
+  const queuedRef = useRef(false);
+  const immediateRef = useRef(false);
+  const firstRunRef = useRef(true);
+  const [saveStatus, setSaveStatus] = useState("idle"); // idle | pending | saving | saved | error
 
   // ── Initial load from MySQL (per-user, via /api/interior_state.php) ─────
   useEffect(() => {
@@ -157,39 +169,71 @@ function AppDataProvider({ children }) {
     return () => { cancelled = true; };
   }, []);
 
-  // ── Debounced save to MySQL (via server/state.php) ──────────────────────
-  useEffect(() => {
-    if (!isLoaded) return; // don't save until the initial load has landed
+  // ── Save to MySQL (via /api/interior_state.php) ──────────────────────────
+  // Writes the newest snapshot, then again if more changes landed meanwhile.
+  const runSave = useCallback(() => {
+    if (inFlightRef.current) { queuedRef.current = true; return inFlightRef.current; }
+    const job = (async () => {
+      try {
+        for (;;) {
+          queuedRef.current = false;
+          const snapshot = latestRef.current;
+          setSaveStatus("saving");
+          await saveState(snapshot);
+          setSaveError(null);
+          if (latestRef.current === snapshot) dirtyRef.current = false;
+          if (!queuedRef.current && latestRef.current === snapshot) break;
+        }
+        setSaveStatus("saved");
+      } catch (err) {
+        console.error("Failed to save app state to server:", err);
+        setSaveError(err.message);
+        setSaveStatus("error");
+      } finally {
+        inFlightRef.current = null;
+      }
+    })();
+    inFlightRef.current = job;
+    return job;
+  }, []);
 
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      const dataToSave = {
-        projects,
-        subProjects,
-        dimensions,
-        prices,
-        materialModelRates,
-        materialModelProfitPercent,
-        templates,
-        selectedTemplateId,
-        materialStockSettings,
-        kerfWidth,
-        companyProfile,
-        designGallery,
-        leads,
-        leadViews,
-        leadStatuses,
-        leadTagColors,
-        teamMembers,
-        templateFolders,
-      };
-      saveState(dataToSave)
-        .then(() => setSaveError(null))
-        .catch((err) => {
-          console.error("Failed to save app state to server:", err);
-          setSaveError(err.message);
-        });
-    }, SAVE_DEBOUNCE_MS);
+  // Debounced: every change re-arms a short timer, so typing doesn't POST the
+  // whole workspace per keystroke. requestImmediateSave() (the template Save
+  // button) makes the very next write skip the wait.
+  useEffect(() => {
+    if (!isLoaded) return undefined; // don't save until the initial load has landed
+
+    const dataToSave = {
+      projects,
+      subProjects,
+      dimensions,
+      prices,
+      materialModelRates,
+      materialModelProfitPercent,
+      templates,
+      selectedTemplateId,
+      materialStockSettings,
+      kerfWidth,
+      companyProfile,
+      designGallery,
+      leads,
+      leadViews,
+      leadStatuses,
+      leadTagColors,
+      teamMembers,
+      templateFolders,
+    };
+    latestRef.current = dataToSave;
+
+    // The first run after the initial load is just the loaded data arriving —
+    // nothing the server doesn't already have, so nothing to write or warn about.
+    if (firstRunRef.current) { firstRunRef.current = false; return undefined; }
+
+    dirtyRef.current = true;
+    setSaveStatus((s) => (s === "saving" ? s : "pending"));
+    const delay = immediateRef.current ? 0 : SAVE_DEBOUNCE_MS;
+    immediateRef.current = false;
+    saveTimer.current = setTimeout(() => { if (dirtyRef.current) runSave(); }, delay);
 
     return () => clearTimeout(saveTimer.current);
   }, [
@@ -213,6 +257,32 @@ function AppDataProvider({ children }) {
     teamMembers,
     templateFolders,
   ]);
+
+  // Leaving the Interior area (e.g. "Back to Preinvesto") unmounts this
+  // provider — write any waiting change then, instead of letting the debounce
+  // timer die with it.
+  useEffect(() => () => { if (dirtyRef.current) runSave(); }, [runSave]);
+
+  // Closing/refreshing the tab with a change still waiting or being written
+  // would lose it — the browser can't finish a request this size during
+  // unload — so ask first.
+  useEffect(() => {
+    const onBeforeUnload = (e) => {
+      if (dirtyRef.current || inFlightRef.current) { e.preventDefault(); e.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
+
+  const requestImmediateSave = useCallback(() => { immediateRef.current = true; }, []);
+  const retrySave = useCallback(() => { dirtyRef.current = true; return runSave(); }, [runSave]);
+  // Resolves once everything pending is on the server — callers about to end
+  // the session (sign out) await this so the last edits aren't lost.
+  const flushPendingSave = useCallback(async () => {
+    clearTimeout(saveTimer.current);
+    if (dirtyRef.current) await runSave();
+    else if (inFlightRef.current) await inFlightRef.current;
+  }, [runSave]);
 
   // Update a price entry and link any unlinked parts that reference it by name.
   // Stored part name strings are intentionally preserved as fallback — only materialId is written.
@@ -338,6 +408,10 @@ function AppDataProvider({ children }) {
         isLoaded,
         loadError,
         saveError,
+        saveStatus,
+        retrySave,
+        requestImmediateSave,
+        flushPendingSave,
       }}
     >
       {children}

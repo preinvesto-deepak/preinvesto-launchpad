@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Routes, Route, useLocation, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, LogOut, UserCog, TriangleAlert } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
@@ -56,6 +57,7 @@ function InteriorTopBar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { guardedNavigate } = useUnsavedChanges();
+  const { flushPendingSave } = useAppData();
   return (
     <div
       className="no-print"
@@ -89,7 +91,7 @@ function InteriorTopBar() {
           {user ? user.name : "Profile"}
         </Link>
         <button
-          onClick={() => guardedNavigate(logout)}
+          onClick={() => guardedNavigate(async () => { await flushPendingSave(); await logout(); })}
           style={{
             display: "flex",
             alignItems: "center",
@@ -142,6 +144,46 @@ function WorkspaceLoadBanner() {
 }
 
 /**
+ * Shows whether the latest edits have reached the server: "Saving…" while a
+ * write is waiting/running, a brief "Saved", and — importantly — a persistent
+ * red warning with a Retry button when a write fails (previously a failed
+ * save was completely silent, so a refresh quietly lost the changes).
+ */
+function SaveStatus() {
+  const { saveStatus, saveError, retrySave } = useAppData();
+  const [showSaved, setShowSaved] = useState(false);
+
+  useEffect(() => {
+    if (saveStatus !== "saved") { setShowSaved(false); return undefined; }
+    setShowSaved(true);
+    const t = setTimeout(() => setShowSaved(false), 2500);
+    return () => clearTimeout(t);
+  }, [saveStatus]);
+
+  const base = {
+    position: "fixed" as const, right: 16, bottom: 16, zIndex: 6000, fontSize: 12,
+    borderRadius: 8, padding: "7px 12px", boxShadow: "0 2px 10px rgba(0,0,0,0.15)",
+  };
+
+  if (saveStatus === "error") {
+    return (
+      <div className="no-print" role="alert" style={{ ...base, background: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", display: "flex", gap: 10, alignItems: "center", maxWidth: 420 }}>
+        <TriangleAlert size={14} style={{ flexShrink: 0 }} />
+        <span>Couldn't save your latest changes{saveError ? ` (${saveError})` : ""}. Don't refresh yet.</span>
+        <button onClick={() => retrySave()} style={{ background: "#b91c1c", color: "#fff", border: "none", borderRadius: 5, padding: "4px 10px", fontSize: 12, cursor: "pointer" }}>Retry</button>
+      </div>
+    );
+  }
+  if (saveStatus === "pending" || saveStatus === "saving") {
+    return <div className="no-print" style={{ ...base, background: "#fff", border: "1px solid #e5e7eb", color: "#6b7280" }}>Saving…</div>;
+  }
+  if (showSaved) {
+    return <div className="no-print" style={{ ...base, background: "#ecfdf5", border: "1px solid #a7f3d0", color: "#047857" }}>✓ All changes saved</div>;
+  }
+  return null;
+}
+
+/**
  * The Interior quotation tool, mounted at /interior/*.
  *
  * Everything is wrapped in .interior-app because this tool ships its own
@@ -158,6 +200,7 @@ const InteriorApp = () => {
         <div className="interior-app">
           <InteriorTopBar />
           <WorkspaceLoadBanner />
+          <SaveStatus />
           <div className="app-layout">
             <Sidebar />
             <div className="main-content" style={noPadTop ? { paddingTop: 0 } : {}}>

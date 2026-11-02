@@ -345,8 +345,9 @@ function LayoutTab({ packedSheets, rowColors, oversizeRows }) {
   return (
     <div>
       <OversizeWarning oversizeRows={oversizeRows} />
-      {/* Material tabs */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "10px 16px 0", borderBottom: "2px solid #e5e7eb", background: "#f8fafc" }}>
+      {/* Material tabs — sticky, so the material being viewed (and the way to
+          switch to another) stays on screen while scrolling through its sheets. */}
+      <div style={{ position: "sticky", top: 0, zIndex: 5, display: "flex", flexWrap: "wrap", gap: 4, padding: "10px 16px 0", borderBottom: "2px solid #e5e7eb", background: "#f8fafc", boxShadow: "0 2px 6px rgba(0,0,0,0.08)" }}>
         {materials.map((mat) => {
           const cnt = (byMat[mat] || []).length;
           const active = mat === activeMat;
@@ -382,6 +383,7 @@ function LayoutTab({ packedSheets, rowColors, oversizeRows }) {
           {sheets.map((sheet, si) => (
             <div key={si}>
               <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4, display: "flex", gap: 8 }}>
+                <span style={{ fontWeight: 700, color: "#185fa5" }}>{activeMat}</span>
                 <span style={{ fontWeight: 700 }}>Sheet #{sheet.sheetIndex}</span>
                 <span>{sheet.sheetW} × {sheet.sheetH} mm</span>
                 <span style={{

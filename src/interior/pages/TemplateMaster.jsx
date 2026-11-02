@@ -1,5 +1,7 @@
+import MaterialModelPicker from "../components/MaterialModelPicker";
+import { useSheetClipboard } from "../utils/sheetClipboard";
 import { useState, useEffect, Fragment } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
 import { useUnsavedChanges } from "../context/UnsavedChangesContext";
 import { mmToFeet, feetToMm, roundTo2, formatCurrency } from "../utils/unitConversions";
@@ -325,33 +327,38 @@ const CROP_OUTPUT_W = CROP_FRAME_W * 2;
 const CROP_OUTPUT_H = CROP_FRAME_H * 2;
 
 /**
- * Drag-to-reposition + zoom cropper. Lets the user pick exactly which part
- * of an uploaded photo becomes the template's card image, instead of the
- * browser silently cropping whatever doesn't fit via object-fit: cover.
+ * Drag-to-reposition + zoom cropper. Opens with the WHOLE photo visible
+ * (zoom 1 = fit inside the frame, any spare space is saved as white); zoom in
+ * to crop to a detail. Lets the user pick exactly what becomes the template's
+ * card image instead of the browser silently cropping it.
  */
 function TemplateImageCropModal({ src, onConfirm, onCancel }) {
   const imgRef = useState(() => ({ current: null }))[0];
   const [natSize, setNatSize] = useState(null); // { w, h } in natural pixels
-  const [zoom, setZoom] = useState(1); // multiplier over the "fills the frame" scale
+  const [zoom, setZoom] = useState(1); // multiplier over the "whole photo fits" scale
   const [offset, setOffset] = useState({ x: 0, y: 0 }); // top-left of the image, in frame px
   const [dragging, setDragging] = useState(false);
   const dragStart = useState(() => ({ current: null }))[0];
 
-  const minScale = natSize ? Math.max(CROP_FRAME_W / natSize.w, CROP_FRAME_H / natSize.h) : 1;
+  const minScale = natSize ? Math.min(CROP_FRAME_W / natSize.w, CROP_FRAME_H / natSize.h) : 1;
+  const coverScale = natSize ? Math.max(CROP_FRAME_W / natSize.w, CROP_FRAME_H / natSize.h) : 1;
+  // Enough range to zoom from "whole photo" past "fills the frame" and keep going.
+  const maxZoom = Math.max(3, (coverScale / minScale) * 3);
   const scale = minScale * zoom;
   const scaledW = natSize ? natSize.w * scale : 0;
   const scaledH = natSize ? natSize.h * scale : 0;
 
-  // Keeps the frame always fully covered by the image — offset can't drift
-  // past an edge and leave blank space inside the crop area.
-  const clamp = (value, scaledDim, frameDim) => Math.min(0, Math.max(frameDim - scaledDim, value));
+  // An image smaller than the frame on an axis stays centered on it (the rest
+  // is white letterbox); a larger one can't be dragged past its own edge.
+  const clamp = (value, scaledDim, frameDim) =>
+    scaledDim <= frameDim ? (frameDim - scaledDim) / 2 : Math.min(0, Math.max(frameDim - scaledDim, value));
 
   const handleImgLoad = () => {
     const el = imgRef.current;
     const w = el.naturalWidth;
     const h = el.naturalHeight;
     setNatSize({ w, h });
-    const ms = Math.max(CROP_FRAME_W / w, CROP_FRAME_H / h);
+    const ms = Math.min(CROP_FRAME_W / w, CROP_FRAME_H / h);
     setOffset({ x: (CROP_FRAME_W - w * ms) / 2, y: (CROP_FRAME_H - h * ms) / 2 });
   };
 
@@ -390,13 +397,13 @@ function TemplateImageCropModal({ src, onConfirm, onCancel }) {
     canvas.width = CROP_OUTPUT_W;
     canvas.height = CROP_OUTPUT_H;
     const ctx = canvas.getContext("2d");
-    // Map the visible frame back to natural-pixel coordinates in the source
-    // image, so the exported crop matches what was shown, 1:1.
-    const sx = -offset.x / scale;
-    const sy = -offset.y / scale;
-    const sW = CROP_FRAME_W / scale;
-    const sH = CROP_FRAME_H / scale;
-    ctx.drawImage(imgRef.current, sx, sy, sW, sH, 0, 0, CROP_OUTPUT_W, CROP_OUTPUT_H);
+    // White first (JPEG has no transparency), then the image placed exactly
+    // where the frame shows it — so the export matches the preview 1:1,
+    // letterbox included.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, CROP_OUTPUT_W, CROP_OUTPUT_H);
+    const k = CROP_OUTPUT_W / CROP_FRAME_W;
+    ctx.drawImage(imgRef.current, offset.x * k, offset.y * k, scaledW * k, scaledH * k);
     onConfirm(canvas.toDataURL("image/jpeg", 0.85));
   };
 
@@ -405,12 +412,12 @@ function TemplateImageCropModal({ src, onConfirm, onCancel }) {
       <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: CROP_FRAME_W + 48 }}>
         <h3 style={{ margin: "0 0 4px", fontSize: 16 }}>Position photo</h3>
         <p style={{ margin: "0 0 14px", fontSize: 12, color: "#6b7280" }}>
-          Drag to reposition, use the slider to zoom. This is exactly what will show on the template card.
+          The whole photo is shown. Drag to reposition, use the slider to zoom in. This is exactly what will show on the template card.
         </p>
         <div
           style={{
             width: CROP_FRAME_W, height: CROP_FRAME_H, overflow: "hidden", position: "relative",
-            borderRadius: 8, background: "#f3f4f6", cursor: dragging ? "grabbing" : "grab",
+            borderRadius: 8, background: "#fff", outline: "1px solid #e5e7eb", cursor: dragging ? "grabbing" : "grab",
             touchAction: "none", userSelect: "none",
           }}
           onPointerDown={handlePointerDown}
@@ -430,7 +437,7 @@ function TemplateImageCropModal({ src, onConfirm, onCancel }) {
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
           <span style={{ fontSize: 12, color: "#6b7280" }}>Zoom</span>
           <input
-            type="range" min={1} max={3} step={0.01} value={zoom}
+            type="range" min={1} max={maxZoom} step={0.01} value={zoom}
             onChange={(e) => handleZoomChange(Number(e.target.value))}
             disabled={!natSize}
             style={{ flex: 1 }}
@@ -447,127 +454,6 @@ function TemplateImageCropModal({ src, onConfirm, onCancel }) {
 
 function ftLabel(mm) {
   return mm ? roundTo2(mmToFeet(Number(mm))) + " ft" : "—";
-}
-
-// ── Item Picker Modal ─────────────────────────────────────────────────────────
-const LABEL_TO_GROUP = {
-  "Door Ply":         "Wood",
-  "Carcase Ply":      "Wood",
-  "Outside Laminate": "Laminate",
-  "Inside Laminate":  "Laminate",
-  "Edge Beading":     "Edge Beading",
-};
-
-// Grouped tabs + multi-field search, mirroring the Items Pricing page's own
-// filter UI so picking a material here feels the same as browsing it there.
-function ItemPickerModal({ label, prices, onSelect, onClose, initialGroup }) {
-  const defaultGroup = initialGroup || LABEL_TO_GROUP[label] || "All";
-  const [filterGroup, setFilterGroup] = useState(defaultGroup);
-  const [search, setSearch] = useState("");
-
-  const allGroups = ["All", ...Array.from(new Set([
-    ...GROUP_OPTIONS,
-    ...(prices || []).map((p) => p.group || "").filter(Boolean),
-  ]))];
-
-  const q = search.toLowerCase();
-  const results = (prices || []).filter((p) => {
-    const grp = p.group || "";
-    const matchTab = filterGroup === "All" || grp === filterGroup;
-    const matchSearch = !q ||
-      (p.materialName || "").toLowerCase().includes(q) ||
-      (p.brand || "").toLowerCase().includes(q) ||
-      (p.group || "").toLowerCase().includes(q) ||
-      (p.materialSpec || "").toLowerCase().includes(q);
-    return matchTab && matchSearch;
-  });
-
-  const byBrand = {};
-  results.forEach((p) => {
-    const b = p.brand || "— No Brand —";
-    (byBrand[b] = byBrand[b] || []).push(p);
-  });
-
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 3000, padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, width: "100%", maxWidth: 640, maxHeight: "84vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.25)" }}>
-        <div style={{ background: "#1e3a5f", color: "#fff", padding: "14px 20px", borderRadius: "14px 14px 0 0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>Pick from Items Pricing</div>
-            <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>For "{label}"</div>
-          </div>
-          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 8, width: 30, height: 30, fontSize: 16, cursor: "pointer", padding: 0 }}>✕</button>
-        </div>
-
-        {/* Group tabs — same set/counts as the Items Pricing page */}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 0", borderBottom: "2px solid #e5e7eb", padding: "8px 16px 0", background: "#fff", flexShrink: 0 }}>
-          {allGroups.map((g) => {
-            const active = filterGroup === g;
-            const count = g === "All" ? (prices || []).length : (prices || []).filter((p) => (p.group || "") === g).length;
-            return (
-              <button key={g} onClick={() => setFilterGroup(g)} style={{
-                padding: "6px 12px", fontSize: 12, fontWeight: active ? 700 : 500,
-                border: "none", borderBottom: active ? "3px solid #2563eb" : "3px solid transparent",
-                borderRadius: "6px 6px 0 0", background: "transparent",
-                color: active ? "#2563eb" : "#6b7280", cursor: "pointer", whiteSpace: "nowrap", marginBottom: -2,
-              }}>
-                {g} <span style={{ fontSize: 10, opacity: 0.65 }}>({count})</span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Search — same fields (name/brand/spec/group) as the Items Pricing page */}
-        <div style={{ padding: "10px 16px", borderBottom: "1px solid #e5e7eb", flexShrink: 0 }}>
-          <input
-            autoFocus
-            type="text"
-            placeholder="Search by name, brand, spec, group…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ width: "100%", padding: "9px 12px", fontSize: 14, borderRadius: 8, border: "1px solid #d1d5db", boxSizing: "border-box" }}
-          />
-        </div>
-
-        <div style={{ overflowY: "auto", flex: 1 }}>
-          {results.length === 0 ? (
-            <p style={{ color: "#9ca3af", textAlign: "center", padding: 32 }}>No matching items found.</p>
-          ) : Object.entries(byBrand).map(([brandName, items]) => (
-            <div key={brandName}>
-              <div style={{ background: "#e0e7ff", color: "#3730a3", padding: "5px 16px", fontWeight: 600, fontSize: 12, position: "sticky", top: 0 }}>
-                {brandName} <span style={{ fontWeight: 400, opacity: 0.7, marginLeft: 6 }}>({items.length})</span>
-              </div>
-              {items.map((p) => {
-                const displayImg = (p.images || []).find((i) => i.isDisplay);
-                return (
-                  <div
-                    key={p.id}
-                    onClick={() => onSelect(p.materialName, p.id)}
-                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", borderBottom: "1px solid #f3f4f6", cursor: "pointer" }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#eff6ff")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "")}
-                  >
-                    <div style={{ width: 40, height: 40, flexShrink: 0, borderRadius: 7, overflow: "hidden", border: "1px solid #e5e7eb", background: "#f9fafb", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      {displayImg ? <img src={displayImg.dataUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 18, color: "#d1d5db" }}>🖼</span>}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{p.materialName}</div>
-                      <div style={{ fontSize: 11, color: "#9ca3af" }}>{[p.group, p.materialSpec, p.unit].filter(Boolean).join(" · ")}</div>
-                    </div>
-                    {p.rate > 0 && (
-                      <div style={{ textAlign: "right", flexShrink: 0, fontSize: 13, fontWeight: 700, color: "#111827" }}>
-                        ₹{Number(p.rate).toLocaleString("en-IN")}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // ── Collapsible Section Header ────────────────────────────────────────────────
@@ -600,7 +486,7 @@ function SectionHeader({ title, open, onToggle, action, style: extraStyle }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 function TemplateMaster() {
-  const { templates, setTemplates, templateFolders, setTemplateFolders, prices, materialStockSettings, setMaterialStockSettings, materialModelRates } = useAppData();
+  const { templates, setTemplates, templateFolders, setTemplateFolders, prices, materialStockSettings, setMaterialStockSettings, materialModelRates, requestImmediateSave } = useAppData();
   const { registerGuard, guardedNavigate } = useUnsavedChanges();
 
   // Folder browsing — currentFolderId is the folder whose contents the grid
@@ -637,15 +523,38 @@ function TemplateMaster() {
   // own internal setView("detail") calls (no navigation involved) — so this
   // fires exactly when the sidebar link is clicked, and only then.
   const location = useLocation();
+  const navigate = useNavigate();
+  // The open template lives in the URL (?id=<templateId>), so a refresh — or
+  // the browser's Back/Forward — lands on the same template instead of the
+  // Templates list. Our own navigations are tagged { internal: true } so the
+  // sidebar-click reset below doesn't mistake them for a sidebar click.
+  const urlId = new URLSearchParams(location.search).get("id");
+  const goTo = (id) =>
+    navigate(id == null ? location.pathname : `${location.pathname}?id=${encodeURIComponent(id)}`, { state: { internal: true } });
   useEffect(() => {
-    setView("grid");
-    // Same click should also climb back out of whatever folder you were
-    // browsing, to the top-level Templates list — otherwise inside a folder
-    // the sidebar link appeared to do nothing.
-    setCurrentFolderId(null);
-    setSearch("");
+    if (urlId == null) setView("grid");
+    if (!location.state?.internal) {
+      // A sidebar click should also climb back out of whatever folder you were
+      // browsing, to the top-level Templates list — otherwise inside a folder
+      // the sidebar link appeared to do nothing.
+      setCurrentFolderId(null);
+      setSearch("");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key]);
+
+  // URL -> screen: open the template named in the URL. Re-runs as templates
+  // load (they arrive after the first render on a fresh page load), so the
+  // refresh case lands in the editor once the saved data is there.
+  useEffect(() => {
+    if (urlId == null) return;
+    const t = templates.find((x) => String(x.id) === urlId);
+    if (t && !(view === "detail" && selectedId === t.id)) {
+      setSelectedId(t.id);
+      setView("detail");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlId, templates, view, selectedId]);
 
   const [activeBoxId, setActiveBoxId] = useState(null);
   const [editingName, setEditingName] = useState(false);
@@ -660,8 +569,10 @@ function TemplateMaster() {
   // Collapsible section state. Each Sub Sheet Calculation gets its own key
   // ("sheet_<id>"), toggled the same way as "sheets"/"hardware"/"summary".
   const [openSections, setOpenSections] = useState({ sheets: false, hardware: false, summary: false });
-  // One-slot clipboard for the Copy/Paste buttons on each Sheet Calculation.
-  const [copiedSheet, setCopiedSheet] = useState(null);
+  // One-slot clipboard for the Copy/Paste buttons on each Sheet Calculation —
+  // shared with Projects and kept across page changes, so a sheet copied here
+  // can be pasted into another template or a project.
+  const [copiedSheet, setCopiedSheet] = useSheetClipboard();
   // Extra length added to each edge band product's calculated meterage before
   // rounding, to cover cutting wastage/offcuts — editable, defaults to 2m.
   const [edgeExtraMtr, setEdgeExtraMtr] = useState(0);
@@ -1105,6 +1016,9 @@ function TemplateMaster() {
     // folderId can be stale (e.g. the template was moved to another folder
     // after that) — which folder a template lives in is not something the
     // editor changes, so keep the live one instead of overwriting it.
+    // Pressing Save writes to the database right away rather than after the
+    // usual short typing delay — so a refresh straight after Save can't lose it.
+    requestImmediateSave();
     setTemplates((prev) => prev.map((t) => t.id === draft.id ? { ...draft, folderId: t.folderId } : t));
     setIsDirty(false);
     setSavedFlash(true);
@@ -1140,6 +1054,7 @@ function TemplateMaster() {
     setShowNewModal(false);
     setNewName("");
     setView("detail");
+    goTo(id);
   };
 
   const deleteTemplate = (id) => {
@@ -1297,7 +1212,8 @@ function TemplateMaster() {
       const v = sheet[f];
       fields[f] = v === undefined ? v : JSON.parse(JSON.stringify(v));
     });
-    setCopiedSheet({ fields, sourceLabel: subSheetId == null ? (activeBox.boxName || "1.") : (sheet.name || "Sub Sheet") });
+    const where = `Template "${draft?.templateName || "Untitled"}" › ${activeBox.boxName || "Box"}`;
+    setCopiedSheet({ fields, sourceLabel: subSheetId == null ? where : `${where} › ${sheet.name || "Sub Sheet"}` });
   };
 
   const pasteSheetData = (subSheetId) => {
@@ -1467,7 +1383,7 @@ function TemplateMaster() {
                   return (
                     <div
                       key={t.id}
-                      onClick={() => guardedNavigate(() => { setSelectedId(t.id); setView("detail"); })}
+                      onClick={() => guardedNavigate(() => { setSelectedId(t.id); setView("detail"); goTo(t.id); })}
                       style={{
                         border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden",
                         cursor: "pointer", background: "#fff",
@@ -1524,7 +1440,7 @@ function TemplateMaster() {
         <div style={{ display: "flex", flexDirection: "column", minHeight: 500 }}>
           {!draft ? (
             <div style={{ padding: 60, textAlign: "center", color: "#6b7280" }}>
-              <button onClick={() => setView("grid")} style={{ background: "#6b7280", marginBottom: 20 }}>← Back</button>
+              <button onClick={() => { setView("grid"); goTo(null); }} style={{ background: "#6b7280", marginBottom: 20 }}>← Back</button>
               <p>Template not found.</p>
             </div>
           ) : (
@@ -1534,7 +1450,7 @@ function TemplateMaster() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                   <button
-                    onClick={() => setView("grid")}
+                    onClick={() => { setView("grid"); goTo(null); }}
                     style={{ background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", padding: "6px 14px", fontSize: 13, marginTop: 2, whiteSpace: "nowrap" }}
                   >
                     ← All Templates
@@ -1543,7 +1459,7 @@ function TemplateMaster() {
                   title={draft.templateImage ? "Change photo" : "Add photo"}
                   style={{
                     width: 64, height: 64, borderRadius: 8, flexShrink: 0, cursor: "pointer",
-                    background: draft.templateImage ? `url(${draft.templateImage}) center/cover` : "#f9fafb",
+                    background: draft.templateImage ? `#fff url(${draft.templateImage}) center/contain no-repeat` : "#f9fafb",
                     border: draft.templateImage ? "1px solid #e5e7eb" : "1px dashed #d1d5db",
                     display: "flex", alignItems: "center", justifyContent: "center",
                     fontSize: 20, color: "#9ca3af", position: "relative", overflow: "hidden",
@@ -2991,10 +2907,10 @@ function TemplateMaster() {
 
       {/* ── Item Picker Modal ── */}
       {matPicker && (
-        <ItemPickerModal
+        <MaterialModelPicker
           label={matPicker.label}
           prices={prices}
-          onSelect={(name, id) => {
+          onSelect={({ materialName: name, id }) => {
             const f = matPicker.field;
             const subSheetId = matPicker.subSheetId ?? null;
             if (matPicker.customMatId != null) {
@@ -3022,11 +2938,11 @@ function TemplateMaster() {
       )}
 
       {hardwarePicker && (
-        <ItemPickerModal
+        <MaterialModelPicker
           label="Material Details"
           prices={prices}
           initialGroup={hardwarePicker.group}
-          onSelect={(name, id) => {
+          onSelect={({ materialName: name, id }) => {
             const boxId = hardwarePicker.boxId ?? activeBox?.id;
             if (hardwarePicker.hwId != null) {
               updateHardwareItemFields(boxId, hardwarePicker.hwId, { materialName: name, materialId: id });
