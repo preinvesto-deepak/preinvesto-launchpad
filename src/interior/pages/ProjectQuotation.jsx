@@ -24,7 +24,7 @@ function priceRowFor(material, model, projectObj, prices) {
   const sameName = prices.filter((p) => p.materialName === material);
   const cell = model ? projectObj?.materialModelRates?.[material]?.[model] : null;
   const linked = (cell?.priceId && sameName.find((p) => p.id === cell.priceId))
-    || (cell?.brand && sameName.find((p) => (p.brand || "") === cell.brand));
+    || (cell?.brand && sameName.find((p) => (p.brand || "").trim().toLowerCase() === cell.brand.trim().toLowerCase()));
   if (linked) return { row: linked, matchedCell: true, cell };
   return { row: sameName[0] || null, matchedCell: false, cell };
 }
@@ -313,6 +313,10 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
   // savings/Cut List is shown below the comparison, and which one Print
   // Preview/Download PDF act on.
   const [selectedModel, setSelectedModel] = useState("standard");
+  // Which of the Rooms-table columns appear in the Quotation (preview, print,
+  // PDF, share link). Unchecked columns are left out; amounts are unaffected.
+  const [quotCols, setQuotCols] = useState({});
+  const colOn = (k) => quotCols[k] !== false;
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [companyName, setCompanyName] = useState("Interior App");
@@ -395,6 +399,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     // Older saves may have "" (the removed "Default (Cost Rates)" option) —
     // fall back to Standard since the UI only offers the three tiers now.
     setSelectedModel(saved.selectedModel || "standard");
+    setQuotCols(saved.quotationColumns || {});
     // Company Name/Mobile/Email default to the account-wide Company Details
     // (set once on Your Profile) but each project can still override them —
     // an explicit per-project save always wins over the account default.
@@ -581,6 +586,13 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
         widthFt: null, heightFt: null,
         areaSqFt: 0, costTotal: 0, woodAmount: 0, edgeAmount: 0, hardwareAmount: 0, transportationAmount: 0, laborAmount: 0, totalAmount: 0, areaSqMm: 0,
       };
+      // Combined still lists what the row covers — each box's name, type of
+      // work, W and H, in the same order so they line up with one another.
+      const joinCol = (key) => boxRows.map((r) => (r[key] ?? "—")).join("\n");
+      g.boxName = joinCol("boxName");
+      g.typeOfWork = joinCol("typeOfWork");
+      g.widthFt = joinCol("widthFt");
+      g.heightFt = joinCol("heightFt");
       boxRows.forEach((r) => {
         g.boxCount += r.boxCount;
         g.areaSqFt += r.areaSqFt;
@@ -712,7 +724,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
         <h3>Rooms</h3>
         <table border="1" cellpadding="7" cellspacing="0" width="100%" style="margin-bottom:16px;font-size:13px">
           <thead style="background:#f9fafb">
-            <tr><th>#</th><th>Room</th><th>Box Name</th><th>Type of Work</th><th>W (ft)</th><th>H (ft)</th><th>Area (sq ft)</th><th>Cost/Sft</th><th>Amount (Incl. GST)</th></tr>
+            <tr><th>#</th>${colOn("room") ? "<th>Room</th>" : ""}${colOn("box") ? "<th>Box Name</th>" : ""}${colOn("type") ? "<th>Type of Work</th>" : ""}${colOn("w") ? "<th>W (ft)</th>" : ""}${colOn("h") ? "<th>H (ft)</th>" : ""}${colOn("area") ? "<th>Area (sq ft)</th>" : ""}${colOn("rate") ? "<th>Cost/Sft</th>" : ""}<th>Amount (Incl. GST)</th></tr>
           </thead>
           <tbody>
             ${withRoomRowSpans(v.items)
@@ -720,13 +732,13 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                 (item, i) => `
               <tr>
                 <td>${i + 1}</td>
-                ${item.roomSpan > 0 ? `<td rowspan="${item.roomSpan}">${item.roomName}</td>` : ""}
-                <td>${item.boxName}</td>
-                <td>${item.typeOfWork}</td>
-                <td>${item.widthFt ?? "—"}</td>
-                <td>${item.heightFt ?? "—"}</td>
-                <td>${item.areaSqFt}</td>
-                <td style="text-align:right">${item.areaSqFt > 0 ? `${fmtCurrency(item.sellingAmount / item.areaSqFt)}/sqft` : "—"}</td>
+                ${colOn("room") && item.roomSpan > 0 ? `<td rowspan="${item.roomSpan}">${item.roomName}</td>` : ""}
+                ${colOn("box") ? `<td style="white-space:pre-line">${item.boxName}</td>` : ""}
+                ${colOn("type") ? `<td style="white-space:pre-line">${item.typeOfWork}</td>` : ""}
+                ${colOn("w") ? `<td style="white-space:pre-line">${item.widthFt ?? "—"}</td>` : ""}
+                ${colOn("h") ? `<td style="white-space:pre-line">${item.heightFt ?? "—"}</td>` : ""}
+                ${colOn("area") ? `<td>${item.areaSqFt}</td>` : ""}
+                ${colOn("rate") ? `<td style="text-align:right">${item.areaSqFt > 0 ? `${fmtCurrency(item.sellingAmount / item.areaSqFt)}/sqft` : "—"}</td>` : ""}
                 <td style="text-align:right">${fmtCurrency(item.sellingAmount)}</td>
               </tr>`
               )
@@ -982,15 +994,17 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     autoTable(doc, {
       startY: y,
       margin: { left: margin, right: margin },
-      head: [["#", "Room", "Box Name", "Type of Work", "W (ft)", "H (ft)", "Area (sqft)", "Cost/Sft", "Amount (Incl. GST)"]],
+      head: [["#", ...[["room", "Room"], ["box", "Box Name"], ["type", "Type of Work"], ["w", "W (ft)"], ["h", "H (ft)"], ["area", "Area (sqft)"]].filter(([k]) => colOn(k)).map(([, l]) => l), ...(colOn("rate") ? ["Cost/Sft"] : []), "Amount (Incl. GST)"]],
       body: withRoomRowSpans(v.items).map((item, i) => {
         const row = [i + 1];
-        if (item.roomSpan > 0) row.push({ content: item.roomName, rowSpan: item.roomSpan });
-        row.push(
-          item.boxName, item.typeOfWork, item.widthFt ?? "-", item.heightFt ?? "-", item.areaSqFt,
-          item.areaSqFt > 0 ? `${fmtPdf(item.sellingAmount / item.areaSqFt)}/sqft` : "-",
-          fmtPdf(item.sellingAmount),
-        );
+        if (colOn("room") && item.roomSpan > 0) row.push({ content: item.roomName, rowSpan: item.roomSpan });
+        if (colOn("box")) row.push(item.boxName);
+        if (colOn("type")) row.push(item.typeOfWork);
+        if (colOn("w")) row.push(item.widthFt ?? "-");
+        if (colOn("h")) row.push(item.heightFt ?? "-");
+        if (colOn("area")) row.push(item.areaSqFt);
+        if (colOn("rate")) row.push(item.areaSqFt > 0 ? `${fmtPdf(item.sellingAmount / item.areaSqFt)}/sqft` : "-");
+        row.push(fmtPdf(item.sellingAmount));
         return row;
       }),
       styles: { fontSize: 8 },
@@ -1201,12 +1215,20 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 700 }}>
             <thead>
               <tr>
-                <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Room</th>
-                <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Box Name</th>
-                <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Type of Work</th>
-                <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>W (ft)</th>
-                <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>H (ft)</th>
-                <th rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Area (sq ft)</th>
+                {[["room", "Room", "left"], ["box", "Box Name", "left"], ["type", "Type of Work", "left"], ["w", "W (ft)", "center"], ["h", "H (ft)", "center"], ["area", "Area (sq ft)", "center"]].map(([k, label, align]) => (
+                  <th key={k} rowSpan={3} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: align, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>
+                    <div>{label}</div>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 6, cursor: "pointer", fontSize: 10, fontWeight: 600, textTransform: "none", color: "#cbd5e1" }} title={`Show "${label}" in the Quotation (preview, print, PDF, share link)`}>
+                      <input
+                        type="checkbox"
+                        checked={colOn(k)}
+                        onChange={(e) => { const next = { ...quotCols, [k]: e.target.checked }; setQuotCols(next); persistField("quotationColumns", next); }}
+                        style={{ width: 14, height: 14, cursor: "pointer" }}
+                      />
+                      Show
+                    </label>
+                  </th>
+                ))}
                 {QUOT_MODELS.map((m) => (
                   <th key={m} colSpan={2} style={{ background: QUOT_MODEL_COLORS[m], color: "#fff", padding: "6px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.3)" }}>{QUOT_MODEL_LABELS[m]}</th>
                 ))}
@@ -1245,7 +1267,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
               <tr>
                 {QUOT_MODELS.map((m) => (
                   <Fragment key={m}>
-                    <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.15)" }}>Sft Rate</th>
+                    <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.15)" }}><label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }} title="Show Sft Rate (Cost/Sft) in the Quotation (preview, print, PDF, share link)"><input type="checkbox" checked={colOn("rate")} onChange={(e) => { const next = { ...quotCols, rate: e.target.checked }; setQuotCols(next); persistField("quotationColumns", next); }} style={{ width: 13, height: 13, cursor: "pointer" }} />Sft Rate</label></th>
                     <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Amount</th>
                   </Fragment>
                 ))}
@@ -1257,10 +1279,10 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                   {item.roomSpan > 0 && (
                     <td rowSpan={item.roomSpan} style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", borderRight: "1px solid #e5e7eb", color: "#374151", verticalAlign: "top", background: "#fff", fontWeight: 600 }}>{item.roomName}</td>
                   )}
-                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", color: "#6b7280" }}>{item.boxName}</td>
-                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", color: "#6b7280" }}>{item.typeOfWork}</td>
-                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280" }}>{item.widthFt ?? "—"}</td>
-                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280" }}>{item.heightFt ?? "—"}</td>
+                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", color: "#6b7280", whiteSpace: "pre-line" }}>{item.boxName}</td>
+                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", color: "#6b7280", whiteSpace: "pre-line" }}>{item.typeOfWork}</td>
+                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280", whiteSpace: "pre-line" }}>{item.widthFt ?? "—"}</td>
+                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280", whiteSpace: "pre-line" }}>{item.heightFt ?? "—"}</td>
                   <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280" }}>{item.areaSqFt}</td>
                   {compareVariants.map((v) => (
                     <Fragment key={v.model}>
@@ -1362,13 +1384,13 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
               <thead>
                 <tr>
                   <th>#</th>
-                  <th>Room</th>
-                  <th>Box Name</th>
-                  <th>Type of Work</th>
-                  <th>W (ft)</th>
-                  <th>H (ft)</th>
-                  <th>Area (sq ft)</th>
-                  <th>Cost/Sft</th>
+                  {colOn("room") && <th>Room</th>}
+                  {colOn("box") && <th>Box Name</th>}
+                  {colOn("type") && <th>Type of Work</th>}
+                  {colOn("w") && <th>W (ft)</th>}
+                  {colOn("h") && <th>H (ft)</th>}
+                  {colOn("area") && <th>Area (sq ft)</th>}
+                  {colOn("rate") && <th>Cost/Sft</th>}
                   <th>Amount (Incl. GST)</th>
                 </tr>
               </thead>
@@ -1376,13 +1398,13 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                 {withRoomRowSpans(itemsWithSelling).map((item, i) => (
                   <tr key={item.id}>
                     <td>{i + 1}</td>
-                    {item.roomSpan > 0 && <td rowSpan={item.roomSpan}>{item.roomName}</td>}
-                    <td>{item.boxName}</td>
-                    <td>{item.typeOfWork}</td>
-                    <td>{item.widthFt ?? "—"}</td>
-                    <td>{item.heightFt ?? "—"}</td>
-                    <td>{item.areaSqFt}</td>
-                    <td>{item.areaSqFt > 0 ? `${formatCurrency(item.sellingAmount / item.areaSqFt)}/sqft` : "—"}</td>
+                    {colOn("room") && item.roomSpan > 0 && <td rowSpan={item.roomSpan}>{item.roomName}</td>}
+                    {colOn("box") && <td style={{ whiteSpace: "pre-line" }}>{item.boxName}</td>}
+                    {colOn("type") && <td style={{ whiteSpace: "pre-line" }}>{item.typeOfWork}</td>}
+                    {colOn("w") && <td style={{ whiteSpace: "pre-line" }}>{item.widthFt ?? "—"}</td>}
+                    {colOn("h") && <td style={{ whiteSpace: "pre-line" }}>{item.heightFt ?? "—"}</td>}
+                    {colOn("area") && <td>{item.areaSqFt}</td>}
+                    {colOn("rate") && <td>{item.areaSqFt > 0 ? `${formatCurrency(item.sellingAmount / item.areaSqFt)}/sqft` : "—"}</td>}
                     <td>{formatCurrency(item.sellingAmount)}</td>
                   </tr>
                 ))}

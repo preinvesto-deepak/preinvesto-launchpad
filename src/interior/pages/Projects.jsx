@@ -534,6 +534,7 @@ function ProjItemPickerModal({ materialName, prices, onSelect, onClose, initialG
   const defaultGroup = initialGroup || LABEL_TO_GROUP[materialName] || "All";
   const [filterGroup, setFilterGroup] = useState(defaultGroup);
   const [search, setSearch] = useState("");
+  const [showAll, setShowAll] = useState(false); // false = only the material that was clicked
 
   const allGroups = ["All", ...Array.from(new Set([
     ...GROUP_OPTIONS,
@@ -544,13 +545,16 @@ function ProjItemPickerModal({ materialName, prices, onSelect, onClose, initialG
   const results = (prices || []).filter((p) => {
     const grp = p.group || "";
     const matchTab = filterGroup === "All" || grp === filterGroup;
-    const matchSearch = !q ||
-      (p.materialName || "").toLowerCase().includes(q) ||
-      (p.brand || "").toLowerCase().includes(q) ||
-      (p.group || "").toLowerCase().includes(q) ||
-      (p.materialSpec || "").toLowerCase().includes(q);
+    const matchSearch = q
+      ? (p.materialName || "").toLowerCase().includes(q) ||
+        (p.brand || "").toLowerCase().includes(q) ||
+        (p.group || "").toLowerCase().includes(q) ||
+        (p.materialSpec || "").toLowerCase().includes(q)
+      : showAll || !materialName || p.materialName === materialName;
     return matchTab && matchSearch;
-  });
+  })
+    // Cheapest first; items with no rate yet go last.
+    .sort((x, y) => (Number(x.rate) > 0 ? Number(x.rate) : Infinity) - (Number(y.rate) > 0 ? Number(y.rate) : Infinity) || 0);
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 3000, padding: 16 }}>
@@ -586,6 +590,14 @@ function ProjItemPickerModal({ materialName, prices, onSelect, onClose, initialG
             value={search} onChange={(e) => setSearch(e.target.value)}
             style={{ width: "100%", padding: "9px 12px", fontSize: 14, borderRadius: 8, border: "1px solid #d1d5db", boxSizing: "border-box" }} />
         </div>
+        {!search && materialName && (
+          <div style={{ padding: "6px 16px", fontSize: 12, color: "#6b7280", borderBottom: "1px solid #f3f4f6", flexShrink: 0 }}>
+            {showAll ? "Showing every material in this group." : <>Showing only <strong>{materialName}</strong>.</>}{" "}
+            <button type="button" onClick={() => setShowAll(!showAll)} style={{ background: "none", border: "none", color: "#2563eb", cursor: "pointer", fontSize: 12, padding: 0 }}>
+              {showAll ? `Show only ${materialName}` : "Show all materials"}
+            </button>
+          </div>
+        )}
         <div style={{ overflowY: "auto", flex: 1 }}>
           {results.length === 0 ? (
             <p style={{ color: "#9ca3af", textAlign: "center", padding: 32 }}>No matching items found.</p>
@@ -603,7 +615,13 @@ function ProjItemPickerModal({ materialName, prices, onSelect, onClose, initialG
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{p.materialName}</div>
-                  <div style={{ fontSize: 11, color: "#9ca3af" }}>{[p.group, p.brand, p.materialSpec, p.unit].filter(Boolean).join(" · ")}</div>
+                  <div style={{ fontSize: 11, color: "#9ca3af" }}>{[p.group, p.materialSpec, p.unit].filter(Boolean).join(" · ")}</div>
+                  {(p.brand || Number(p.warranty) > 0) && (
+                    <div style={{ fontSize: 12, marginTop: 1, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      {p.brand && <span style={{ fontWeight: 700, color: "#1e3a5f" }}>{p.brand}</span>}
+                      {Number(p.warranty) > 0 && <span style={{ color: "#b45309", background: "#fef3c7", borderRadius: 10, padding: "0 7px", fontSize: 11 }}>Warranty: {p.warranty} yr{Number(p.warranty) === 1 ? "" : "s"}</span>}
+                    </div>
+                  )}
                 </div>
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
                   {p.rate > 0 ? (
@@ -809,7 +827,7 @@ function ProjectMaterialModels({ project, prices, globalRates, setProjects }) {
                 // that row's CURRENT rate/GST — so the tab never disagrees with
                 // the Quotation. Only a cell matching no row keeps its own numbers.
                 const live = (rawCell.priceId && prices.find((p) => p.id === rawCell.priceId))
-                  || (rawCell.brand && prices.find((p) => p.materialName === item.materialName && (p.brand || "") === rawCell.brand));
+                  || (rawCell.brand && prices.find((p) => p.materialName === item.materialName && (p.brand || "").trim().toLowerCase() === rawCell.brand.trim().toLowerCase()));
                 if (live) {
                   const liveRate = live.rate > 0 ? String(live.rate) : "";
                   const liveGst = live.gst !== undefined && live.gst !== null ? String(live.gst) : cell.gst;
@@ -1015,7 +1033,7 @@ function Projects() {
   const [gstPercent, setGstPercentLocal] = useState(18);
 
   // Project-level tab: "rooms" | "material-models"
-  const [projectTab, setProjectTab] = useState("rooms");
+  const [projectTab, setProjectTab] = useState("req");
   // Summary tab: hides materials whose Economy/Standard/Premium rate all
   // resolve to the exact same value — usually means no tier differentiation
   // has been set for that material, so it's just noise once comparing models.
@@ -1026,7 +1044,7 @@ function Projects() {
 
   // Reset tab when switching projects
   useEffect(() => {
-    setProjectTab("rooms");
+    setProjectTab("req");
   }, [selectedProjectId]);
 
   // Auto-clone global material model rates into project on first open
@@ -1046,6 +1064,7 @@ function Projects() {
 
   // Template picker modal
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [reqTemplateRoomId, setReqTemplateRoomId] = useState(null); // Req tab: room a picked template is applied to
   const [pendingTemplate, setPendingTemplate] = useState(null); // template awaiting confirm-replace
 
   // ── Derived data ────────────────────────────────────────────────────────────
@@ -1217,9 +1236,7 @@ function Projects() {
   const boxes = activeRoom?.boxes || [];
   const activeBox = boxes.find((b) => b.id === activeBoxId) ?? boxes[0] ?? null;
 
-  const addBox = () => {
-    const id = boxes.length ? Math.max(...boxes.map((b) => b.id)) + 1 : 1;
-    const newBox = {
+  const makeBlankBox = (id) => ({
       id, name: `Box ${id}`,
       includeInQuotation: true,
       boxType: "", frameType: "Framed", doorType: "", includeInMaterialCalc: true,
@@ -1238,12 +1255,15 @@ function Projects() {
       doorsH: 2, doorsV: 1,
       shelves: 2, partitions: 0, backParts: 1, frontFrame: 0,
       parts: [], subSheets: [],
-    };
-    updateRoomField("boxes", [...boxes, newBox]);
+  });
+
+  const addBox = () => {
+    const id = boxes.length ? Math.max(...boxes.map((b) => b.id)) + 1 : 1;
+    updateRoomField("boxes", [...boxes, makeBlankBox(id)]);
     setActiveBoxId(id);
   };
 
-  const applyTemplate = (template) => {
+  const applyTemplate = (template, roomId = activeRoom?.id) => {
     const tBoxes = template.boxes || [];
     if (!tBoxes.length) return;
     const newBoxes = tBoxes.map((tb, i) => ({
@@ -1285,8 +1305,8 @@ function Projects() {
       materialLabels: { ...(tb.materialLabels || {}) },
       fieldLabels: { ...(tb.fieldLabels || {}) },
     }));
-    updateRoomField("boxes", newBoxes);
-    setActiveBoxId(newBoxes[0].id);
+    setSubProjects((prev) => prev.map((s) => s.id === roomId ? { ...s, boxes: newBoxes } : s));
+    if (roomId === activeRoom?.id) setActiveBoxId(newBoxes[0].id);
     setPendingTemplate(null);
   };
 
@@ -1937,7 +1957,7 @@ function Projects() {
 
             {/* ── Project-level Tab Bar ── */}
             <div className="no-print" style={{ borderBottom: "2px solid #e5e7eb", padding: "0 24px", display: "flex", alignItems: "flex-end", gap: 0, background: "#fff" }}>
-              {[["design", "📐 Design"], ["rooms", "🏠 Rooms & Boxes"], ["material-models", "📋 Material Models"], ["summary", "📊 Summary"], ["quotation", "🧾 Quotation"]].map(([tab, label]) => {
+              {[["req", "📝 Req"], ["design", "📐 Design"], ["rooms", "🏠 Rooms & Boxes"], ["material-models", "📋 Material Models"], ["summary", "📊 Summary"], ["quotation", "🧾 Quotation"]].map(([tab, label]) => {
                 const active = projectTab === tab;
                 return (
                   <button
@@ -1961,6 +1981,151 @@ function Projects() {
                 );
               })}
             </div>
+
+            {/* ── Req Tab — every room's boxes in one table, editing the same
+                Quotation Details fields as Rooms & Boxes (shared state, so each
+                view reflects the other). ── */}
+            {projectTab === "req" && (() => {
+              const setBoxField = (roomId, boxId, field, value) =>
+                setSubProjects((prev) => prev.map((s) => s.id !== roomId ? s : {
+                  ...s,
+                  boxes: (s.boxes || []).map((b) => b.id === boxId ? { ...b, [field]: value } : b),
+                }));
+              const th = { padding: "8px 10px", textAlign: "left", fontSize: 12, fontWeight: 700, color: "#4c1d95", background: "#f5f3ff", borderBottom: "2px solid #ddd6fe", whiteSpace: "nowrap" };
+              const td = { padding: "6px 10px", borderBottom: "1px solid #ede9fe", fontSize: 13 };
+              const setRoomName = (roomId, name) =>
+                setSubProjects((prev) => prev.map((s) => s.id === roomId ? { ...s, subProject: name } : s));
+              const nameIn = { width: 140, fontSize: 13, padding: "3px 6px" };
+              const dimIn = { width: 76, fontSize: 12, padding: "3px 6px" };
+              const addBoxToRoom = (roomId) =>
+                setSubProjects((prev) => prev.map((s) => {
+                  if (s.id !== roomId) return s;
+                  const bs = s.boxes || [];
+                  return { ...s, boxes: [...bs, makeBlankBox(bs.length ? Math.max(...bs.map((b) => b.id)) + 1 : 1)] };
+                }));
+              // A room with no boxes yet still gets one (box-less) row.
+              const rowsFlat = rooms.flatMap((room) => (room.boxes || []).length ? room.boxes.map((box) => ({ room, box })) : [{ room, box: null }]);
+              let totalSft = 0;
+              rowsFlat.forEach(({ box }) => { if (box && box.includeInQuotation !== false) totalSft += quotationAreaSft(box); });
+              return (
+                <div style={{ padding: "20px 24px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ fontSize: 13, color: "#6b7280" }}>
+                      Quotation Details of every box. Changes here and in Rooms &amp; Boxes are the same data.
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={openAddRoom} style={{ fontSize: 12, padding: "4px 12px" }}>+ Add Room</button>
+                      <button
+                        onClick={() => setDimUnit(dimUnit === "mm" ? "ft" : "mm")}
+                        style={{ fontSize: 11, padding: "3px 10px", background: "#ede9fe", color: "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 6 }}
+                      >Show {dimUnit === "mm" ? "feet" : "mm"}</button>
+                    </div>
+                  </div>
+                  {rowsFlat.length === 0 ? (
+                    <p style={{ color: "#9ca3af" }}>No rooms yet — use + Add Room.</p>
+                  ) : (
+                    <div style={{ overflowX: "auto", border: "1px solid #ede9fe", borderRadius: 8 }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+                        <thead>
+                          <tr>
+                            <th style={th}>Room</th>
+                            <th style={th}>Box</th>
+                            <th style={th}>Box Type</th>
+                            <th style={th}>Door Type</th>
+                            <th style={{ ...th, textAlign: "center" }}>Include in Quotation</th>
+                            <th style={th}>H ({dimUnit})</th>
+                            <th style={th}>W ({dimUnit})</th>
+                            <th style={th}>D ({dimUnit})</th>
+                            <th style={{ ...th, textAlign: "right" }}>Area Sft</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rowsFlat.map(({ room, box }, i) => {
+                            const firstOfRoom = i === 0 || rowsFlat[i - 1].room.id !== room.id;
+                            const lastOfRoom = i === rowsFlat.length - 1 || rowsFlat[i + 1].room.id !== room.id;
+                            const sep = firstOfRoom && i ? "2px solid #ddd6fe" : undefined;
+                            if (!box) {
+                              return (
+                                <tr key={`${room.id}-empty`}>
+                                  <td style={{ ...td, fontWeight: 700, color: "#1e3a5f", borderTop: sep }}><input type="text" value={room.subProject} onChange={(e) => setRoomName(room.id, e.target.value)} placeholder="Room name" style={{ ...nameIn, fontWeight: 700 }} /><button onClick={() => { setReqTemplateRoomId(room.id); setTemplatePickerOpen(true); }} style={{ display: "block", background: "none", border: "none", color: "#1d4ed8", cursor: "pointer", fontSize: 11, padding: 0, fontWeight: 400 }}>📐 Apply Template</button></td>
+                                  <td colSpan={8} style={{ ...td, borderTop: sep, color: "#9ca3af" }}>
+                                    No boxes yet
+                                    <button onClick={() => addBoxToRoom(room.id)} style={{ marginLeft: 12, background: "none", border: "none", color: "#7c3aed", cursor: "pointer", fontSize: 12 }}>+ Add Box</button>
+                                  </td>
+                                </tr>
+                              );
+                            }
+                            const excluded = box.includeInQuotation === false;
+                            return (
+                              <tr key={`${room.id}-${box.id}`} style={{ opacity: excluded ? 0.55 : 1 }}>
+                                <td style={{ ...td, fontWeight: 700, color: "#1e3a5f", borderTop: sep }}>{firstOfRoom && (<><input type="text" value={room.subProject} onChange={(e) => setRoomName(room.id, e.target.value)} placeholder="Room name" style={{ ...nameIn, fontWeight: 700 }} /><button onClick={() => { setReqTemplateRoomId(room.id); setTemplatePickerOpen(true); }} style={{ display: "block", background: "none", border: "none", color: "#1d4ed8", cursor: "pointer", fontSize: 11, padding: 0, fontWeight: 400 }}>📐 Apply Template</button></>)}</td>
+                                <td style={{ ...td, borderTop: sep }}>
+                                  <input type="text" value={box.name} onChange={(e) => setBoxField(room.id, box.id, "name", e.target.value)} placeholder="Box name" style={nameIn} />
+                                  {lastOfRoom && (
+                                    <button onClick={() => addBoxToRoom(room.id)} style={{ marginLeft: 10, background: "none", border: "none", color: "#7c3aed", cursor: "pointer", fontSize: 11, padding: 0 }}>+ Add Box</button>
+                                  )}
+                                </td>
+                                <td style={{ ...td, borderTop: sep }}>
+                                  <select value={box.quotationBoxType || ""} onChange={(e) => setBoxField(room.id, box.id, "quotationBoxType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 130 }}>
+                                    <option value="">— Select —</option>
+                                    {(prices || []).filter((p) => p.group === "Carpenter").map((p) => (
+                                      <option key={p.id} value={p.materialName}>{p.materialName}</option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td style={{ ...td, borderTop: sep }}>
+                                  <select value={box.quotationDoorType || ""} onChange={(e) => setBoxField(room.id, box.id, "quotationDoorType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 130 }}>
+                                    <option value="">— Select —</option>
+                                    <option value="Sliding Door">Sliding Door</option>
+                                    <option value="Swing Door">Swing Door</option>
+                                  </select>
+                                </td>
+                                <td style={{ ...td, textAlign: "center", borderTop: sep }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={!excluded}
+                                    onChange={(e) => setBoxField(room.id, box.id, "includeInQuotation", e.target.checked)}
+                                    style={{ width: 14, height: 14, cursor: "pointer" }}
+                                  />
+                                </td>
+                                {["quotationHeightMm", "quotationWidthMm", "quotationDepthMm"].map((key) => {
+                                  const mmVal = box[key] ?? "";
+                                  const ftVal = mmVal !== "" ? roundTo2(mmToFeet(Number(mmVal))) : "";
+                                  return (
+                                    <td key={key} style={{ ...td, borderTop: sep }}>
+                                      <input
+                                        type="number"
+                                        value={dimUnit === "mm" ? mmVal : ftVal}
+                                        placeholder={dimUnit}
+                                        onChange={(e) => {
+                                          if (dimUnit === "mm") setBoxField(room.id, box.id, key, e.target.value);
+                                          else {
+                                            const ft = Number(e.target.value);
+                                            if (!isNaN(ft)) setBoxField(room.id, box.id, key, e.target.value === "" ? "" : String(Math.round(feetToMm(ft))));
+                                          }
+                                        }}
+                                        style={dimIn}
+                                      />
+                                    </td>
+                                  );
+                                })}
+                                <td style={{ ...td, textAlign: "right", fontWeight: 600, borderTop: sep }}>{quotationAreaSft(box) || "—"}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr>
+                            <td colSpan={8} style={{ ...td, textAlign: "right", fontWeight: 700, background: "#faf5ff" }}>Total (included boxes)</td>
+                            <td style={{ ...td, textAlign: "right", fontWeight: 700, background: "#faf5ff" }}>{totalSft} sft</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* ── Project Material Models Tab ── */}
             {projectTab === "material-models" && (
@@ -3635,13 +3800,21 @@ function Projects() {
           folders={templateFolders}
           onSelect={(t) => {
             setTemplatePickerOpen(false);
+            if (reqTemplateRoomId != null) {
+              const target = subProjects.find((s) => s.id === reqTemplateRoomId);
+              setReqTemplateRoomId(null);
+              const n = (target?.boxes || []).length;
+              if (n > 0 && !window.confirm(`Apply template "${t.templateName}" to ${target.subProject}? This will replace its ${n} existing box${n !== 1 ? "es" : ""}.`)) return;
+              applyTemplate(t, reqTemplateRoomId);
+              return;
+            }
             if (boxes.length > 0) {
               setPendingTemplate(t);
             } else {
               applyTemplate(t);
             }
           }}
-          onClose={() => setTemplatePickerOpen(false)}
+          onClose={() => { setTemplatePickerOpen(false); setReqTemplateRoomId(null); }}
         />
       )}
 

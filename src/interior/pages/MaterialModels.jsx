@@ -32,25 +32,29 @@ function calcWithoutGst(rateWithGst, gst) {
 function ItemPickerModal({ materialName, prices, onSelect, onClose, initialGroup }) {
   const [search, setSearch] = useState("");
   const [filterGroup, setFilterGroup] = useState(initialGroup || "All");
+  const [showAll, setShowAll] = useState(false); // false = only the material that was clicked
 
   const allGroups = ["All", ...Array.from(new Set([
     ...GROUP_OPTIONS,
     ...(prices || []).map((p) => p.group || "").filter(Boolean),
   ]))];
 
-  // Show items from Items Pricing — prioritise same-name matches, then all
+  // Opens on just this material (its brands); search or "Show all materials"
+  // widens it to everything in Items Pricing.
+  const q = search.toLowerCase();
   const results = prices.filter((p) => {
     const grp = p.group || "";
     const matchTab = filterGroup === "All" || grp === filterGroup;
-    const q = search.toLowerCase();
     const matchSearch = q
       ? (p.materialName || "").toLowerCase().includes(q) ||
         (p.brand || "").toLowerCase().includes(q) ||
-        (p.group || "").toLowerCase().includes(q) ||
+        grp.toLowerCase().includes(q) ||
         (p.materialSpec || "").toLowerCase().includes(q)
-      : (p.materialName || "").toLowerCase().includes(materialName.toLowerCase());
+      : showAll || !materialName || p.materialName === materialName;
     return matchTab && matchSearch;
-  });
+  })
+    // Cheapest first; items with no rate yet go last.
+    .sort((x, y) => (Number(x.rate) > 0 ? Number(x.rate) : Infinity) - (Number(y.rate) > 0 ? Number(y.rate) : Infinity) || 0);
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000, padding: 16 }}>
@@ -93,6 +97,15 @@ function ItemPickerModal({ materialName, prices, onSelect, onClose, initialGroup
           />
         </div>
 
+        {!search && materialName && (
+          <div style={{ padding: "6px 16px", fontSize: 12, color: "#6b7280", borderBottom: "1px solid #f3f4f6", flexShrink: 0 }}>
+            {showAll ? "Showing every material in this group." : <>Showing only <strong>{materialName}</strong>.</>}{" "}
+            <button type="button" onClick={() => setShowAll(!showAll)} style={{ background: "none", border: "none", color: "#2563eb", cursor: "pointer", fontSize: 12, padding: 0 }}>
+              {showAll ? `Show only ${materialName}` : "Show all materials"}
+            </button>
+          </div>
+        )}
+
         {/* Results */}
         <div style={{ overflowY: "auto", flex: 1 }}>
           {results.length === 0 ? (
@@ -115,8 +128,14 @@ function ItemPickerModal({ materialName, prices, onSelect, onClose, initialGroup
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{p.materialName}</div>
                   <div style={{ fontSize: 11, color: "#9ca3af" }}>
-                    {[p.group, p.brand, p.materialSpec, p.unit].filter(Boolean).join(" · ")}
+                    {[p.group, p.materialSpec, p.unit].filter(Boolean).join(" · ")}
                   </div>
+                  {(p.brand || Number(p.warranty) > 0) && (
+                    <div style={{ fontSize: 12, marginTop: 1, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      {p.brand && <span style={{ fontWeight: 700, color: "#1e3a5f" }}>{p.brand}</span>}
+                      {Number(p.warranty) > 0 && <span style={{ color: "#b45309", background: "#fef3c7", borderRadius: 10, padding: "0 7px", fontSize: 11 }}>Warranty: {p.warranty} yr{Number(p.warranty) === 1 ? "" : "s"}</span>}
+                    </div>
+                  )}
                 </div>
                 {/* Rate */}
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -184,7 +203,7 @@ function MaterialModels() {
   // a cell with no matching row keeps its own typed/saved numbers.
   const resolveCell = (cell, model, materialName) => {
     const live = (cell.priceId && prices.find((p) => p.id === cell.priceId))
-      || (cell.brand && prices.find((p) => p.materialName === materialName && (p.brand || "") === cell.brand));
+      || (cell.brand && prices.find((p) => p.materialName === materialName && (p.brand || "").trim().toLowerCase() === cell.brand.trim().toLowerCase()));
     if (!live) return cell;
     const rate = live.rate > 0 ? String(live.rate) : "";
     const gst = live.gst !== undefined && live.gst !== null ? String(live.gst) : cell.gst;
@@ -425,9 +444,6 @@ function MaterialModels() {
                   return (
                     <div key={model} style={{ borderLeft: "2px solid #e5e7eb", paddingLeft: 10, paddingRight: 8, display: "flex", flexDirection: "column", gap: 4 }}>
                       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                        {m.priceId && (
-                          <span title="Linked to Items Pricing — updates automatically when that item's price changes" style={{ fontSize: 12, flexShrink: 0 }}>🔗</span>
-                        )}
                         <input
                           type="text" placeholder="Brand" value={m.brand}
                           onChange={(e) => setField(item.materialName, model, "brand", e.target.value)}
