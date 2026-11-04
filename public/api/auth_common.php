@@ -132,4 +132,8 @@ function require_user(): array {
 function purge_expired(): void {
     db()->query('DELETE FROM user_sessions  WHERE expires_at < NOW()');
     db()->query('DELETE FROM password_resets WHERE expires_at < NOW()');
+    // Employee sessions (table is created lazily by interior_access.php).
+    if (db()->query("SHOW TABLES LIKE 'interior_employee_sessions'")->num_rows > 0) {
+        db()->query('DELETE FROM interior_employee_sessions WHERE expires_at < NOW()');
+    }
 }

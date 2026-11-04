@@ -71,4 +71,4 @@ export const GROUP_OPTIONS = [
   "Glue", "Addons", "Tape", "Hinges & Sliders", "Transportation", "Carpenter",
 ];
 
-export const UNIT_OPTIONS = ["Sheet", "Mtr", "Nos", "Set", "KG", "Rs", "Sq.ft", "Rft"];
+export const UNIT_OPTIONS = ["Sheet", "Mtr", "Nos", "Set", "KG", "Rs", "Sq.ft", "Rft", "Point"];

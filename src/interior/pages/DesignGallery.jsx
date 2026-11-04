@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useAppData } from "../context/AppDataContext";
 import { uploadGalleryImage } from "../utils/api";
 import ImageCropModal from "../components/ImageCropModal";
+import ServiceFilter from "../components/ServiceFilter";
+import { ALL_SERVICES, WARDROBE_SERVICE, SERVICE_NAMES, matchesService, serviceTagOf } from "../utils/services";
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`);
 
@@ -99,6 +101,9 @@ function FolderCard({ node, onOpen, onDelete }) {
       <div style={{ marginTop: 8, fontSize: 13, fontWeight: 600, color: "#374151", textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {node.name}
       </div>
+      {node.serviceType && (
+        <div style={{ textAlign: "center", fontSize: 10, color: "#7c3aed", fontWeight: 600 }}>{node.serviceType}</div>
+      )}
     </div>
   );
 }
@@ -116,6 +121,7 @@ function DesignGallery() {
   const [uploadError, setUploadError] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [svcFilter, setSvcFilter] = useState("All");
   // { parentId, draft } | null — an in-app modal instead of window.prompt(),
   // which several browsers/embedded webviews silently block or no-op,
   // making "+ New Group" appear to do nothing.
@@ -139,7 +145,10 @@ function DesignGallery() {
   };
   const path = resolvePath();
   const currentNode = path.length ? path[path.length - 1] : null;
-  const currentChildren = currentNode ? currentNode.children : designGallery;
+  // The service filter narrows the top-level groups only; everything inside a
+  // group belongs to that group's service.
+  const currentChildren = currentNode ? currentNode.children : designGallery.filter((g) => matchesService(g, svcFilter));
+  const svcCounts = Object.fromEntries(ALL_SERVICES.map((s) => [s, designGallery.filter((g) => serviceTagOf(g) === s).length]));
 
   const openFolder = (id) => setPathIds((prev) => [...prev, id]);
   const goToDepth = (depth) => setPathIds((prev) => prev.slice(0, depth));
@@ -151,6 +160,7 @@ function DesignGallery() {
     if (!name) return;
     const { parentId } = addGroupModal;
     const newNode = { id: uid(), name, images: [], children: [] };
+    if (parentId == null && svcFilter !== "All" && svcFilter !== WARDROBE_SERVICE) newNode.serviceType = svcFilter;
     setDesignGallery((prev) => (parentId == null ? [...prev, newNode] : mapTree(prev, parentId, (n) => ({ ...n, children: [...n.children, newNode] }))));
     setAddGroupModal(null);
   };
@@ -247,6 +257,8 @@ function DesignGallery() {
 
   return (
     <div style={{ padding: "16px 24px" }}>
+      {!currentNode && <ServiceFilter value={svcFilter} onChange={setSvcFilter} counts={svcCounts} style={{ marginBottom: 14 }} />}
+
       {/* ── Breadcrumb ── */}
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 4, marginBottom: 16, fontSize: 14 }}>
         <span
@@ -275,6 +287,17 @@ function DesignGallery() {
             onFocus={(e) => (e.target.style.borderColor = "#ddd6fe")}
             onBlur={(e) => (e.target.style.borderColor = "transparent")}
           />
+          {path.length === 1 && (
+            <select
+              value={serviceTagOf(currentNode)}
+              onChange={(e) => setDesignGallery((prev) => mapTree(prev, currentNode.id, (n) => ({ ...n, serviceType: e.target.value === WARDROBE_SERVICE ? "" : e.target.value })))}
+              title="Service this group belongs to"
+              style={{ fontSize: 12, padding: "5px 8px" }}
+            >
+              <option value={WARDROBE_SERVICE}>{WARDROBE_SERVICE}</option>
+              {SERVICE_NAMES.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          )}
           <button onClick={() => addGroup(currentNode.id)} style={{ background: "#ede9fe", color: "#7c3aed", border: "1px solid #ddd6fe", padding: "6px 14px", fontSize: 12, borderRadius: 6, fontWeight: 600 }}>+ Add Sub-group</button>
           <button onClick={() => requestDelete(currentNode.id)} style={{ background: "#fee2e2", color: "#dc2626", border: "1px solid #fecaca", padding: "6px 14px", fontSize: 12, borderRadius: 6, fontWeight: 600 }}>🗑 Delete</button>
         </div>

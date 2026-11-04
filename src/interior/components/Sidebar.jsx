@@ -3,6 +3,8 @@ import { useState } from "react";
 import { FolderKanban, Users } from "lucide-react";
 import { useAppData } from "../context/AppDataContext";
 import { useUnsavedChanges } from "../context/UnsavedChangesContext";
+import { useAuth } from "@/context/AuthContext";
+import { can, isOwner, isScoped } from "../utils/access";
 
 function GroupLabel({ label }) {
   return <div className="sidebar-group-label">{label}</div>;
@@ -14,6 +16,13 @@ function Sidebar() {
   const location = useLocation();
   const { guardedNavigate } = useUnsavedChanges();
   const [projectsOpen, setProjectsOpen] = useState(true);
+
+  // An employee only sees the screens their group can view.
+  const { user } = useAuth();
+  const access = user?.access;
+  const owner = isOwner(access);
+  const show = (screen) => can(access, screen, "view");
+  const canAddProject = can(access, "projects", "edit") && !isScoped(access);
 
   const onProjectsPage = location.pathname === "/interior/projects";
   const params = new URLSearchParams(location.search);
@@ -31,9 +40,10 @@ function Sidebar() {
   // Left icon rail: "Project" holds everything the app had before (Dashboard,
   // Leads, Projects, Configure, Output, Account); "Teams" is the people side.
   const onTeams = location.pathname.startsWith("/interior/teams");
+  const teamTab = params.get("tab") === "groups" ? "groups" : "team";
   const railItems = [
     { key: "project", label: "Project", icon: FolderKanban, to: "/interior", active: !onTeams },
-    { key: "teams", label: "Teams", icon: Users, to: "/interior/teams", active: onTeams },
+    ...(owner ? [{ key: "teams", label: "Teams", icon: Users, to: "/interior/teams", active: onTeams }] : []),
   ];
 
   return (
@@ -71,7 +81,12 @@ function Sidebar() {
         <nav>
           <ul>
             <GroupLabel label="Teams" />
-            <li><NavLink to="/interior/teams" onClick={(e) => goTo(e, "/interior/teams")}>Team Members</NavLink></li>
+            {owner && (
+              <>
+                <li><NavLink to="/interior/teams" className={() => (teamTab === "team" ? "active" : "")} onClick={(e) => goTo(e, "/interior/teams")}>Team</NavLink></li>
+                <li><NavLink to="/interior/teams?tab=groups" className={() => (teamTab === "groups" ? "active" : "")} onClick={(e) => goTo(e, "/interior/teams?tab=groups")}>Groups &amp; Access</NavLink></li>
+              </>
+            )}
           </ul>
         </nav>
       ) : (
@@ -81,10 +96,10 @@ function Sidebar() {
 
           <GroupLabel label="Setup" />
 
-          <li><NavLink to="/interior/leads" onClick={(e) => goTo(e, "/interior/leads")}>Leads</NavLink></li>
+          {show("leads") && <li><NavLink to="/interior/leads" onClick={(e) => goTo(e, "/interior/leads")}>Leads</NavLink></li>}
 
           {/* Projects collapsible */}
-          <li>
+          {show("projects") && <li>
             <div
               style={{
                 display: "flex",
@@ -149,7 +164,7 @@ function Sidebar() {
                   );
                 })}
 
-                <li>
+                {canAddProject && <li>
                   <div
                     onClick={() => guardedNavigate(() => navigate("/interior/projects?new=1"))}
                     style={{
@@ -166,23 +181,23 @@ function Sidebar() {
                   >
                     + New Project
                   </div>
-                </li>
+                </li>}
               </ul>
             )}
-          </li>
+          </li>}
 
-          <GroupLabel label="Configure" />
-          <li><NavLink to="/interior/items-pricing" onClick={(e) => goTo(e, "/interior/items-pricing")}>Items Pricing</NavLink></li>
-          <li><NavLink to="/interior/material-models" onClick={(e) => goTo(e, "/interior/material-models")}>Material Models</NavLink></li>
-          <li><NavLink to="/interior/template-master" onClick={(e) => goTo(e, "/interior/template-master")}>Templates</NavLink></li>
-          <li><NavLink to="/interior/design-gallery" onClick={(e) => goTo(e, "/interior/design-gallery")}>Design Gallery</NavLink></li>
+          {(show("itemsPricing") || show("materialModels") || show("templates") || show("designGallery")) && <GroupLabel label="Configure" />}
+          {show("itemsPricing") && <li><NavLink to="/interior/items-pricing" onClick={(e) => goTo(e, "/interior/items-pricing")}>Items Pricing</NavLink></li>}
+          {show("materialModels") && <li><NavLink to="/interior/material-models" onClick={(e) => goTo(e, "/interior/material-models")}>Material Models</NavLink></li>}
+          {show("templates") && <li><NavLink to="/interior/template-master" onClick={(e) => goTo(e, "/interior/template-master")}>Templates</NavLink></li>}
+          {show("designGallery") && <li><NavLink to="/interior/design-gallery" onClick={(e) => goTo(e, "/interior/design-gallery")}>Design Gallery</NavLink></li>}
 
-          <GroupLabel label="Output" />
-          <li><NavLink to="/interior/project-boq" onClick={(e) => goTo(e, "/interior/project-boq")}>Project BOQ</NavLink></li>
-          <li><NavLink to="/interior/project-quotation" onClick={(e) => goTo(e, "/interior/project-quotation")}>Project Quotation</NavLink></li>
+          {show("projects") && <GroupLabel label="Output" />}
+          {show("projects") && <li><NavLink to="/interior/project-boq" onClick={(e) => goTo(e, "/interior/project-boq")}>Project BOQ</NavLink></li>}
+          {show("projects") && <li><NavLink to="/interior/project-quotation" onClick={(e) => goTo(e, "/interior/project-quotation")}>Project Quotation</NavLink></li>}
 
-          <GroupLabel label="Account" />
-          <li><NavLink to="/interior/profile" onClick={(e) => goTo(e, "/interior/profile")}>Your Profile</NavLink></li>
+          {owner && <GroupLabel label="Account" />}
+          {owner && <li><NavLink to="/interior/profile" onClick={(e) => goTo(e, "/interior/profile")}>Your Profile</NavLink></li>}
         </ul>
       </nav>
       )}

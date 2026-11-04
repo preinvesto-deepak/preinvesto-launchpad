@@ -1,10 +1,13 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "@/context/AuthContext";
 import { projectList } from "../data/projectData";
 import { subProjectList } from "../data/subProjectData";
 import { dimensionEntries } from "../data/dimensionData";
 import { priceList } from "../data/priceData";
 import { templateList } from "../data/templateData";
 import { fetchState, saveState } from "../utils/api";
+import { syncCustomServices } from "../utils/services";
+import { guardSetter } from "../utils/access";
 
 const AppDataContext = createContext();
 
@@ -71,24 +74,61 @@ const defaultData = {
 const SAVE_DEBOUNCE_MS = 800;
 
 function AppDataProvider({ children }) {
-  const [projects, setProjects] = useState(defaultData.projects);
-  const [subProjects, setSubProjects] = useState(defaultData.subProjects);
-  const [dimensions, setDimensions] = useState(defaultData.dimensions);
-  const [prices, setPrices] = useState(defaultData.prices);
-  const [materialModelRates, setMaterialModelRates] = useState(defaultData.materialModelRates);
-  const [materialModelProfitPercent, setMaterialModelProfitPercent] = useState(defaultData.materialModelProfitPercent);
-  const [templates, setTemplates] = useState(defaultData.templates);
-  const [selectedTemplateId, setSelectedTemplateId] = useState(defaultData.selectedTemplateId);
-  const [materialStockSettings, setMaterialStockSettings] = useState(defaultData.materialStockSettings);
-  const [kerfWidth, setKerfWidth] = useState(defaultData.kerfWidth);
-  const [companyProfile, setCompanyProfile] = useState(defaultData.companyProfile);
-  const [designGallery, setDesignGallery] = useState(defaultData.designGallery);
-  const [leads, setLeads] = useState(defaultData.leads);
-  const [leadViews, setLeadViews] = useState(defaultData.leadViews);
-  const [leadStatuses, setLeadStatuses] = useState(defaultData.leadStatuses);
-  const [leadTagColors, setLeadTagColors] = useState(defaultData.leadTagColors);
-  const [teamMembers, setTeamMembers] = useState(defaultData.teamMembers);
-  const [templateFolders, setTemplateFolders] = useState(defaultData.templateFolders);
+  const [projects, setProjectsRaw] = useState(defaultData.projects);
+  const [subProjects, setSubProjectsRaw] = useState(defaultData.subProjects);
+  const [dimensions, setDimensionsRaw] = useState(defaultData.dimensions);
+  const [prices, setPricesRaw] = useState(defaultData.prices);
+  const [materialModelRates, setMaterialModelRatesRaw] = useState(defaultData.materialModelRates);
+  const [materialModelProfitPercent, setMaterialModelProfitPercentRaw] = useState(defaultData.materialModelProfitPercent);
+  const [templates, setTemplatesRaw] = useState(defaultData.templates);
+  const [selectedTemplateId, setSelectedTemplateIdRaw] = useState(defaultData.selectedTemplateId);
+  const [materialStockSettings, setMaterialStockSettingsRaw] = useState(defaultData.materialStockSettings);
+  const [kerfWidth, setKerfWidthRaw] = useState(defaultData.kerfWidth);
+  const [companyProfile, setCompanyProfileRaw] = useState(defaultData.companyProfile);
+  // Services the account added (companyProfile.customServices) join the
+  // built-in ones in the shared registry before any child renders. Kept inside
+  // companyProfile so no new top-level key (and no backend change) is needed.
+  syncCustomServices(companyProfile?.customServices, companyProfile?.wardrobeName, companyProfile?.wardrobeHidden);
+  const [designGallery, setDesignGalleryRaw] = useState(defaultData.designGallery);
+  const [leads, setLeadsRaw] = useState(defaultData.leads);
+  const [leadViews, setLeadViewsRaw] = useState(defaultData.leadViews);
+  const [leadStatuses, setLeadStatusesRaw] = useState(defaultData.leadStatuses);
+  const [leadTagColors, setLeadTagColorsRaw] = useState(defaultData.leadTagColors);
+  const [teamMembers, setTeamMembersRaw] = useState(defaultData.teamMembers);
+  const [templateFolders, setTemplateFoldersRaw] = useState(defaultData.templateFolders);
+
+  // An employee gets setters that refuse changes their group doesn't allow (see
+  // utils/access.js — the server enforces the same rules); the owner's are the
+  // plain React setters.
+  const { user } = useAuth();
+  const access = user?.access;
+  const accessKey = JSON.stringify(access ?? null);
+  const guarded = useMemo(() => ({
+    setProjects: guardSetter(access, "projects", setProjectsRaw),
+    setSubProjects: guardSetter(access, "subProjects", setSubProjectsRaw),
+    setDimensions: guardSetter(access, "dimensions", setDimensionsRaw),
+    setPrices: guardSetter(access, "prices", setPricesRaw),
+    setMaterialModelRates: guardSetter(access, "materialModelRates", setMaterialModelRatesRaw),
+    setMaterialModelProfitPercent: guardSetter(access, "materialModelProfitPercent", setMaterialModelProfitPercentRaw),
+    setTemplates: guardSetter(access, "templates", setTemplatesRaw),
+    setSelectedTemplateId: guardSetter(access, "selectedTemplateId", setSelectedTemplateIdRaw),
+    setMaterialStockSettings: guardSetter(access, "materialStockSettings", setMaterialStockSettingsRaw),
+    setKerfWidth: guardSetter(access, "kerfWidth", setKerfWidthRaw),
+    setCompanyProfile: guardSetter(access, "companyProfile", setCompanyProfileRaw),
+    setDesignGallery: guardSetter(access, "designGallery", setDesignGalleryRaw),
+    setLeads: guardSetter(access, "leads", setLeadsRaw),
+    setLeadViews: guardSetter(access, "leadViews", setLeadViewsRaw),
+    setLeadStatuses: guardSetter(access, "leadStatuses", setLeadStatusesRaw),
+    setLeadTagColors: guardSetter(access, "leadTagColors", setLeadTagColorsRaw),
+    setTeamMembers: guardSetter(access, "teamMembers", setTeamMembersRaw),
+    setTemplateFolders: guardSetter(access, "templateFolders", setTemplateFoldersRaw),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [accessKey]);
+  const {
+    setProjects, setSubProjects, setDimensions, setPrices, setMaterialModelRates, setMaterialModelProfitPercent, setTemplates, setSelectedTemplateId, setMaterialStockSettings, setKerfWidth, setCompanyProfile, setDesignGallery, setLeads, setLeadViews, setLeadStatuses, setLeadTagColors, setTeamMembers, setTemplateFolders,
+  } = guarded;
+  // Keys the server refused on the last save (employees only).
+  const [deniedKeys, setDeniedKeys] = useState([]);
 
   // Gates the very first render (before the API has responded) and stops
   // the save effect from firing on the initial default state — otherwise
@@ -138,24 +178,24 @@ function AppDataProvider({ children }) {
         // An existing account gets exactly what it saved, empty lists
         // included — otherwise deleting every project would silently bring
         // the sample data back on the next reload.
-        setProjects(data.projects || []);
-        setSubProjects(data.subProjects || []);
-        setDimensions(data.dimensions || []);
-        setPrices(data.prices || []);
-        setMaterialModelRates(data.materialModelRates || {});
-        setMaterialModelProfitPercent(data.materialModelProfitPercent || defaultData.materialModelProfitPercent);
-        setTemplates(data.templates || []);
-        setSelectedTemplateId(data.selectedTemplateId || "");
-        setMaterialStockSettings(data.materialStockSettings || {});
-        setKerfWidth(data.kerfWidth ?? 0);
-        setCompanyProfile(data.companyProfile || {});
-        setDesignGallery(data.designGallery || []);
-        setLeads(data.leads || []);
-        setLeadViews(data.leadViews || null);
-        setLeadStatuses(data.leadStatuses || null);
-        setLeadTagColors(data.leadTagColors || null);
-        setTeamMembers(data.teamMembers || []);
-        setTemplateFolders(data.templateFolders || []);
+        setProjectsRaw(data.projects || []);
+        setSubProjectsRaw(data.subProjects || []);
+        setDimensionsRaw(data.dimensions || []);
+        setPricesRaw(data.prices || []);
+        setMaterialModelRatesRaw(data.materialModelRates || {});
+        setMaterialModelProfitPercentRaw(data.materialModelProfitPercent || defaultData.materialModelProfitPercent);
+        setTemplatesRaw(data.templates || []);
+        setSelectedTemplateIdRaw(data.selectedTemplateId || "");
+        setMaterialStockSettingsRaw(data.materialStockSettings || {});
+        setKerfWidthRaw(data.kerfWidth ?? 0);
+        setCompanyProfileRaw(data.companyProfile || {});
+        setDesignGalleryRaw(data.designGallery || []);
+        setLeadsRaw(data.leads || []);
+        setLeadViewsRaw(data.leadViews || null);
+        setLeadStatusesRaw(data.leadStatuses || null);
+        setLeadTagColorsRaw(data.leadTagColors || null);
+        setTeamMembersRaw(data.teamMembers || []);
+        setTemplateFoldersRaw(data.templateFolders || []);
         // Only now does state genuinely reflect the server — safe to arm autosave.
         setIsLoaded(true);
       })
@@ -179,7 +219,8 @@ function AppDataProvider({ children }) {
           queuedRef.current = false;
           const snapshot = latestRef.current;
           setSaveStatus("saving");
-          await saveState(snapshot);
+          const result = await saveState(snapshot);
+          setDeniedKeys(result && Array.isArray(result.denied) ? result.denied : []);
           setSaveError(null);
           if (latestRef.current === snapshot) dirtyRef.current = false;
           if (!queuedRef.current && latestRef.current === snapshot) break;
@@ -408,6 +449,7 @@ function AppDataProvider({ children }) {
         isLoaded,
         loadError,
         saveError,
+        deniedKeys,
         saveStatus,
         retrySave,
         requestImmediateSave,

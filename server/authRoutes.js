@@ -12,6 +12,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
+import { normalizePerms, normalizeScope, viewWorkspace, mergeWorkspace, anyEdit } from './access.js';
 
 const SESSION_TTL_DAYS = 30;
 const RESET_TTL_MINUTES = 60;
@@ -82,6 +83,137 @@ export default function registerAuthRoutes(app, pool) {
     return handler(req, res, user);
   };
 
+  // ---- employees & groups -------------------------------------------------
+  // Employees sign in with a username + password the owner sets and work in the
+  // OWNER's workspace under their group's rules (see access.js). Their sessions
+  // live in a separate table, so a token from here never satisfies `withUser`
+  // (account-level endpoints such as profile/password) — only `withPrincipal`.
+  let teamTablesReady = null;
+  const ensureTeamTables = () => {
+    if (!teamTablesReady) {
+      teamTablesReady = (async () => {
+        await pool.query(
+          `CREATE TABLE IF NOT EXISTS interior_groups (
+             id         VARCHAR(36)  NOT NULL,
+             owner_id   VARCHAR(36)  NOT NULL,
+             name       VARCHAR(100) NOT NULL,
+             perms_json TEXT         NOT NULL,
+             scope_json TEXT         NULL,
+             created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+             PRIMARY KEY (id),
+             KEY idx_group_owner (owner_id),
+             CONSTRAINT fk_group_owner FOREIGN KEY (owner_id) REFERENCES users (id) ON DELETE CASCADE
+           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+        );
+        await pool.query(
+          `CREATE TABLE IF NOT EXISTS interior_employees (
+             id            VARCHAR(36)  NOT NULL,
+             owner_id      VARCHAR(36)  NOT NULL,
+             username      VARCHAR(60)  NULL,
+             password_hash VARCHAR(255) NULL,
+             name          VARCHAR(100) NOT NULL,
+             role          VARCHAR(100) NULL,
+             phone         VARCHAR(20)  NULL,
+             email         VARCHAR(190) NULL,
+             group_id      VARCHAR(36)  NULL,
+             active        TINYINT(1)   NOT NULL DEFAULT 1,
+             created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+             last_login_at DATETIME     NULL,
+             PRIMARY KEY (id),
+             UNIQUE KEY uq_employee_username (username),
+             KEY idx_employee_owner (owner_id),
+             CONSTRAINT fk_employee_owner FOREIGN KEY (owner_id) REFERENCES users (id) ON DELETE CASCADE,
+             CONSTRAINT fk_employee_group FOREIGN KEY (group_id) REFERENCES interior_groups (id) ON DELETE SET NULL
+           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+        );
+        // Tables made before a person could be contact-only required a login.
+        const [ucol] = await pool.query("SHOW COLUMNS FROM interior_employees LIKE 'username'");
+        if (ucol[0] && ucol[0].Null === 'NO') {
+          await pool.query('ALTER TABLE interior_employees MODIFY username VARCHAR(60) NULL, MODIFY password_hash VARCHAR(255) NULL');
+        }
+        await pool.query(
+          `CREATE TABLE IF NOT EXISTS interior_employee_sessions (
+             token_hash  CHAR(64)    NOT NULL,
+             employee_id VARCHAR(36) NOT NULL,
+             expires_at  DATETIME    NOT NULL,
+             PRIMARY KEY (token_hash),
+             KEY idx_emp_session_employee (employee_id),
+             CONSTRAINT fk_emp_session FOREIGN KEY (employee_id) REFERENCES interior_employees (id) ON DELETE CASCADE
+           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+        );
+      })().catch((err) => { teamTablesReady = null; throw err; });
+    }
+    return teamTablesReady;
+  };
+
+  const EMPLOYEE_SELECT =
+    `SELECT e.id, e.owner_id, e.name, e.username, e.email, e.phone, e.group_id, e.active,
+            g.name AS group_name, g.perms_json, g.scope_json,
+            u.name AS owner_name, u.email AS owner_email, u.mobile AS owner_mobile
+       FROM interior_employees e
+       JOIN users u ON u.id = e.owner_id
+       LEFT JOIN interior_groups g ON g.id = e.group_id`;
+
+  const buildPrincipal = (row) => ({
+    id: row.owner_id, name: row.owner_name, email: row.owner_email, mobile: row.owner_mobile,
+    employee: {
+      id: row.id, name: row.name, username: row.username,
+      email: row.email || '', phone: row.phone || '', groupId: row.group_id, groupName: row.group_name || '',
+    },
+    // No group (or a deleted one) means no access to anything.
+    access: {
+      owner: false,
+      perms: normalizePerms(row.perms_json ? JSON.parse(row.perms_json) : {}),
+      scope: row.scope_json ? normalizeScope(JSON.parse(row.scope_json)) : null,
+      groupName: row.group_name || '',
+    },
+  });
+
+  // The owner (full access) or an employee, for the current token. `id` is
+  // always the OWNER's id — it is what keys the workspace rows.
+  async function currentPrincipal(req) {
+    const owner = await currentUser(req);
+    if (owner) return { ...owner, employee: null, access: { owner: true } };
+    const token = bearer(req);
+    if (!token) return null;
+    await ensureTeamTables();
+    const [rows] = await pool.query(
+      `${EMPLOYEE_SELECT}
+         JOIN interior_employee_sessions s ON s.employee_id = e.id
+        WHERE s.token_hash = ? AND s.expires_at > NOW() AND e.active = 1
+        LIMIT 1`,
+      [sha256(token)]
+    );
+    return rows[0] ? buildPrincipal(rows[0]) : null;
+  }
+
+  const withPrincipal = (handler) => async (req, res) => {
+    const principal = await currentPrincipal(req);
+    if (!principal) return res.status(401).json({ success: false, error: 'Not authenticated' });
+    return handler(req, res, principal);
+  };
+
+  // What the browser is told about who is signed in.
+  const publicUser = (p) => (p.employee
+    ? {
+        id: p.employee.id, name: p.employee.name, email: p.employee.email, mobile: p.employee.phone,
+        username: p.employee.username, isEmployee: true, access: p.access,
+      }
+    : { id: p.id, name: p.name, email: p.email, mobile: p.mobile, isEmployee: false, access: p.access });
+
+  // 403 helper: ok if the principal is the owner or their group grants `action` on `mod`.
+  const allowed = (p, mod, action) => p.access.owner || !!(p.access.perms[mod] && p.access.perms[mod][action]);
+
+  async function issueEmployeeSession(employeeId) {
+    const token = crypto.randomBytes(32).toString('hex');
+    await pool.query(
+      `INSERT INTO interior_employee_sessions (token_hash, employee_id, expires_at)
+       VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))`,
+      [sha256(token), employeeId, SESSION_TTL_DAYS]
+    );
+    return token;
+  }
+
   async function issueSession(userId) {
     const token = crypto.randomBytes(32).toString('hex');
     await pool.query(
@@ -95,6 +227,10 @@ export default function registerAuthRoutes(app, pool) {
   async function purgeExpired() {
     await pool.query('DELETE FROM user_sessions  WHERE expires_at < NOW()');
     await pool.query('DELETE FROM password_resets WHERE expires_at < NOW()');
+    try {
+      await ensureTeamTables();
+      await pool.query('DELETE FROM interior_employee_sessions WHERE expires_at < NOW()');
+    } catch (err) { console.error('employee session purge failed:', err.message); }
   }
 
   const paths = (name) => [`/api/${name}`, `/api/${name}.php`];
@@ -153,6 +289,26 @@ export default function registerAuthRoutes(app, pool) {
 
       await purgeExpired();
 
+      // No "@" means a username: an employee the owner added under Teams.
+      if (!email.includes('@')) {
+        await ensureTeamTables();
+        const [erows] = await pool.query(`${EMPLOYEE_SELECT} WHERE e.username = ? LIMIT 1`, [email]);
+        const [hrows] = erows[0]
+          ? await pool.query('SELECT password_hash FROM interior_employees WHERE id = ?', [erows[0].id])
+          : [[]];
+        const emp = erows[0];
+        const storedHash = hrows[0] && hrows[0].password_hash;
+        if (!emp || !emp.active || !storedHash || !bcrypt.compareSync(password, storedHash)) {
+          return res.status(401).json({ success: false, error: 'Incorrect username or password.' });
+        }
+        await pool.query('UPDATE interior_employees SET last_login_at = NOW() WHERE id = ?', [emp.id]);
+        return res.json({
+          success: true,
+          token: await issueEmployeeSession(emp.id),
+          user: publicUser(buildPrincipal(emp)),
+        });
+      }
+
       const [rows] = await pool.query(
         'SELECT id, name, email, mobile, password_hash FROM users WHERE email = ? LIMIT 1',
         [email]
@@ -178,14 +334,18 @@ export default function registerAuthRoutes(app, pool) {
   });
 
   // ---- session restore / logout -----------------------------------------
-  app.get(paths('auth_me'), withUser(async (_req, res, user) => {
-    res.json({ success: true, user });
+  app.get(paths('auth_me'), withPrincipal(async (_req, res, principal) => {
+    res.json({ success: true, user: publicUser(principal) });
   }));
 
   app.post(paths('auth_logout'), async (req, res) => {
     const token = bearer(req);
     if (token) {
       await pool.query('DELETE FROM user_sessions WHERE token_hash = ?', [sha256(token)]);
+      try {
+        await ensureTeamTables();
+        await pool.query('DELETE FROM interior_employee_sessions WHERE token_hash = ?', [sha256(token)]);
+      } catch (err) { console.error('employee logout failed:', err.message); }
     }
     res.json({ success: true });
   });
@@ -333,7 +493,7 @@ export default function registerAuthRoutes(app, pool) {
   }));
 
   // ---- Interior tool workspace (per user) --------------------------------
-  app.get(paths('interior_state'), withUser(async (_req, res, user) => {
+  app.get(paths('interior_state'), withPrincipal(async (_req, res, user) => {
     try {
       const [rows] = await pool.query(
         'SELECT data_key, data_json FROM interior_app_state WHERE user_id = ?',
@@ -341,6 +501,12 @@ export default function registerAuthRoutes(app, pool) {
       );
       const stored = {};
       for (const r of rows) stored[r.data_key] = JSON.parse(r.data_json);
+
+      // Employees only get what their group lets them see, and never trigger
+      // the "brand-new account" seeding.
+      if (!user.access.owner) {
+        return res.json({ success: true, isNew: false, data: viewWorkspace(user.access, stored, INTERIOR_DEFAULTS) });
+      }
 
       const data = {};
       for (const [k, def] of Object.entries(INTERIOR_DEFAULTS)) {
@@ -353,7 +519,7 @@ export default function registerAuthRoutes(app, pool) {
     }
   }));
 
-  app.post(paths('interior_state'), withUser(async (req, res, user) => {
+  app.post(paths('interior_state'), withPrincipal(async (req, res, user) => {
     try {
       const body = req.body;
       if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -364,7 +530,19 @@ export default function registerAuthRoutes(app, pool) {
         return res.status(400).json({ success: false, error: `Unknown key(s): ${unknown.join(', ')}` });
       }
 
-      for (const [key, value] of Object.entries(body)) {
+      let toWrite = body;
+      let denied = [];
+      if (!user.access.owner) {
+        const [rows] = await pool.query(
+          'SELECT data_key, data_json FROM interior_app_state WHERE user_id = ?',
+          [user.id]
+        );
+        const stored = {};
+        for (const r of rows) stored[r.data_key] = JSON.parse(r.data_json);
+        ({ writes: toWrite, denied } = mergeWorkspace(user.access, stored, body, INTERIOR_DEFAULTS));
+      }
+
+      for (const [key, value] of Object.entries(toWrite)) {
         await pool.query(
           `INSERT INTO interior_app_state (user_id, data_key, data_json)
            VALUES (?, ?, ?)
@@ -372,9 +550,158 @@ export default function registerAuthRoutes(app, pool) {
           [user.id, key, JSON.stringify(value)]
         );
       }
-      res.json({ success: true });
+      res.json({ success: true, denied });
     } catch (err) {
       console.error('interior_state POST failed:', err.message);
+      res.status(500).json({ success: false, error: 'Could not save changes.' });
+    }
+  }));
+
+  // ---- Employees & groups (owner only) ------------------------------------
+  //   GET  /api/interior_team            -> { employees, groups }
+  //   POST /api/interior_team            -> { action, ... }
+  //        saveGroup { id?, name, perms, scope } | deleteGroup { id }
+  //        saveEmployee { id?, name, role, phone, email, active, canSignIn, username?, password?, groupId? }
+  //        importContacts { contacts: [{ name, role, phone, email }] }   (one-time move of the old contact list)
+  //        deleteEmployee { id }
+  const USERNAME_RE = /^[a-z0-9._-]{3,40}$/;
+
+  const groupOut = (g, counts) => ({
+    id: g.id, name: g.name,
+    perms: normalizePerms(JSON.parse(g.perms_json || '{}')),
+    scope: g.scope_json ? normalizeScope(JSON.parse(g.scope_json)) : null,
+    employeeCount: counts[g.id] || 0,
+  });
+
+  async function teamSnapshot(ownerId) {
+    const [emps] = await pool.query(
+      `SELECT id, name, username, role, phone, email, group_id, active, created_at, last_login_at
+         FROM interior_employees WHERE owner_id = ? ORDER BY name`, [ownerId]);
+    const [groups] = await pool.query(
+      'SELECT id, name, perms_json, scope_json FROM interior_groups WHERE owner_id = ? ORDER BY name', [ownerId]);
+    const counts = {};
+    emps.forEach((e) => { if (e.group_id) counts[e.group_id] = (counts[e.group_id] || 0) + 1; });
+    return {
+      employees: emps.map((e) => ({
+        id: e.id, name: e.name, username: e.username || '', hasLogin: !!e.username, role: e.role || '', phone: e.phone || '', email: e.email || '',
+        groupId: e.group_id, active: !!e.active, createdAt: e.created_at, lastLoginAt: e.last_login_at,
+      })),
+      groups: groups.map((g) => groupOut(g, counts)),
+    };
+  }
+
+  app.get(paths('interior_team'), withPrincipal(async (_req, res, user) => {
+    try {
+      if (!user.access.owner) return res.status(403).json({ success: false, error: 'Only the account owner can manage employees.' });
+      await ensureTeamTables();
+      res.json({ success: true, ...(await teamSnapshot(user.id)) });
+    } catch (err) {
+      console.error('interior_team GET failed:', err.message);
+      res.status(500).json({ success: false, error: 'Could not load employees.' });
+    }
+  }));
+
+  app.post(paths('interior_team'), withPrincipal(async (req, res, user) => {
+    try {
+      if (!user.access.owner) return res.status(403).json({ success: false, error: 'Only the account owner can manage employees.' });
+      await ensureTeamTables();
+      const b = req.body || {};
+      const fail = (status, error) => res.status(status).json({ success: false, error });
+
+      if (b.action === 'saveGroup') {
+        const name = String(b.name ?? '').trim();
+        if (!name || name.length > 100) return fail(400, 'Enter a group name.');
+        const perms = JSON.stringify(normalizePerms(b.perms));
+        const scope = Array.isArray(b.scope) ? JSON.stringify(normalizeScope(b.scope)) : null;
+        if (b.id) {
+          const [r] = await pool.query(
+            'UPDATE interior_groups SET name = ?, perms_json = ?, scope_json = ? WHERE id = ? AND owner_id = ?',
+            [name, perms, scope, b.id, user.id]);
+          if (!r.affectedRows) return fail(404, 'Group not found.');
+        } else {
+          await pool.query(
+            'INSERT INTO interior_groups (id, owner_id, name, perms_json, scope_json) VALUES (?, ?, ?, ?, ?)',
+            [crypto.randomUUID(), user.id, name, perms, scope]);
+        }
+      } else if (b.action === 'deleteGroup') {
+        await pool.query('DELETE FROM interior_groups WHERE id = ? AND owner_id = ?', [String(b.id ?? ''), user.id]);
+      } else if (b.action === 'saveEmployee') {
+        const name = String(b.name ?? '').trim();
+        const canSignIn = !!b.canSignIn;
+        const username = canSignIn ? String(b.username ?? '').trim().toLowerCase() : '';
+        const password = canSignIn ? String(b.password ?? '') : '';
+        const phone = String(b.phone ?? '').replace(/[^0-9]/g, '');
+        const email = String(b.email ?? '').trim();
+        const role = String(b.role ?? '').trim().slice(0, 100);
+        const active = b.active === false ? 0 : 1;
+        if (!name || name.length > 100) return fail(400, 'Enter the person\'s name.');
+        if (phone && !/^[0-9]{10}$/.test(phone)) return fail(400, 'Phone must be exactly 10 digits.');
+        if (email && !EMAIL_RE.test(email)) return fail(400, 'Enter a valid email address.');
+        if (canSignIn && !USERNAME_RE.test(username)) return fail(400, 'Username must be 3-40 characters: letters, numbers, dot, dash or underscore.');
+        if (password && password.length < 6) return fail(400, 'Password must be at least 6 characters.');
+
+        let existing = null;
+        if (b.id) {
+          const [own] = await pool.query('SELECT id, password_hash FROM interior_employees WHERE id = ? AND owner_id = ?', [b.id, user.id]);
+          if (!own.length) return fail(404, 'Person not found.');
+          existing = own[0];
+        }
+        if (canSignIn && !password && !(existing && existing.password_hash)) return fail(400, 'Set a password of at least 6 characters.');
+
+        // Only someone who can sign in has a group — it is what decides their access.
+        let groupId = canSignIn && b.groupId ? String(b.groupId) : null;
+        if (groupId) {
+          const [g] = await pool.query('SELECT id FROM interior_groups WHERE id = ? AND owner_id = ?', [groupId, user.id]);
+          if (!g.length) groupId = null;
+        }
+        if (canSignIn) {
+          const [taken] = await pool.query(
+            'SELECT id FROM interior_employees WHERE username = ? AND id != ? LIMIT 1', [username, String(b.id ?? '')]);
+          if (taken.length) return fail(409, 'That username is already taken.');
+        }
+
+        if (existing) {
+          const sets = ['name = ?', 'username = ?', 'role = ?', 'phone = ?', 'email = ?', 'group_id = ?', 'active = ?'];
+          const args = [name, canSignIn ? username : null, role || null, phone || null, email || null, groupId, active];
+          if (password) { sets.push('password_hash = ?'); args.push(bcrypt.hashSync(password, 10)); }
+          else if (!canSignIn) sets.push('password_hash = NULL');
+          await pool.query(`UPDATE interior_employees SET ${sets.join(', ')} WHERE id = ?`, [...args, b.id]);
+          // A new password, a switched-off account or removed sign-in ends their sessions.
+          if (password || !active || !canSignIn) await pool.query('DELETE FROM interior_employee_sessions WHERE employee_id = ?', [b.id]);
+        } else {
+          await pool.query(
+            `INSERT INTO interior_employees (id, owner_id, username, password_hash, name, role, phone, email, group_id, active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [crypto.randomUUID(), user.id, canSignIn ? username : null, canSignIn ? bcrypt.hashSync(password, 10) : null,
+              name, role || null, phone || null, email || null, groupId, active]);
+        }
+      } else if (b.action === 'importContacts') {
+        // One-time move of the old Team Members contact list into the Team list.
+        const list = Array.isArray(b.contacts) ? b.contacts.slice(0, 500) : [];
+        const [have] = await pool.query('SELECT name, phone FROM interior_employees WHERE owner_id = ?', [user.id]);
+        const seen = new Set(have.map((r) => `${String(r.name).toLowerCase()}|${r.phone || ''}`));
+        for (const c of list) {
+          const name = String(c?.name ?? '').trim().slice(0, 100);
+          const phone = String(c?.phone ?? '').replace(/[^0-9]/g, '');
+          const email = String(c?.email ?? '').trim();
+          if (!name) continue;
+          const keyed = `${name.toLowerCase()}|${/^[0-9]{10}$/.test(phone) ? phone : ''}`;
+          if (seen.has(keyed)) continue;
+          seen.add(keyed);
+          await pool.query(
+            `INSERT INTO interior_employees (id, owner_id, username, password_hash, name, role, phone, email, group_id, active)
+             VALUES (?, ?, NULL, NULL, ?, ?, ?, ?, NULL, 1)`,
+            [crypto.randomUUID(), user.id, name, String(c?.role ?? '').trim().slice(0, 100) || null,
+              /^[0-9]{10}$/.test(phone) ? phone : null, EMAIL_RE.test(email) ? email : null]);
+        }
+      } else if (b.action === 'deleteEmployee') {
+        await pool.query('DELETE FROM interior_employees WHERE id = ? AND owner_id = ?', [String(b.id ?? ''), user.id]);
+      } else {
+        return fail(400, 'Unknown action.');
+      }
+      res.json({ success: true, ...(await teamSnapshot(user.id)) });
+    } catch (err) {
+      console.error('interior_team POST failed:', err.message);
       res.status(500).json({ success: false, error: 'Could not save changes.' });
     }
   }));
@@ -394,7 +721,8 @@ export default function registerAuthRoutes(app, pool) {
     fileFilter: (_req, file, cb) => cb(null, !!DESIGN_TYPES[file.mimetype]),
   }).single('file');
 
-  app.post(paths('upload_design_file'), withUser((req, res) => {
+  app.post(paths('upload_design_file'), withPrincipal((req, res, user) => {
+    if (!anyEdit(user.access)) return res.status(403).json({ success: false, error: 'You do not have permission to upload files.' });
     designUpload(req, res, (err) => {
       if (err) {
         const tooBig = err.code === 'LIMIT_FILE_SIZE';
@@ -474,8 +802,9 @@ export default function registerAuthRoutes(app, pool) {
     return rows[0] || null;
   };
 
-  app.get(paths('interior_share'), withUser(async (req, res, user) => {
+  app.get(paths('interior_share'), withPrincipal(async (req, res, user) => {
     try {
+      if (!allowed(user, 'projects', 'view')) return res.status(403).json({ success: false, error: 'No access to project sharing.' });
       await ensureShareTable();
       const projectId = String(req.query.projectId || '');
       if (!projectId) return res.status(400).json({ success: false, error: 'projectId is required' });
@@ -486,8 +815,9 @@ export default function registerAuthRoutes(app, pool) {
     }
   }));
 
-  app.post(paths('interior_share'), withUser(async (req, res, user) => {
+  app.post(paths('interior_share'), withPrincipal(async (req, res, user) => {
     try {
+      if (!allowed(user, 'projects', 'edit')) return res.status(403).json({ success: false, error: 'You do not have permission to change sharing.' });
       await ensureShareTable();
       const { action, snapshot, pin, enabled } = req.body || {};
       const projectId = String((req.body || {}).projectId || '');

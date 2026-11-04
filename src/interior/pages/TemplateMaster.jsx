@@ -8,6 +8,8 @@ import { mmToFeet, feetToMm, roundTo2, formatCurrency } from "../utils/unitConve
 import CutSheetOptimizer from "./CutSheetOptimizer";
 import { packSheets, findOversizedPieces } from "../utils/binPack";
 import { GROUP_OPTIONS } from "../data/priceData";
+import ServiceFilter from "../components/ServiceFilter";
+import { ALL_SERVICES, WARDROBE_SERVICE, SERVICES, matchesService, serviceTagOf } from "../utils/services";
 
 // Annotates a group-sorted row list with rowSpan info so the "Group" cell can
 // be rendered once per group (merged) instead of repeated on every row.
@@ -499,6 +501,7 @@ function TemplateMaster() {
 
   // Left panel
   const [search, setSearch] = useState("");
+  const [svcFilter, setSvcFilter] = useState("All");
   const [selectedId, setSelectedId] = useState(() => templates[0]?.id ?? null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
@@ -622,7 +625,7 @@ function TemplateMaster() {
   // Every template/subfolder under a folder, at any depth — for the counts on
   // a folder tile.
   const deepCounts = (id) => {
-    let tCount = templatesIn(id).length;
+    let tCount = templatesIn(id).filter((t) => matchesService(t, svcFilter)).length;
     let fCount = 0;
     subfoldersOf(id).forEach((f) => { const c = deepCounts(f.id); tCount += c.tCount; fCount += 1 + c.fCount; });
     return { tCount, fCount };
@@ -644,8 +647,11 @@ function TemplateMaster() {
   // findable without knowing where it was filed); otherwise the grid shows
   // just the current folder's own templates.
   const searching = search.trim() !== "";
-  const filtered = searching ? templates.filter(matchesSearch) : templatesIn(activeFolderId);
-  const visibleFolders = searching ? [] : subfoldersOf(activeFolderId);
+  const filtered = (searching ? templates.filter(matchesSearch) : templatesIn(activeFolderId)).filter((t) => matchesService(t, svcFilter));
+  const templateServiceCounts = Object.fromEntries(ALL_SERVICES.map((s) => [s, templates.filter((t) => serviceTagOf(t) === s).length]));
+  // With a service picked, only folders that hold (at any depth) a template of
+  // that service are listed; their counts already respect the filter.
+  const visibleFolders = searching ? [] : subfoldersOf(activeFolderId).filter((f) => svcFilter === "All" || deepCounts(f.id).tCount > 0);
 
   const saveFolderModal = () => {
     const name = folderNameDraft.trim();
@@ -1047,7 +1053,11 @@ function TemplateMaster() {
   const createTemplate = () => {
     if (!newName.trim()) { alert("Template name is required."); return; }
     const id = templates.length ? Math.max(...templates.map((t) => t.id)) + 1 : 1;
-    const t = { ...emptyTemplate(id, newName.trim()), folderId: activeFolderId };
+    const t = {
+      ...emptyTemplate(id, newName.trim()),
+      folderId: activeFolderId,
+      serviceType: svcFilter !== "All" && svcFilter !== WARDROBE_SERVICE ? svcFilter : "",
+    };
     setTemplates((prev) => [...prev, t]);
     setSelectedId(id);
     setActiveBoxId(1);
@@ -1321,6 +1331,10 @@ function TemplateMaster() {
             </div>
           </div>
 
+          <div style={{ padding: "10px 24px 0" }}>
+            <ServiceFilter value={svcFilter} onChange={setSvcFilter} counts={templateServiceCounts} />
+          </div>
+
           {/* Breadcrumb — Templates / Folder / Subfolder (hidden while searching,
               since search results span every folder) */}
           {!searching && (
@@ -1503,6 +1517,17 @@ function TemplateMaster() {
                       {isDirty && <span style={{ marginLeft: 8, fontSize: 12, color: "#d97706", fontWeight: 400 }}>• unsaved changes</span>}
                     </h2>
                   )}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>Service</label>
+                    <select
+                      value={serviceTagOf(draft)}
+                      onChange={(e) => updateDraft("serviceType", e.target.value === WARDROBE_SERVICE ? "" : e.target.value)}
+                      style={{ fontSize: 12, padding: "3px 6px" }}
+                    >
+                      <option value={WARDROBE_SERVICE}>{WARDROBE_SERVICE}</option>
+                      {ALL_SERVICES.filter((n) => n !== WARDROBE_SERVICE).map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   {savedFlash && (

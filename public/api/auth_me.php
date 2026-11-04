@@ -4,8 +4,9 @@
 // Header: Authorization: Bearer <token>  ->  { success, user }
 
 require_once __DIR__ . '/auth_common.php';
+require_once __DIR__ . '/interior_access.php';
 
 auth_headers('GET, OPTIONS');
 require_method(['GET']);
 
-json_ok(['user' => require_user()]);
+json_ok(['user' => ia_public_user(require_principal())]);

@@ -7,7 +7,41 @@ import { roundTo2, formatCurrency, mmToFeet } from "../utils/unitConversions";
 import { buildRoomRows, buildRoomEdgeBanding, buildRoomHardware, buildRoomCarpenter, buildBoxRows, buildBoxEdgeBanding, buildBoxCarpenterRow } from "../utils/projectRows";
 import { computeSheetCounts } from "../utils/binPack";
 import ShareWithCustomerModal from "../components/ShareWithCustomerModal";
+import { useAuth } from "@/context/AuthContext";
+import { canTab } from "../utils/access";
 import { normEntry, finalMoodBoard } from "../utils/designFiles";
+import { SERVICES, SERVICE_NAMES, serviceOf, boxQty } from "../utils/services";
+
+// Area/qty cell and "Sft Rate" unit for a line: sq ft for wardrobe and area
+// services, pt / rft for point and length services.
+const qtyText = (item) => item.unitLabel && item.unitLabel !== "sqft" ? `${item.areaSqFt} ${item.unitLabel}` : `${item.areaSqFt}`;
+const unitOf = (item) => item.unitLabel || "sqft";
+
+// Splits quotation rows into one table per service: wardrobe/modular rows keep
+// the "Rooms" table, then each service that has rows gets its own, headed by
+// the service name and with column titles matching how it is measured.
+// `_i` is a row's index in the original list (the compare grid lines rows up
+// across models by it).
+const SERVICE_HEADS = {
+  sqft: ["Area (sq ft)", "Cost/Sft"],
+  rft: ["Length (rft)", "Rate/rft"],
+  pt: ["Qty (points)", "Rate/pt"],
+};
+// Amount (Incl. GST) summed over one table's rows.
+const tableTotal = (t) => t.rows.reduce((a, r) => a + (r.sellingAmount || 0), 0);
+const quotationTables = (items) => {
+  const rows = items.map((item, _i) => ({ ...item, _i }));
+  const tables = [];
+  const wardrobe = rows.filter((r) => !r.service);
+  if (wardrobe.length || !rows.length) tables.push({ title: "Rooms", service: "", areaHead: SERVICE_HEADS.sqft[0], rateHead: SERVICE_HEADS.sqft[1], rows: wardrobe });
+  SERVICE_NAMES.forEach((name) => {
+    const own = rows.filter((r) => r.service === name);
+    if (!own.length) return;
+    const [areaHead, rateHead] = SERVICE_HEADS[SERVICES[name].unit] || SERVICE_HEADS.sqft;
+    tables.push({ title: name, service: name, areaHead, rateHead, rows: own });
+  });
+  return tables;
+};
 
 const QUOT_MODELS = ["economy", "standard", "premium"];
 const QUOT_MODEL_LABELS = { economy: "Economy", standard: "Standard", premium: "Premium" };
@@ -295,7 +329,11 @@ function buildProjectCutListRows(projectRooms, prices) {
   return rows;
 }
 
-function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
+// customerView: only the customer-facing quotation — no settings panel and no
+// Economy/Standard/Premium comparison — with Print Preview / PDF / Share.
+function ProjectQuotation({ initialProjectName, lockProject = false, customerView = false } = {}) {
+  const { user: authUser } = useAuth();
+  const canShare = !customerView || canTab(authUser?.access, "customer-view", "edit");
   const { projects, setProjects, subProjects, prices, materialStockSettings, companyProfile, designGallery } = useAppData();
   const [shareOpen, setShareOpen] = useState(false);
 
@@ -385,7 +423,8 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
   const quotationRooms = useMemo(
     () => projectRooms.map((room) => ({
       ...room,
-      boxes: (room.boxes || []).filter((b) => b.includeInQuotation !== false),
+      boxes: (room.boxes || []).filter((b) => b.includeInQuotation !== false && !serviceOf(b)),
+      serviceBoxes: (room.boxes || []).filter((b) => b.includeInQuotation !== false && serviceOf(b)),
     })),
     [projectRooms]
   );
@@ -521,6 +560,32 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
       const cost = roomCosts[ri];
       const roomName = room.subProject || room.name;
       const boxes = room.boxes || [];
+      // Non-wardrobe work: quantity × the picked Items Pricing item's rate,
+      // one line each (never merged by Combined).
+      const serviceRows = (room.serviceBoxes || []).map((box, idx) => {
+        const svc = serviceOf(box);
+        const { qty } = boxQty(box);
+        const amount = qty * (box.serviceItem ? rate(box.serviceItem) : 0);
+        const hMm = Number(box.quotationHeightMm) || 0;
+        const wMm = Number(box.quotationWidthMm) || 0;
+        return {
+          id: `${room.id}-svc-${idx}`,
+          service: box.serviceType,
+          roomName,
+          boxCount: 1,
+          boxName: box.name || `${box.serviceType} ${idx + 1}`,
+          typeOfWork: [box.serviceType, box.serviceItem].filter(Boolean).join(" – "),
+          widthFt: svc.measure !== "points" && wMm ? roundTo2(mmToFeet(wMm)) : null,
+          heightFt: svc.measure === "area" && hMm ? roundTo2(mmToFeet(hMm)) : null,
+          areaSqFt: qty,
+          unitLabel: svc.unit,
+          costTotal: amount,
+          woodAmount: 0, edgeAmount: 0, hardwareAmount: 0, transportationAmount: 0, laborAmount: 0,
+          totalAmount: amount,
+          areaSqMm: 0,
+        };
+      });
+      if (boxes.length === 0 && serviceRows.length) return serviceRows;
       if (boxes.length === 0) {
         return [{
           id: room.id,
@@ -580,7 +645,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
       // total cost ÷ total area rather than any one box's own rate), instead
       // of listing each box separately. The underlying per-box cost math above
       // is untouched either way; this only changes how the results are grouped.
-      if (room.quotationSftMode === "perBox") return boxRows;
+      if (room.quotationSftMode === "perBox") return [...boxRows, ...serviceRows];
       const g = {
         id: `${room.id}-all`, roomName, boxCount: 0, boxName: "All Boxes", typeOfWork: "—",
         widthFt: null, heightFt: null,
@@ -605,7 +670,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
         g.totalAmount += r.totalAmount;
         g.areaSqMm += r.areaSqMm;
       });
-      return [g];
+      return [g, ...serviceRows];
     });
   };
 
@@ -666,6 +731,9 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
   const fmtCurrency = (n) =>
     "₹" + Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  // Columns before Amount in a quotation table: "#" plus whichever are shown.
+  const beforeAmountCols = () => 1 + ["room", "box", "type", "w", "h", "area", "rate"].filter(colOn).length;
+
   const buildVariant = (model) => {
     const items = buildLineItems(quotationRooms, model);
     const ct = items.reduce((s, i) => s + i.costTotal, 0);
@@ -721,13 +789,14 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
           </div>
         </div>
         <p><strong>Project:</strong> ${selectedProject}</p>
-        <h3>Rooms</h3>
+        ${quotationTables(v.items).map((t, ti, all) => `
+        <h3>${t.title}</h3>
         <table border="1" cellpadding="7" cellspacing="0" width="100%" style="margin-bottom:16px;font-size:13px">
           <thead style="background:#f9fafb">
-            <tr><th>#</th>${colOn("room") ? "<th>Room</th>" : ""}${colOn("box") ? "<th>Box Name</th>" : ""}${colOn("type") ? "<th>Type of Work</th>" : ""}${colOn("w") ? "<th>W (ft)</th>" : ""}${colOn("h") ? "<th>H (ft)</th>" : ""}${colOn("area") ? "<th>Area (sq ft)</th>" : ""}${colOn("rate") ? "<th>Cost/Sft</th>" : ""}<th>Amount (Incl. GST)</th></tr>
+            <tr><th>#</th>${colOn("room") ? "<th>Room</th>" : ""}${colOn("box") ? "<th>Box Name</th>" : ""}${colOn("type") ? "<th>Type of Work</th>" : ""}${colOn("w") ? "<th>W (ft)</th>" : ""}${colOn("h") ? "<th>H (ft)</th>" : ""}${colOn("area") ? `<th>${t.areaHead}</th>` : ""}${colOn("rate") ? `<th>${t.rateHead}</th>` : ""}<th>Amount (Incl. GST)</th></tr>
           </thead>
           <tbody>
-            ${withRoomRowSpans(v.items)
+            ${withRoomRowSpans(t.rows)
               .map(
                 (item, i) => `
               <tr>
@@ -737,14 +806,16 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                 ${colOn("type") ? `<td style="white-space:pre-line">${item.typeOfWork}</td>` : ""}
                 ${colOn("w") ? `<td style="white-space:pre-line">${item.widthFt ?? "—"}</td>` : ""}
                 ${colOn("h") ? `<td style="white-space:pre-line">${item.heightFt ?? "—"}</td>` : ""}
-                ${colOn("area") ? `<td>${item.areaSqFt}</td>` : ""}
-                ${colOn("rate") ? `<td style="text-align:right">${item.areaSqFt > 0 ? `${fmtCurrency(item.sellingAmount / item.areaSqFt)}/sqft` : "—"}</td>` : ""}
+                ${colOn("area") ? `<td>${qtyText(item)}</td>` : ""}
+                ${colOn("rate") ? `<td style="text-align:right">${item.areaSqFt > 0 ? `${fmtCurrency(item.sellingAmount / item.areaSqFt)}/${unitOf(item)}` : "—"}</td>` : ""}
                 <td style="text-align:right">${fmtCurrency(item.sellingAmount)}</td>
               </tr>`
               )
               .join("")}
           </tbody>
+          ${all.length > 1 ? `<tfoot><tr style="background:#f3f4f6"><td colspan="${beforeAmountCols()}" style="text-align:right"><strong>${t.title} Sub Total (Incl. GST)</strong></td><td style="text-align:right"><strong>${fmtCurrency(tableTotal(t))}</strong></td></tr></tfoot>` : ""}
         </table>
+        `).join("")}
         ${!opts.omitSavings && mrpSavings.mrpTotal > 0 ? `
         <div style="padding:12px 14px;border:1px solid #a7f3d0;background:#ecfdf5;border-radius:8px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center">
           <div>
@@ -991,27 +1062,32 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
     doc.text(`Project: ${selectedProject}`, margin, y);
     y += 6;
 
-    autoTable(doc, {
-      startY: y,
-      margin: { left: margin, right: margin },
-      head: [["#", ...[["room", "Room"], ["box", "Box Name"], ["type", "Type of Work"], ["w", "W (ft)"], ["h", "H (ft)"], ["area", "Area (sqft)"]].filter(([k]) => colOn(k)).map(([, l]) => l), ...(colOn("rate") ? ["Cost/Sft"] : []), "Amount (Incl. GST)"]],
-      body: withRoomRowSpans(v.items).map((item, i) => {
-        const row = [i + 1];
-        if (colOn("room") && item.roomSpan > 0) row.push({ content: item.roomName, rowSpan: item.roomSpan });
-        if (colOn("box")) row.push(item.boxName);
-        if (colOn("type")) row.push(item.typeOfWork);
-        if (colOn("w")) row.push(item.widthFt ?? "-");
-        if (colOn("h")) row.push(item.heightFt ?? "-");
-        if (colOn("area")) row.push(item.areaSqFt);
-        if (colOn("rate")) row.push(item.areaSqFt > 0 ? `${fmtPdf(item.sellingAmount / item.areaSqFt)}/sqft` : "-");
-        row.push(fmtPdf(item.sellingAmount));
-        return row;
-      }),
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [30, 58, 95] },
-      theme: "grid",
+    quotationTables(v.items).forEach((t, ti, all) => {
+      if (t.service) { doc.setFontSize(10); doc.text(t.title, margin, y); y += 3; }
+      autoTable(doc, {
+        startY: y,
+        margin: { left: margin, right: margin },
+        head: [["#", ...[["room", "Room"], ["box", "Box Name"], ["type", "Type of Work"], ["w", "W (ft)"], ["h", "H (ft)"], ["area", t.areaHead]].filter(([k]) => colOn(k)).map(([, l]) => l), ...(colOn("rate") ? [t.rateHead] : []), "Amount (Incl. GST)"]],
+        body: withRoomRowSpans(t.rows).map((item, i) => {
+          const row = [i + 1];
+          if (colOn("room") && item.roomSpan > 0) row.push({ content: item.roomName, rowSpan: item.roomSpan });
+          if (colOn("box")) row.push(item.boxName);
+          if (colOn("type")) row.push(item.typeOfWork);
+          if (colOn("w")) row.push(item.widthFt ?? "-");
+          if (colOn("h")) row.push(item.heightFt ?? "-");
+          if (colOn("area")) row.push(qtyText(item));
+          if (colOn("rate")) row.push(item.areaSqFt > 0 ? `${fmtPdf(item.sellingAmount / item.areaSqFt)}/${unitOf(item)}` : "-");
+          row.push(fmtPdf(item.sellingAmount));
+          return row;
+        }),
+        ...(all.length > 1 ? { foot: [[{ content: `${t.title} Sub Total (Incl. GST)`, colSpan: beforeAmountCols(), styles: { halign: "right" } }, fmtPdf(tableTotal(t))]] } : {}),
+        footStyles: { fillColor: [243, 244, 246], textColor: 0, fontStyle: "bold" },
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [30, 58, 95] },
+        theme: "grid",
+      });
+      y = doc.lastAutoTable.finalY + 6;
     });
-    y = doc.lastAutoTable.finalY + 6;
 
     if (mrpSavings.mrpTotal > 0) {
       doc.setFillColor(236, 253, 245);
@@ -1119,6 +1195,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
 
   return (
     <div className="page-card">
+      {!customerView && (
       <div className="no-print" style={{ marginBottom: 24, border: "1px solid #e5e7eb", borderRadius: 8 }}>
         <div
           onClick={() => setSettingsOpen((o) => !o)}
@@ -1196,8 +1273,9 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
         </div>
         )}
       </div>
+      )}
 
-      {selectedProjectObj && (
+      {selectedProjectObj && canShare && (
         <div className="no-print" style={{ marginBottom: 20, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <button onClick={() => setShareOpen(true)} style={{ background: "#0f766e", color: "#fff", border: "none", padding: "8px 16px", fontSize: 13, borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
             🔗 Share with customer
@@ -1209,6 +1287,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
       {/* ─── Compare Pricing Models — checkmark above each column picks the
           model whose Quotation/Hardware savings/Cut List renders below, and
           which model Print Preview / Download PDF act on. ─── */}
+      {!customerView && (
       <div className="no-print" style={{ marginBottom: 24 }}>
         <h3>Compare Pricing Models (Economy / Standard / Premium)</h3>
         <div style={{ overflowX: "auto" }}>
@@ -1274,8 +1353,13 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
               </tr>
             </thead>
             <tbody>
-              {withRoomRowSpans(compareVariants[0].items).map((item, i) => (
-                <tr key={item.id} style={{ background: i % 2 === 0 ? "#f8fafc" : "#fff" }}>
+              {quotationTables(compareVariants[0].items).map((t, ti, all) => (
+                <Fragment key={t.title}>
+                  {all.length > 1 && (
+                    <tr><td colSpan={6 + QUOT_MODELS.length * 2} style={{ padding: "8px 14px", background: "#ede9fe", color: "#5b21b6", fontWeight: 700, fontSize: 12 }}>{t.title}</td></tr>
+                  )}
+                  {withRoomRowSpans(t.rows).map((item, k) => { const i = item._i; return (
+                <tr key={item.id} style={{ background: k % 2 === 0 ? "#f8fafc" : "#fff" }}>
                   {item.roomSpan > 0 && (
                     <td rowSpan={item.roomSpan} style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", borderRight: "1px solid #e5e7eb", color: "#374151", verticalAlign: "top", background: "#fff", fontWeight: 600 }}>{item.roomName}</td>
                   )}
@@ -1283,11 +1367,11 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                   <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", color: "#6b7280", whiteSpace: "pre-line" }}>{item.typeOfWork}</td>
                   <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280", whiteSpace: "pre-line" }}>{item.widthFt ?? "—"}</td>
                   <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280", whiteSpace: "pre-line" }}>{item.heightFt ?? "—"}</td>
-                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280" }}>{item.areaSqFt}</td>
+                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280" }}>{qtyText(item)}</td>
                   {compareVariants.map((v) => (
                     <Fragment key={v.model}>
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", borderLeft: "1px solid #e5e7eb", textAlign: "center", color: QUOT_MODEL_COLORS[v.model] }}>
-                        {item.areaSqFt > 0 ? `${formatCurrency(v.items[i].sellingAmount / item.areaSqFt)}/sqft` : <span style={{ color: "#d1d5db" }}>—</span>}
+                        {item.areaSqFt > 0 ? `${formatCurrency(v.items[i].sellingAmount / item.areaSqFt)}/${unitOf(item)}` : <span style={{ color: "#d1d5db" }}>—</span>}
                       </td>
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: "center", fontWeight: 600, color: "#111827" }}>
                         {formatCurrency(v.items[i].sellingAmount)}
@@ -1295,6 +1379,18 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                     </Fragment>
                   ))}
                 </tr>
+                  ); })}
+                  {all.length > 1 && (
+                    <tr style={{ background: "#f3f4f6" }}>
+                      <td colSpan={6} style={{ padding: "8px 14px", fontWeight: 700, color: "#374151", fontSize: 12, textAlign: "right" }}>{t.title} Sub Total (Incl. GST)</td>
+                      {compareVariants.map((v) => (
+                        <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#374151", fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>
+                          {formatCurrency(t.rows.reduce((a, r) => a + (v.items[r._i]?.sellingAmount || 0), 0))}
+                        </td>
+                      ))}
+                    </tr>
+                  )}
+                </Fragment>
               ))}
               <tr style={{ background: "#1e3a5f" }}>
                 <td colSpan={6} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Sub Total</td>
@@ -1342,6 +1438,15 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
           </table>
         </div>
       </div>
+      )}
+
+      {customerView && (
+        <div className="no-print" style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button onClick={() => showPreview(variantPageHTML(buildVariant(selectedModel), false), "Project Quotation — Print Preview", false)} style={{ background: "#2563eb", padding: "7px 14px", fontSize: 13 }}>👁 Print Preview</button>
+          <button onClick={() => downloadQuotationPDF()} style={{ background: "#7c3aed", padding: "7px 14px", fontSize: 13 }}>⬇ Download PDF</button>
+          <span style={{ fontSize: 12, color: "#9ca3af" }}>The quotation exactly as the customer sees it.</span>
+        </div>
+      )}
 
       {/* ─── Printable Quotation ─── */}
       <div className="quotation-print-area" style={{ background: "#fff", padding: 30, border: "1px solid #d1d5db", borderRadius: 10 }}>
@@ -1379,7 +1484,9 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
           <p>No rooms/boxes in this project yet. Apply a template under Rooms &amp; Boxes first.</p>
         ) : (
           <>
-            <h3>Rooms</h3>
+            {quotationTables(itemsWithSelling).map((t, ti, all) => (
+              <Fragment key={t.title}>
+            <h3>{t.title}</h3>
             <table border="1" cellPadding="8" cellSpacing="0" width="100%" style={{ marginBottom: 20 }}>
               <thead>
                 <tr>
@@ -1389,13 +1496,13 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                   {colOn("type") && <th>Type of Work</th>}
                   {colOn("w") && <th>W (ft)</th>}
                   {colOn("h") && <th>H (ft)</th>}
-                  {colOn("area") && <th>Area (sq ft)</th>}
-                  {colOn("rate") && <th>Cost/Sft</th>}
+                  {colOn("area") && <th>{t.areaHead}</th>}
+                  {colOn("rate") && <th>{t.rateHead}</th>}
                   <th>Amount (Incl. GST)</th>
                 </tr>
               </thead>
               <tbody>
-                {withRoomRowSpans(itemsWithSelling).map((item, i) => (
+                {withRoomRowSpans(t.rows).map((item, i) => (
                   <tr key={item.id}>
                     <td>{i + 1}</td>
                     {colOn("room") && item.roomSpan > 0 && <td rowSpan={item.roomSpan}>{item.roomName}</td>}
@@ -1403,13 +1510,23 @@ function ProjectQuotation({ initialProjectName, lockProject = false } = {}) {
                     {colOn("type") && <td style={{ whiteSpace: "pre-line" }}>{item.typeOfWork}</td>}
                     {colOn("w") && <td style={{ whiteSpace: "pre-line" }}>{item.widthFt ?? "—"}</td>}
                     {colOn("h") && <td style={{ whiteSpace: "pre-line" }}>{item.heightFt ?? "—"}</td>}
-                    {colOn("area") && <td>{item.areaSqFt}</td>}
-                    {colOn("rate") && <td>{item.areaSqFt > 0 ? `${formatCurrency(item.sellingAmount / item.areaSqFt)}/sqft` : "—"}</td>}
+                    {colOn("area") && <td>{qtyText(item)}</td>}
+                    {colOn("rate") && <td>{item.areaSqFt > 0 ? `${formatCurrency(item.sellingAmount / item.areaSqFt)}/${unitOf(item)}` : "—"}</td>}
                     <td>{formatCurrency(item.sellingAmount)}</td>
                   </tr>
                 ))}
               </tbody>
+                {all.length > 1 && (
+                  <tfoot>
+                    <tr style={{ background: "#f3f4f6" }}>
+                      <td colSpan={beforeAmountCols()} style={{ textAlign: "right", fontWeight: 700 }}>{t.title} Sub Total (Incl. GST)</td>
+                      <td style={{ fontWeight: 700 }}>{formatCurrency(tableTotal(t))}</td>
+                    </tr>
+                  </tfoot>
+                )}
             </table>
+              </Fragment>
+            ))}
 
             <div style={{ padding: 12, border: "1px solid #e5e7eb", background: "#f9fafb", borderRadius: 8, marginBottom: 20, fontSize: 12, color: "#6b7280" }}>
               Amount includes wood/laminate, edge banding, hardware &amp; consumables, transportation, and carpenter/labor for each room.

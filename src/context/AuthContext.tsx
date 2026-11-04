@@ -3,18 +3,32 @@ import { createContext, useContext, useEffect, useState, useCallback } from "rea
 const TOKEN_KEY = "preinvesto_auth_token_v1";
 const API_URL = import.meta.env.VITE_API_URL || "";
 
+/** What the signed-in person may do. Owners (and older servers) have no limits. */
+export interface Access {
+  owner: boolean;
+  perms?: Record<string, { view: boolean; edit: boolean; delete: boolean }>;
+  /** null/undefined = every project, else the project ids they may work on. */
+  scope?: string[] | null;
+  groupName?: string;
+}
+
 export interface AuthUser {
   id: string;
   name: string;
   email: string;
   mobile: string;
+  /** True for an employee the owner added under Teams (signs in with a username). */
+  isEmployee?: boolean;
+  username?: string;
+  access?: Access;
 }
 
 interface AuthContextType {
   user: AuthUser | null;
   /** True while the stored token is being checked on first load. */
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  /** `identifier` is the owner's email or an employee's username. */
+  login: (identifier: string, password: string) => Promise<void>;
   signup: (name: string, email: string, mobile: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   forgotPassword: (email: string) => Promise<string>;
@@ -115,8 +129,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const data = await postJson("/api/auth_login.php", { email, password });
+  const login = useCallback(async (identifier: string, password: string) => {
+    const data = await postJson("/api/auth_login.php", { email: identifier, password });
     localStorage.setItem(TOKEN_KEY, data.token);
     setUser(data.user);
   }, []);

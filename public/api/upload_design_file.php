@@ -6,10 +6,11 @@
 // filename, and the stored name is random so URLs can't be guessed.
 
 require_once __DIR__ . '/auth_common.php';
+require_once __DIR__ . '/interior_access.php';
 
 auth_headers('POST, OPTIONS');
 require_method(['POST']);
-require_user();
+if (!ia_any_edit(require_principal()['access'])) json_fail(403, 'You do not have permission to upload files.');
 
 const DESIGN_MAX_MB = 25;
 

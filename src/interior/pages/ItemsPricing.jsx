@@ -1,6 +1,8 @@
 import { useState, useRef } from "react";
 import { useAppData } from "../context/AppDataContext";
 import { priceList, GROUP_OPTIONS, UNIT_OPTIONS } from "../data/priceData";
+import ServiceFilter from "../components/ServiceFilter";
+import { ALL_SERVICES, serviceForGroup } from "../utils/services";
 
 const emptyForm = {
   group: "", materialName: "", materialSpec: "", unit: "",
@@ -130,7 +132,13 @@ function ImageManager({ images, onChange }) {
 
 // ── Add / Edit Modal ─────────────────────────────────────────────────────────
 function ItemFormModal({ initial, onSave, onClose, allPrices }) {
-  const [form, setForm] = useState({ ...emptyForm, ...(initial || {}), images: initial?.images || [] });
+  const [form, setForm] = useState(() => {
+    const f = { ...emptyForm, ...(initial || {}), images: initial?.images || [] };
+    // Wood: MRP SFT Rate is just MRP ÷ sheet sqft, shown for entry/reading.
+    const sq = (Number(f.woodDimW) || 0) * (Number(f.woodDimH) || 0);
+    f.mrpSft = f.group === "Wood" && Number(f.mrp) > 0 && sq ? (Number(f.mrp) / sq).toFixed(2) : "";
+    return f;
+  });
   const [nameSuggestions, setNameSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showGroupSuggestions, setShowGroupSuggestions] = useState(false);
@@ -188,13 +196,24 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
     return { rate, withGst };
   };
 
+  // Wood: whenever the discounted rate changes, the SFT Rate (without GST)
+  // follows it, so the per-sqft figure always reflects the discount.
+  const sftFromRate = (f, rate) => {
+    const sq = (Number(f.woodDimW) || 0) * (Number(f.woodDimH) || 0);
+    return f.group === "Wood" && sq && rate !== "" ? (Number(rate) / sq).toFixed(2) : f.sftRate;
+  };
+
   const handleMrp = (e) => {
     const mrp = e.target.value;
     const result = recalcFromMrp(mrp, form.discountPercent);
-    setForm((f) => ({
-      ...f, mrp,
-      ...(result ? { rate: result.rate, rateWithGst: result.withGst } : {}),
-    }));
+    setForm((f) => {
+      const sq = (Number(f.woodDimW) || 0) * (Number(f.woodDimH) || 0);
+      return {
+        ...f, mrp,
+        mrpSft: f.group === "Wood" && mrp !== "" && sq ? (Number(mrp) / sq).toFixed(2) : "",
+        ...(result ? { rate: result.rate, rateWithGst: result.withGst, sftRate: sftFromRate(f, result.rate) } : {}),
+      };
+    });
   };
 
   const handleDiscountPercent = (e) => {
@@ -202,19 +221,21 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
     const result = recalcFromMrp(form.mrp, discountPercent);
     setForm((f) => ({
       ...f, discountPercent,
-      ...(result ? { rate: result.rate, rateWithGst: result.withGst } : {}),
+      ...(result ? { rate: result.rate, rateWithGst: result.withGst, sftRate: sftFromRate(f, result.rate) } : {}),
     }));
   };
 
-  // SFT Rate (₹/sqft, without GST) — Wood only. Editing this drives Rate
-  // without GST (and Rate with GST) as sftRate × total sqft.
-  const handleSftRate = (e) => {
-    const sftRate = e.target.value;
-    const sqft = woodSqFt();
-    const rate = sftRate !== "" && sqft ? (Number(sftRate) * sqft).toFixed(2) : "";
-    const gst = Number(form.gst) || 0;
-    const withGst = rate !== "" ? (Number(rate) * (1 + gst / 100)).toFixed(2) : "";
-    setForm((f) => ({ ...f, sftRate, rate, rateWithGst: withGst }));
+  // Wood: SFT Rate incl. GST (the MRP per sqft) × sheet sqft → MRP, which then
+  // flows through the supplier discount like an MRP typed directly.
+  const handleMrpSft = (e) => {
+    const mrpSft = e.target.value;
+    const sq = woodSqFt();
+    const mrp = mrpSft !== "" && sq ? (Number(mrpSft) * sq).toFixed(2) : "";
+    const result = recalcFromMrp(mrp, form.discountPercent);
+    setForm((f) => ({
+      ...f, mrpSft, mrp,
+      ...(result ? { rate: result.rate, rateWithGst: result.withGst, sftRate: sftFromRate(f, result.rate) } : {}),
+    }));
   };
 
   // Changing the Wood sheet dimensions recomputes Rate without GST from the
@@ -226,6 +247,7 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
       const h = Number(field === "woodDimH" ? value : f.woodDimH) || 0;
       const sqft = w * h;
       const next = { ...f, [field]: value };
+      if (Number(f.mrp) > 0 && sqft) next.mrpSft = (Number(f.mrp) / sqft).toFixed(2);
       if (f.sftRate !== "" && sqft) {
         const rate = (Number(f.sftRate) * sqft).toFixed(2);
         const gst = Number(f.gst) || 0;
@@ -480,6 +502,15 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
               <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>
                 MRP + Supplier Discount → Rate below (or enter Rate directly)
               </div>
+              {form.group === "Wood" && (
+                <div style={{ marginBottom: 10 }}>
+                  <label style={lbl}>MRP SFT Rate (₹/sqft, incl. GST)</label>
+                  <input style={inp} type="number" placeholder="0.00" value={form.mrpSft} onChange={handleMrpSft} />
+                  <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
+                    × {woodSqFt() || 0} sqft = MRP below
+                  </div>
+                </div>
+              )}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px", marginBottom: 10 }}>
                 <div>
                   <label style={lbl}>MRP (₹)</label>
@@ -494,13 +525,10 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
               <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>
                 Pricing — enter any two, the third auto-calculates
               </div>
-              {form.group === "Wood" && (
-                <div style={{ marginBottom: 10 }}>
-                  <label style={lbl}>SFT Rate (₹/sqft, without GST)</label>
-                  <input style={inp} type="number" placeholder="0.00" value={form.sftRate} onChange={handleSftRate} />
-                  <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
-                    × {woodSqFt() || 0} sqft = Rate without GST below
-                  </div>
+              {form.group === "Wood" && Number(form.rateWithGst) > 0 && woodSqFt() > 0 && (
+                <div style={{ marginBottom: 10, fontSize: 12, color: "#374151" }}>
+                  Discounted SFT Rate (incl. GST): <b>₹{(Number(form.rateWithGst) / woodSqFt()).toFixed(2)}/sqft</b>
+                  <span style={{ color: "#9ca3af" }}> · {woodSqFt()} sqft sheet</span>
                 </div>
               )}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 0.6fr 1fr", gap: "0 12px" }}>
@@ -655,6 +683,7 @@ function ItemsPricing() {
   const { prices, setPrices, renamePrice } = useAppData();
 
   const [filterGroup, setFilterGroup] = useState("All");
+  const [filterService, setFilterService] = useState("All");
   const [searchGroup, setSearchGroup] = useState("");
   const [searchName, setSearchName] = useState("");
   const [searchSpec, setSearchSpec] = useState("");
@@ -747,11 +776,13 @@ function ItemsPricing() {
     e.target.value = "";
   };
 
-  const allGroups = ["All", ...Array.from(new Set([...GROUP_OPTIONS, ...prices.map((p) => p.group || p.category || "").filter(Boolean)].filter(Boolean)))];
+  const inService = (grp) => filterService === "All" || serviceForGroup(grp) === filterService;
+  const serviceCounts = Object.fromEntries(ALL_SERVICES.map((s) => [s, prices.filter((p) => serviceForGroup(p.group || p.category || "") === s).length]));
+  const allGroups = ["All", ...Array.from(new Set([...GROUP_OPTIONS, ...prices.map((p) => p.group || p.category || "").filter(Boolean)].filter(Boolean))).filter(inService)];
 
   const filtered = prices.filter((p) => {
     const grp = p.group || p.category || "";
-    const matchTab   = filterGroup === "All" || grp === filterGroup;
+    const matchTab   = (filterGroup === "All" || grp === filterGroup) && inService(grp);
     const matchGroup = !searchGroup || grp.toLowerCase().includes(searchGroup.toLowerCase());
     const matchName  = !searchName  || (p.materialName || "").toLowerCase().includes(searchName.toLowerCase());
     const matchSpec  = !searchSpec  || (p.materialSpec  || "").toLowerCase().includes(searchSpec.toLowerCase());
@@ -827,11 +858,16 @@ function ItemsPricing() {
           <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: "#111827" }}>Items Pricing</h1>
         </div>
 
+{/* Service filter */}
+        <div style={{ padding: "10px 24px", background: "#fff", borderBottom: "1px solid #e5e7eb" }}>
+          <ServiceFilter value={filterService} onChange={(s) => { setFilterService(s); setFilterGroup("All"); }} counts={serviceCounts} />
+        </div>
+
         {/* Group tabs */}
         <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 0", borderBottom: "2px solid #e5e7eb", padding: "12px 24px 0", background: "#fff" }}>
           {allGroups.map((g) => {
             const active = filterGroup === g;
-            const count = g === "All" ? prices.length : prices.filter((p) => (p.group || p.category) === g).length;
+            const count = g === "All" ? prices.filter((p) => inService(p.group || p.category || "")).length : prices.filter((p) => (p.group || p.category) === g).length;
             return (
               <button key={g} onClick={() => setFilterGroup(g)} style={{
                 padding: "7px 14px", fontSize: 12, fontWeight: active ? 700 : 500,
@@ -901,7 +937,11 @@ function ItemsPricing() {
                       {brandName} <span style={{ fontWeight: 400, opacity: 0.7, marginLeft: 6 }}>({items.length})</span>
                     </div>
                   )}
-                  <table cellPadding="0" cellSpacing="0" width="100%" style={{ borderCollapse: "collapse", border: "1px solid #e5e7eb", borderTop: "none", background: "#fff" }}>
+                  <table cellPadding="0" cellSpacing="0" width="100%" style={{ borderCollapse: "collapse", tableLayout: "fixed", border: "1px solid #e5e7eb", borderTop: "none", background: "#fff" }}>
+                    {/* Fixed widths so every brand block lines its columns up with the others */}
+                    <colgroup>
+                      {[56, "18%", "16%", 72, "12%", 84, 92, 92, 66, 112, 64, 176].map((w, ci) => <col key={ci} style={{ width: w }} />)}
+                    </colgroup>
                     <thead>
                       <tr style={{ background: "#f9fafb" }}>
                         {TABLE_HEADERS.map((h, i) => (
@@ -937,15 +977,13 @@ function ItemsPricing() {
                               {rateWithGst > 0 ? `₹${rateWithGst.toLocaleString("en-IN", { maximumFractionDigits: 2 })}` : <span style={{ color: "#d1d5db" }}>—</span>}
                             </td>
                             <td style={{ padding: "7px 10px", textAlign: "center" }}>
-                              {item.mrp > 0 ? (
-                                <input
-                                  type="checkbox"
-                                  checked={item.showInQuotation !== false}
-                                  onChange={() => toggleShowInQuotation(item)}
-                                  title="Show this item's MRP savings in Project Quotation"
-                                  style={{ width: 15, height: 15, cursor: "pointer" }}
-                                />
-                              ) : <span style={{ color: "#d1d5db" }}>—</span>}
+                              <input
+                                type="checkbox"
+                                checked={item.showInQuotation !== false}
+                                onChange={() => toggleShowInQuotation(item)}
+                                title={item.mrp > 0 ? "Show this item's MRP savings in Project Quotation" : "Show this item's MRP savings in Project Quotation (takes effect once an MRP is set)"}
+                                style={{ width: 15, height: 15, cursor: "pointer" }}
+                              />
                             </td>
                             <td style={{ padding: "7px 10px" }}>
                               <div style={{ display: "flex", gap: 4 }}>

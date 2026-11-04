@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Routes, Route, useLocation, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, LogOut, UserCog, TriangleAlert } from "lucide-react";
+import { ArrowLeft, LogOut, UserCog, TriangleAlert, Lock } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { AppDataProvider, useAppData } from "./context/AppDataContext";
 import { UnsavedChangesProvider, useUnsavedChanges } from "./context/UnsavedChangesContext";
@@ -19,6 +19,7 @@ import ProjectQuotation from "./pages/ProjectQuotation";
 import Profile from "./pages/Profile";
 import DesignGallery from "./pages/DesignGallery";
 import Teams from "./pages/Teams";
+import { can, canTab, isOwner, ROUTE_SCREEN, ROUTE_TAB, SCREENS, setProjectLock } from "./utils/access";
 
 import "./interior.css";
 
@@ -38,8 +39,8 @@ const PAGE_TITLES: Record<string, string> = {
   "/interior/profile": "Your Profile",
 };
 
-// These two pages render their own heading, so the shared bar is suppressed.
-const NO_HEADER = ["/interior/items-pricing", "/interior/material-models"];
+// These pages render their own heading (or none), so the shared bar is suppressed.
+const NO_HEADER = ["/interior/items-pricing", "/interior/material-models", "/interior/projects", "/interior/sub-projects"];
 
 function PageHeader() {
   const { pathname } = useLocation();
@@ -81,15 +82,25 @@ function InteriorTopBar() {
       </Link>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <Link
-          to="/interior/profile"
-          onClick={(e) => { e.preventDefault(); guardedNavigate(() => navigate("/interior/profile")); }}
-          style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--stone-700)", textDecoration: "none" }}
-          title="Your profile"
-        >
-          <UserCog size={14} />
-          {user ? user.name : "Profile"}
-        </Link>
+        {user?.isEmployee ? (
+          <span style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--stone-700)" }} title={user.access?.groupName ? `Group: ${user.access.groupName}` : "Employee"}>
+            <UserCog size={14} />
+            {user.name}
+            <span style={{ fontSize: 10, background: "var(--stone-100)", border: "1px solid var(--stone-300)", borderRadius: 999, padding: "1px 7px" }}>
+              {user.access?.groupName || "No group"}
+            </span>
+          </span>
+        ) : (
+          <Link
+            to="/interior/profile"
+            onClick={(e) => { e.preventDefault(); guardedNavigate(() => navigate("/interior/profile")); }}
+            style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--stone-700)", textDecoration: "none" }}
+            title="Your profile"
+          >
+            <UserCog size={14} />
+            {user ? user.name : "Profile"}
+          </Link>
+        )}
         <button
           onClick={() => guardedNavigate(async () => { await flushPendingSave(); await logout(); })}
           style={{
@@ -184,6 +195,102 @@ function SaveStatus() {
 }
 
 /**
+ * Tells an employee when the server refused part of what they changed — their
+ * group doesn't allow it, so it was not saved.
+ */
+function PermissionBanner() {
+  const { deniedKeys } = useAppData();
+  if (!deniedKeys || deniedKeys.length === 0) return null;
+  return (
+    <div
+      className="no-print"
+      style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 20px", background: "#fffbeb", borderBottom: "1px solid #fde68a", color: "#92400e", fontSize: 12 }}
+    >
+      <Lock size={14} style={{ flexShrink: 0 }} />
+      <span>Some changes were not saved because your group doesn't have permission to make them ({deniedKeys.join(", ")}). Reload the page to see the saved data.</span>
+      <button onClick={() => window.location.reload()} style={{ marginLeft: "auto", background: "#92400e", color: "#fff", border: "none", borderRadius: 5, padding: "4px 10px", fontSize: 12, cursor: "pointer" }}>Reload</button>
+    </div>
+  );
+}
+
+// Buttons that delete something, by their label — turned off for employees whose
+// group can edit a screen but not delete from it. (The server refuses the
+// delete regardless; this just keeps the buttons from looking usable.)
+const DELETE_LABEL = /^(del|delete|🗑)(\b|\s|$)/i;
+function useDisableDeleteButtons(ref: React.RefObject<HTMLElement>, active: boolean) {
+  useEffect(() => {
+    const root = ref.current;
+    if (!active || !root) return undefined;
+    const apply = () => {
+      root.querySelectorAll("button").forEach((b) => {
+        const label = (b.textContent || "").trim();
+        const title = b.getAttribute("title") || "";
+        if (DELETE_LABEL.test(label) || /^delete\b/i.test(title)) {
+          b.disabled = true;
+          b.style.opacity = "0.4";
+          b.style.cursor = "not-allowed";
+          b.title = "Your group can't delete here";
+        }
+      });
+    };
+    apply();
+    const obs = new MutationObserver(apply);
+    obs.observe(root, { childList: true, subtree: true });
+    return () => obs.disconnect();
+  }, [ref, active]);
+}
+
+/** Wraps one page: blocks it without View, and marks it read-only without Edit. */
+function Screen({ route, children }: { route: string; children: ReactNode }) {
+  const { user } = useAuth();
+  const access = user?.access;
+  const screen = ROUTE_SCREEN[route];
+  // Project BOQ / Quotation are single project tabs; the Projects page limits
+  // itself tab by tab, so it only needs the "can see any tab" check here.
+  const tab = ROUTE_TAB[route];
+  const tabLevel = route === "projects";
+  const canView = isOwner(access) || (tab ? canTab(access, tab, "view") : can(access, screen, "view"));
+  const canEdit = tab ? canTab(access, tab, "edit") : can(access, screen, "edit");
+  const canDelete = tab ? canTab(access, tab, "delete") : can(access, screen, "delete");
+  const ref = useRef<HTMLDivElement>(null);
+  useDisableDeleteButtons(ref, canView && canEdit && !canDelete && !tabLevel);
+  useEffect(() => {
+    if (!tab) return undefined;
+    setProjectLock({ readOnly: !canEdit, noDelete: !canDelete });
+    return () => setProjectLock(null);
+  }, [tab, canEdit, canDelete]);
+
+  if (!canView) return <NoAccess what={SCREENS.find((s) => s.key === screen)?.label || "this page"} />;
+  return (
+    <div ref={ref}>
+      {!canEdit && !tabLevel && (
+        <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 12px", padding: "8px 12px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, color: "#1e40af", fontSize: 12 }}>
+          <Lock size={13} /> View only — your group can look at this page but not change it.
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
+
+function NoAccess({ what }: { what: string }) {
+  return (
+    <div className="page-card" style={{ textAlign: "center", padding: 48, color: "#6b7280" }}>
+      <Lock size={28} style={{ marginBottom: 10 }} />
+      <h3 style={{ margin: "0 0 6px", color: "#374151" }}>No access</h3>
+      <p style={{ margin: 0, fontSize: 13 }}>Your group doesn't include {what}. Ask the account owner if you need it.</p>
+    </div>
+  );
+}
+
+/** Profile and Teams (people, groups, passwords) are the account owner's alone. */
+function OwnerOnly({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  if (!isOwner(user?.access)) return <NoAccess what="this page" />;
+  return <>{children}</>;
+}
+
+/**
  * The Interior quotation tool, mounted at /interior/*.
  *
  * Everything is wrapped in .interior-app because this tool ships its own
@@ -200,6 +307,7 @@ const InteriorApp = () => {
         <div className="interior-app">
           <InteriorTopBar />
           <WorkspaceLoadBanner />
+          <PermissionBanner />
           <SaveStatus />
           <div className="app-layout">
             <Sidebar />
@@ -207,18 +315,18 @@ const InteriorApp = () => {
               <PageHeader />
               <Routes>
                 <Route index element={<Dashboard />} />
-                <Route path="leads" element={<Leads />} />
-                <Route path="teams" element={<Teams />} />
-                <Route path="projects" element={<Projects />} />
-                <Route path="sub-projects" element={<SubProjects />} />
-                <Route path="template-master" element={<TemplateMaster />} />
-                <Route path="design-gallery" element={<DesignGallery />} />
-                <Route path="items-pricing" element={<ItemsPricing />} />
-                <Route path="material-models" element={<MaterialModels />} />
-                <Route path="dimensions-entry" element={<DimensionsEntry />} />
-                <Route path="project-boq" element={<ProjectBOQ />} />
-                <Route path="project-quotation" element={<ProjectQuotation />} />
-                <Route path="profile" element={<Profile />} />
+                <Route path="leads" element={<Screen route="leads"><Leads /></Screen>} />
+                <Route path="teams" element={<OwnerOnly><Teams /></OwnerOnly>} />
+                <Route path="projects" element={<Screen route="projects"><Projects /></Screen>} />
+                <Route path="sub-projects" element={<Screen route="sub-projects"><SubProjects /></Screen>} />
+                <Route path="template-master" element={<Screen route="template-master"><TemplateMaster /></Screen>} />
+                <Route path="design-gallery" element={<Screen route="design-gallery"><DesignGallery /></Screen>} />
+                <Route path="items-pricing" element={<Screen route="items-pricing"><ItemsPricing /></Screen>} />
+                <Route path="material-models" element={<Screen route="material-models"><MaterialModels /></Screen>} />
+                <Route path="dimensions-entry" element={<Screen route="dimensions-entry"><DimensionsEntry /></Screen>} />
+                <Route path="project-boq" element={<Screen route="project-boq"><ProjectBOQ /></Screen>} />
+                <Route path="project-quotation" element={<Screen route="project-quotation"><ProjectQuotation /></Screen>} />
+                <Route path="profile" element={<OwnerOnly><Profile /></OwnerOnly>} />
               </Routes>
             </div>
           </div>

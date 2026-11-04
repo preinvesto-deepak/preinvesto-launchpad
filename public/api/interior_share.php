@@ -7,21 +7,24 @@
 // Header: Authorization: Bearer <token>
 
 require_once __DIR__ . '/share_common.php';
+require_once __DIR__ . '/interior_access.php';
 
 auth_headers('GET, POST, OPTIONS');
 require_method(['GET', 'POST']);
 
-$user   = require_user();
+$user   = require_principal();
 $userId = $user['id'];
 ensure_share_table();
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    if (!ia_allowed($user, 'projects', 'view')) json_fail(403, 'No access to project sharing.');
     $projectId = (string)($_GET['projectId'] ?? '');
     if ($projectId === '') json_fail(400, 'projectId is required');
     json_ok(['share' => share_meta(load_share($userId, $projectId))]);
 }
 
 // ---- POST ----
+if (!ia_allowed($user, 'projects', 'edit')) json_fail(403, 'You do not have permission to change sharing.');
 $body      = json_body();
 $action    = $body['action'] ?? '';
 $projectId = (string)($body['projectId'] ?? '');

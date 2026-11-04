@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { useAppData } from "../context/AppDataContext";
 import { useUnsavedChanges } from "../context/UnsavedChangesContext";
 import { GROUP_OPTIONS } from "../data/priceData";
+import ServiceFilter from "../components/ServiceFilter";
+import { ALL_SERVICES, serviceForGroup } from "../utils/services";
 
 const MODELS = ["economy", "standard", "premium"];
 const MODEL_LABELS = { economy: "Economy", standard: "Standard", premium: "Premium" };
@@ -163,6 +165,7 @@ function MaterialModels() {
   const [searchGroup, setSearchGroup] = useState("");
   const [searchName, setSearchName] = useState("");
   const [activeGroup, setActiveGroup] = useState("All");
+  const [activeService, setActiveService] = useState("All");
   // Hides materials where Economy/Standard/Premium all resolve to the exact
   // same rate — usually means no tier differentiation has been set for that
   // material yet, so it's just noise once you're hunting for ones that do
@@ -175,11 +178,13 @@ function MaterialModels() {
   // picker: { materialName, model } | null
   const [picker, setPicker] = useState(null);
 
-  const groups = ["All", ...Array.from(new Set(prices.map((p) => p.group || p.category || "").filter(Boolean)))];
+  const inService = (grp) => activeService === "All" || serviceForGroup(grp) === activeService;
+  const serviceCounts = Object.fromEntries(ALL_SERVICES.map((s) => [s, prices.filter((p) => serviceForGroup(p.group || p.category || "") === s).length]));
+  const groups = ["All", ...Array.from(new Set(prices.map((p) => p.group || p.category || "").filter(Boolean))).filter(inService)];
 
   const filtered = prices.filter((p) => {
     const grp = p.group || p.category || "";
-    const matchTab = activeGroup === "All" || grp === activeGroup;
+    const matchTab = (activeGroup === "All" || grp === activeGroup) && inService(grp);
     const matchGroup = !searchGroup || grp.toLowerCase().includes(searchGroup.toLowerCase());
     const matchName = !searchName || (p.materialName || "").toLowerCase().includes(searchName.toLowerCase());
     return matchTab && matchGroup && matchName;
@@ -370,6 +375,11 @@ function MaterialModels() {
         <div style={{ padding: "16px 24px 12px", background: "#fff", borderBottom: "1px solid #e5e7eb" }}>
           <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: "#111827" }}>Material Models</h1>
           <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6b7280" }}>Global template — Economy / Standard / Premium rates for every material. Projects inherit this and can override per-project.</p>
+        </div>
+
+{/* Service filter */}
+        <div style={{ padding: "10px 24px", background: "#fff", borderBottom: "1px solid #e5e7eb" }}>
+          <ServiceFilter value={activeService} onChange={(s) => { setActiveService(s); setActiveGroup("All"); }} counts={serviceCounts} />
         </div>
 
         {/* Group tabs */}

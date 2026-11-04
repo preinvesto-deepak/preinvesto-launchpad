@@ -2,6 +2,12 @@ import { useState, useEffect, Fragment } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
 import { formatCurrency, mmToFeet, feetToMm, roundTo2 } from "../utils/unitConversions";
+import { WARDROBE_SERVICE, SERVICE_NAMES, serviceOf, boxQty, ALL_SERVICES, matchesService, serviceTagOf, serviceForGroup } from "../utils/services";
+import ServiceFilter from "../components/ServiceFilter";
+import { useAuth } from "@/context/AuthContext";
+import { quotationMaterialRows } from "../utils/quotationMaterials";
+import { canTab, isOwner, setProjectLock } from "../utils/access";
+import AddServiceModal from "../components/AddServiceModal";
 import CutSheetOptimizer from "./CutSheetOptimizer";
 import ProjectQuotation from "./ProjectQuotation";
 import { packSheets, findOversizedPieces } from "../utils/binPack";
@@ -310,6 +316,7 @@ function MaterialModal({ prices, onSelect, onClose }) {
 function TemplatePickerModal({ templates = [], folders = [], onSelect, onClose }) {
   const [q, setQ] = useState("");
   const [folderId, setFolderId] = useState(null); // folder being browsed (null = top level)
+  const [svc, setSvc] = useState("All");
   const searching = q.trim() !== "";
 
   // Same folder structure as the Templates page: a template sits in the
@@ -333,9 +340,10 @@ function TemplatePickerModal({ templates = [], folders = [], onSelect, onClose }
   };
 
   // Searching looks through every folder (flat); otherwise just this folder.
-  const filtered = searching
+  const filtered = (searching
     ? templates.filter((t) => (t.templateName || "").toLowerCase().includes(q.toLowerCase()))
-    : templates.filter((t) => templateFolderOf(t) === activeFolderId);
+    : templates.filter((t) => templateFolderOf(t) === activeFolderId)).filter((t) => matchesService(t, svc));
+  const svcCounts = Object.fromEntries(ALL_SERVICES.map((s) => [s, templates.filter((t) => serviceTagOf(t) === s).length]));
   const visibleFolders = searching ? [] : subfoldersOf(activeFolderId);
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -345,6 +353,7 @@ function TemplatePickerModal({ templates = [], folders = [], onSelect, onClose }
           <button onClick={onClose} style={{ background: "#6b7280", padding: "5px 12px", fontSize: 13 }}>✕</button>
         </div>
         <input autoFocus type="text" placeholder="Search templates…" value={q} onChange={(e) => setQ(e.target.value)} style={{ marginBottom: 12 }} />
+        <ServiceFilter value={svc} onChange={setSvc} counts={svcCounts} style={{ marginBottom: 12 }} />
         {!searching && folders.length > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 13, marginBottom: 12 }}>
             {[{ id: null, name: "Templates" }, ...folderPath(activeFolderId)].map((f, i, arr) => (
@@ -640,258 +649,409 @@ function ProjItemPickerModal({ materialName, prices, onSelect, onClose, initialG
   );
 }
 
-function ProjectMaterialModels({ project, prices, globalRates, setProjects }) {
-  const [resetConfirm, setResetConfirm] = useState(false);
-  const [activeGroup, setActiveGroup] = useState("All");
-  const [searchGroup, setSearchGroup] = useState("");
-  const [searchName, setSearchName] = useState("");
-  const [picker, setPicker] = useState(null); // { materialName, model }
-  const [hideEmpty, setHideEmpty] = useState(false);
+// Service work in the project (False Ceiling, Electrical, ...) as analysis rows:
+// one line per service + Items Pricing item, quantities summed across rooms —
+// the same boxes and quantities the Quotation prices.
+function serviceAnalysisRows(rooms) {
+  const acc = new Map();
+  (rooms || []).forEach((room) => (room.boxes || []).forEach((box) => {
+    if (!serviceOf(box) || box.includeInQuotation === false) return;
+    const { qty, unit } = boxQty(box);
+    const material = box.serviceItem || "— no item picked —";
+    const key = `${box.serviceType}::${material}`;
+    const cur = acc.get(key) || { service: box.serviceType, group: box.serviceType, material, requiredQty: 0, unit };
+    cur.requiredQty = Math.round((cur.requiredQty + qty) * 100) / 100;
+    acc.set(key, cur);
+  }));
+  return [...acc.values()];
+}
 
+// ─── Analysis — Material Models + Summary (with and without rates) in one table ─
+// One row per material the project needs (the Summary's quantity), with each
+// pricing model's brand + rate (the Material Models tab) sitting next to the
+// amount it produces, so a brand/rate decision and its cost are read — and
+// changed — in the same place. Rates resolve exactly as the Quotation does:
+// a brand tied to an Items Pricing row uses that row's current rate, a
+// hand-typed rate keeps its own, and a material with neither falls back to its
+// first Items Pricing row.
+//   canSeeRates false → quantities only (the old "Summary (No Rates)")
+//   canEdit false     → brands/rates are read-only
+function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canSeeRates = true, canEdit = true }) {
+  const [activeService, setActiveService] = useState("All");
+  const [activeGroup, setActiveGroup] = useState("All");
+  const [hideSame, setHideSame] = useState(false);
+  const [showUnused, setShowUnused] = useState(false);
+  const [ratesOn, setRatesOn] = useState(true);
+  const [basis, setBasis] = useState("excl"); // rate/amount shown excl. or incl. GST
+  const [nameQ, setNameQ] = useState("");
+  const [groupQ, setGroupQ] = useState("");
+  const [picker, setPicker] = useState(null); // { material, model, group }
+  const [resetConfirm, setResetConfirm] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const rates = project.materialModelRates || {};
+  const showRates = canSeeRates && ratesOn;
   const globalHasRates = Object.keys(globalRates || {}).length > 0;
 
-  const groups = ["All", ...Array.from(new Set((prices || []).map((p) => p.group || p.category || "").filter(Boolean)))];
-  const filteredRaw = (prices || []).filter((p) => {
-    const grp = p.group || p.category || "";
-    const matchTab = activeGroup === "All" || grp === activeGroup;
-    const matchGroup = !searchGroup || grp.toLowerCase().includes(searchGroup.toLowerCase());
-    const matchName = !searchName || (p.materialName || "").toLowerCase().includes(searchName.toLowerCase());
-    return matchTab && matchGroup && matchName;
-  });
-  // A material can have several brand-specific Items Pricing rows (e.g. "9mm
-  // Ply" priced separately from Gurjan/green Ply/Century), but Economy/
-  // Standard/Premium rates are tracked once per material name, not once per
-  // supplier row (see updateField/getRates below), so only list it once here.
-  const seenNames = new Set();
-  const filtered = filteredRaw.filter((p) => {
-    if (!p.materialName || seenNames.has(p.materialName)) return false;
-    seenNames.add(p.materialName);
-    return true;
-  });
-
-  const hasAnyData = (matName) => {
-    const matRates = rates[matName];
-    if (!matRates) return false;
-    return PROJ_MODELS.some((m) => {
-      const cell = matRates[m];
-      return cell && (cell.brand || cell.rate || cell.rateWithGst);
+  // Materials the project doesn't use yet can be listed (quantity 0) so their
+  // brand/rate per model can be set ahead of time — what Material Models was for.
+  const allRows = (() => {
+    if (!showUnused || !showRates) return rows || [];
+    const used = new Set((rows || []).map((r) => r.material));
+    const seen = new Set();
+    const extra = [];
+    (prices || []).forEach((p) => {
+      if (!p.materialName || used.has(p.materialName) || seen.has(p.materialName)) return;
+      seen.add(p.materialName);
+      const g = p.group || p.category || "Other";
+      extra.push({ material: p.materialName, group: g, requiredQty: 0, unit: p.unit || "", service: serviceForGroup(g), unused: true });
     });
-  };
-  const displayItems = hideEmpty ? filtered.filter((item) => hasAnyData(item.materialName)) : filtered;
+    return [...(rows || []), ...extra];
+  })();
 
-  // Rate (excl GST), GST % and Rate+GST keep each other in sync.
-  const updateField = (matName, model, field, value) => {
+  const resolve = (material, model, qty) => {
+    const cell = rates[material]?.[model] || {};
+    const sameName = (prices || []).filter((p) => p.materialName === material);
+    const linked = (cell.priceId && sameName.find((p) => p.id === cell.priceId))
+      || (cell.brand && sameName.find((p) => (p.brand || "").trim().toLowerCase() === cell.brand.trim().toLowerCase()))
+      || null;
+    const fallback = sameName[0] || null;
+    const own = Number(cell.baseRate || cell.rate) || 0;
+    const source = linked || (own ? null : fallback);
+    const rate = linked ? (Number(linked.rate) || 0) : own || (fallback ? Number(fallback.rate) || 0 : 0);
+    const gst = linked ? Number(linked.gst ?? 18)
+      : own ? (cell.gst !== undefined && cell.gst !== "" ? Number(cell.gst) : 18)
+      : fallback ? Number(fallback.gst ?? 18) : 18;
+    const amount = qty * rate;
+    return {
+      brand: cell.brand || source?.brand || "",
+      cellBrand: cell.brand || "",
+      rate, gst, amount, inclAmount: amount * (1 + gst / 100),
+      linked: !!linked,            // follows Items Pricing — edit the rate there
+      isDefault: !linked && !own,  // nothing set for this model: Items Pricing's first row
+    };
+  };
+
+  const costed = allRows.map((row) => {
+    const m = {};
+    PROJ_MODELS.forEach((model) => { m[model] = resolve(row.material, model, row.requiredQty); });
+    return { ...row, m };
+  });
+  const groupStd = {};
+  costed.forEach((r) => { groupStd[r.group] = (groupStd[r.group] || 0) + r.m.standard.amount; });
+  const sorted = [...costed].sort((a, b) =>
+    (a.unused ? 1 : 0) - (b.unused ? 1 : 0) ||
+    (groupStd[b.group] - groupStd[a.group]) || (b.m.standard.amount - a.m.standard.amount));
+
+  // Service tabs: wardrobe materials plus each service's own lines.
+  const svcOf = (r) => r.service || WARDROBE_SERVICE;
+  const service = activeService === "All" || ALL_SERVICES.includes(activeService) ? activeService : "All";
+  const svcCounts = {};
+  sorted.forEach((r) => { svcCounts[svcOf(r)] = (svcCounts[svcOf(r)] || 0) + 1; });
+  const inService = sorted.filter((r) => service === "All" || svcOf(r) === service);
+
+  const groups = ["All", ...Array.from(new Set(inService.map((r) => r.group)))];
+  const isSame = (r) => {
+    const rs = PROJ_MODELS.map((mo) => r.m[mo].rate);
+    return rs.every((x) => x > 0) && rs.every((x) => x === rs[0]);
+  };
+  const samePricedCount = inService.filter(isSame).length;
+  const visible = inService
+    .filter((r) => activeGroup === "All" || r.group === activeGroup)
+    .filter((r) => !groupQ || r.group.toLowerCase().includes(groupQ.toLowerCase()))
+    .filter((r) => !nameQ || r.material.toLowerCase().includes(nameQ.toLowerCase()))
+    .filter((r) => !hideSame || !showRates || !isSame(r));
+  const tableRows = withGroupSpan(visible);
+
+  const totals = (list) => {
+    const t = {};
+    PROJ_MODELS.forEach((mo) => { t[mo] = { excl: 0, incl: 0 }; });
+    list.forEach((r) => PROJ_MODELS.forEach((mo) => { t[mo].excl += r.m[mo].amount; t[mo].incl += r.m[mo].inclAmount; }));
+    return t;
+  };
+  const grand = totals(visible);
+  const pick = (t, mo) => (basis === "incl" ? t[mo].incl : t[mo].excl);
+
+  // Typing a rate keeps the cell's brand/GST; it only applies to a rate that is
+  // not tied to an Items Pricing row.
+  const setCell = (material, model, patch) => {
     setProjects((prev) => prev.map((p) => {
       if (p.id !== project.id) return p;
-      const currentRates = p.materialModelRates || {};
-      const matRates = currentRates[matName] || emptyProjRates();
+      const current = p.materialModelRates || {};
+      const matRates = current[material] || emptyProjRates();
       const cell = matRates[model] || emptyM();
-      let updated = { ...cell, [field]: value };
-      const gst = Number(field === "gst" ? value : updated.gst) || 0;
-      if (field === "rate") {
-        updated.baseRate = value;
-        const base = Number(value) || 0;
-        updated.rate = base > 0 ? String(roundTo2(base)) : "";
-        if (base > 0) updated.rateWithGst = String(roundTo2(base * (1 + gst / 100)));
-      } else if (field === "rateWithGst") {
-        const rg = Number(value) || 0;
-        if (rg > 0) {
-          const rate = String(roundTo2(rg / (1 + gst / 100)));
-          updated.rate = rate;
-          updated.baseRate = rate;
-        }
-      } else if (field === "gst") {
-        const r = Number(updated.baseRate !== undefined && updated.baseRate !== "" ? updated.baseRate : updated.rate) || 0;
-        if (r > 0) updated.rateWithGst = String(roundTo2(r * (1 + Number(value) / 100)));
-      }
-      return { ...p, materialModelRates: { ...currentRates, [matName]: { ...matRates, [model]: updated } } };
+      return { ...p, materialModelRates: { ...current, [material]: { ...matRates, [model]: { ...cell, ...patch } } } };
     }));
   };
-
-  const onPickerSelect = (priceItem) => {
-    const { materialName, model } = picker;
+  const onRate = (material, model, typed, gstNow) => {
+    // What was typed is excl. GST, or incl. GST when that basis is selected.
+    const base = typed === "" ? "" : String(basis === "incl" ? roundTo2(Number(typed) / (1 + gstNow / 100)) : typed);
+    const n = Number(base) || 0;
+    setCell(material, model, {
+      baseRate: base, rate: base, gst: String(gstNow),
+      rateWithGst: n > 0 ? String(roundTo2(n * (1 + gstNow / 100))) : "",
+    });
+  };
+  const onGst = (material, model, value, rateNow) => {
+    const g = Number(value) || 0;
+    setCell(material, model, {
+      baseRate: rateNow > 0 ? String(rateNow) : "", rate: rateNow > 0 ? String(rateNow) : "", gst: value,
+      rateWithGst: rateNow > 0 ? String(roundTo2(rateNow * (1 + g / 100))) : "",
+    });
+  };
+  const onPick = (priceItem) => {
+    const { material, model } = picker;
     const gst = priceItem.gst ?? 18;
     const baseRate = priceItem.rate > 0 ? String(priceItem.rate) : "";
     setProjects((prev) => prev.map((p) => {
       if (p.id !== project.id) return p;
-      const rate = baseRate;
-      const rateWithGst = rate ? String(roundTo2(Number(rate) * (1 + gst / 100))) : "";
-      const currentRates = p.materialModelRates || {};
-      const matRates = currentRates[materialName] || emptyProjRates();
+      const current = p.materialModelRates || {};
+      const matRates = current[material] || emptyProjRates();
       return {
         ...p,
         materialModelRates: {
-          ...currentRates,
-          [materialName]: { ...matRates, [model]: { brand: priceItem.brand || "", baseRate, rate, gst: String(gst), rateWithGst } },
+          ...current,
+          [material]: { ...matRates, [model]: { brand: priceItem.brand || "", baseRate, rate: baseRate, gst: String(gst), rateWithGst: baseRate ? String(roundTo2(Number(baseRate) * (1 + gst / 100))) : "", priceId: priceItem.id } },
         },
       };
     }));
     setPicker(null);
   };
-
   const resetToGlobal = () => {
     const snapshot = JSON.parse(JSON.stringify(globalRates || {}));
-    setProjects((prev) => prev.map((p) =>
-      p.id === project.id ? { ...p, materialModelRates: snapshot } : p
-    ));
+    setProjects((prev) => prev.map((p) => (p.id === project.id ? { ...p, materialModelRates: snapshot } : p)));
     setResetConfirm(false);
   };
 
-  const inp = { fontSize: 11, padding: "3px 6px", borderRadius: 5, border: "1px solid #d1d5db", boxSizing: "border-box" };
+  const th = { background: "#1e3a5f", color: "#fff", padding: "8px 10px", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" };
+  const sub = { background: "#1e3a5f", color: "#cbd5e1", padding: "5px 8px", fontWeight: 600, fontSize: 10, textTransform: "uppercase", whiteSpace: "nowrap", textAlign: "center" };
+  const td = { padding: "6px 8px", borderBottom: "1px solid #e5e7eb", fontSize: 12 };
+  const inp = { fontSize: 11, padding: "3px 5px", borderRadius: 5, border: "1px solid #d1d5db", boxSizing: "border-box" };
+  const search = { padding: "6px 10px", fontSize: 12, borderRadius: 8, border: "1px solid #d1d5db", width: 130, boxSizing: "border-box" };
+  const money = (n) => (n > 0 ? formatCurrency(n) : <span style={{ color: "#d1d5db" }}>—</span>);
+  const leadCols = 4;
 
   return (
-    <div>
-      {/* ── Group Tabs ── */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 0", borderBottom: "2px solid #e5e7eb", padding: "10px 24px 0", background: "#fff" }}>
+    <div style={{ padding: "20px 24px" }}>
+      <div style={{ marginBottom: 12, position: "relative" }}>
+        <h3 style={{ margin: "0 0 4px", fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}>
+          Material Analysis
+          <button
+            type="button" onClick={() => setHelpOpen((v) => !v)} aria-label="How this table works" title="How this table works"
+            style={{ width: 20, height: 20, borderRadius: "50%", border: "1px solid #9ca3af", background: helpOpen ? "#1e3a5f" : "#fff", color: helpOpen ? "#fff" : "#6b7280", fontSize: 12, fontWeight: 700, lineHeight: 1, padding: 0, cursor: "pointer" }}
+          >?</button>
+        </h3>
+        <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
+          {canSeeRates ? "What this project needs, and what each pricing model costs." : "What this project needs, by group and unit."}
+        </p>
+        {helpOpen && (
+          <>
+            <div onClick={() => setHelpOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+            <div role="dialog" style={{ position: "absolute", top: 26, left: 0, zIndex: 41, width: 420, maxWidth: "92vw", background: "#fff", border: "1px solid #d1d5db", borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,0.18)", padding: "12px 14px", fontSize: 12.5, color: "#374151", lineHeight: 1.5 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <strong style={{ fontSize: 13 }}>How this table works</strong>
+                <button type="button" onClick={() => setHelpOpen(false)} style={{ background: "none", border: "none", color: "#9ca3af", fontSize: 15, cursor: "pointer", padding: 0, lineHeight: 1 }}>✕</button>
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, listStyle: "disc" }}>
+                <li>Each row is a material (or service item) the project needs, with its quantity — counted the same way as the Quotation, so the totals match it.</li>
+                {canSeeRates && (
+                  <>
+                    <li>For Economy, Standard and Premium you see the brand and rate chosen and the amount it gives. Pick a brand with 🔍 or type a rate and the amounts move with it.</li>
+                    <li><b style={{ color: "#b45309" }}>Amber brand</b> — differs from the global Material Models template (hover to see it).</li>
+                    <li><i style={{ color: "#9ca3af" }}>Grey italic</i> — nothing set for that model, so the first Items Pricing row is used.</li>
+                    <li>A grey rate box is tied to an Items Pricing row — change it there. A white box is this project's own rate (with its GST %).</li>
+                    <li>Excl. / Incl. GST changes the rates and amounts shown. <b>Include unused materials</b> lists items the project doesn't use yet so you can set their rates ahead of time.</li>
+                    <li>Untick <b>Show rates</b> for a quantities-only view.</li>
+                  </>
+                )}
+                <li>The service tabs separate wardrobe materials from each service's items.</li>
+              </ul>
+            </div>
+          </>
+        )}
+      </div>
+
+      <ServiceFilter
+        value={service}
+        onChange={(v) => { setActiveService(v); setActiveGroup("All"); }}
+        counts={svcCounts}
+        style={{ marginBottom: 10 }}
+      />
+
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 0", borderBottom: "2px solid #e5e7eb", marginBottom: 10 }}>
         {groups.map((g) => {
           const active = activeGroup === g;
           return (
             <button key={g} onClick={() => setActiveGroup(g)} style={{
-              padding: "6px 13px", fontSize: 12, fontWeight: active ? 700 : 500,
-              border: "none", borderBottom: active ? "3px solid #2563eb" : "3px solid transparent",
-              borderRadius: "6px 6px 0 0", background: "transparent",
-              color: active ? "#2563eb" : "#6b7280", cursor: "pointer", whiteSpace: "nowrap", marginBottom: -2,
+              padding: "6px 13px", fontSize: 12, fontWeight: active ? 700 : 500, border: "none",
+              borderBottom: active ? "3px solid #2563eb" : "3px solid transparent", borderRadius: "6px 6px 0 0",
+              background: "transparent", color: active ? "#2563eb" : "#6b7280", cursor: "pointer", whiteSpace: "nowrap", marginBottom: -2,
             }}>{g}</button>
           );
         })}
       </div>
 
-      {/* ── Filter bar ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 24px", borderBottom: "1px solid #e5e7eb", background: "#f9fafb", flexWrap: "wrap" }}>
-        {[{ ph: "Group…", v: searchGroup, s: setSearchGroup }, { ph: "Name…", v: searchName, s: setSearchName }].map(({ ph, v, s }) => (
-          <div key={ph} style={{ position: "relative", flex: 1, minWidth: 120, maxWidth: 220 }}>
-            <input type="text" placeholder={ph} value={v} onChange={(e) => s(e.target.value)}
-              style={{ padding: "7px 26px 7px 10px", fontSize: 13, borderRadius: 8, border: "1px solid #d1d5db", width: "100%", boxSizing: "border-box" }} />
-            {v && <span onClick={() => s("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", cursor: "pointer", color: "#9ca3af", fontSize: 13 }}>✕</span>}
-          </div>
-        ))}
-        <span style={{ fontSize: 12, color: "#9ca3af" }}>{displayItems.length}{hideEmpty ? ` / ${filtered.length}` : ""} items</span>
-        <button
-          onClick={() => setHideEmpty((h) => !h)}
-          style={{ background: hideEmpty ? "#2563eb" : "#f3f4f6", color: hideEmpty ? "#fff" : "#374151", border: "1px solid #d1d5db", borderRadius: 8, padding: "5px 12px", fontSize: 12, cursor: "pointer" }}
-        >
-          {hideEmpty ? "✓ Hide Unused" : "Hide Unused"}
-        </button>
-        {!globalHasRates && (
-          <span style={{ fontSize: 11, color: "#854d0e", background: "#fef9c3", border: "1px solid #fde047", borderRadius: 6, padding: "4px 10px" }}>
-            No global template yet — go to Configure → Material Models, save rates, then Reset here.
-          </span>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 10 }}>
+        <input type="text" placeholder="Group…" value={groupQ} onChange={(e) => setGroupQ(e.target.value)} style={search} />
+        <input type="text" placeholder="Name…" value={nameQ} onChange={(e) => setNameQ(e.target.value)} style={search} />
+        {canSeeRates && (
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#374151", cursor: "pointer" }} title="Untick to see quantities only, without any rate or amount">
+            <input type="checkbox" checked={ratesOn} onChange={(e) => setRatesOn(e.target.checked)} /> Show rates
+          </label>
         )}
-        <button onClick={() => setResetConfirm(true)} style={{ marginLeft: "auto", background: "#dc2626", padding: "7px 14px", fontSize: 12 }}>
-          ↺ Reset to Global Template
-        </button>
+        {showRates && (
+          <>
+            <span style={{ display: "inline-flex", border: "1px solid #d1d5db", borderRadius: 8, overflow: "hidden" }} title="Show rates and amounts excluding or including GST">
+              {[["excl", "Excl. GST"], ["incl", "Incl. GST"]].map(([k, label]) => (
+                <button key={k} onClick={() => setBasis(k)} style={{ border: "none", borderRadius: 0, padding: "5px 10px", fontSize: 12, cursor: "pointer", background: basis === k ? "#1e3a5f" : "#f9fafb", color: basis === k ? "#fff" : "#374151" }}>{label}</button>
+              ))}
+            </span>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#374151", cursor: "pointer" }}>
+              <input type="checkbox" checked={hideSame} onChange={(e) => setHideSame(e.target.checked)} />
+              Hide same-priced{samePricedCount > 0 ? ` (${samePricedCount})` : ""}
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#374151", cursor: "pointer" }} title="Also list Items Pricing materials this project doesn't use yet, so their brand and rate per model can be set ahead of time">
+              <input type="checkbox" checked={showUnused} onChange={(e) => setShowUnused(e.target.checked)} /> Include unused materials
+            </label>
+          </>
+        )}
+        <span style={{ fontSize: 12, color: "#9ca3af" }}>{visible.length} item{visible.length !== 1 ? "s" : ""}</span>
+        {showRates && canEdit && (
+          <button onClick={() => setResetConfirm(true)} style={{ marginLeft: "auto", background: "#dc2626", padding: "6px 12px", fontSize: 12 }}>↺ Reset to Global Template</button>
+        )}
       </div>
+      {showRates && canEdit && !globalHasRates && (
+        <div style={{ fontSize: 11, color: "#854d0e", background: "#fef9c3", border: "1px solid #fde047", borderRadius: 6, padding: "4px 10px", marginBottom: 10 }}>
+          No global template yet — go to Configure → Material Models, save rates, then Reset here.
+        </div>
+      )}
 
-      {/* ── Column header ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "220px 1fr 1fr 1fr", gap: 0, padding: "8px 24px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Material</div>
-        {PROJ_MODELS.map((m) => (
-          <div key={m} style={{ fontSize: 11, fontWeight: 700, color: PROJ_MODEL_COLORS[m], textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", borderLeft: "2px solid #e5e7eb", paddingLeft: 10 }}>
-            {PROJ_MODEL_LABELS[m]}
-          </div>
-        ))}
-      </div>
-
-      {/* ── Items ── */}
-      <div style={{ padding: "0 24px 40px" }}>
-        {displayItems.length === 0 ? (
-          <div style={{ textAlign: "center", padding: 40, color: "#6b7280", border: "2px dashed #e5e7eb", borderRadius: 10, marginTop: 16 }}>
-            {hideEmpty ? "No materials with rates yet. Click \"Hide Unused\" to show all." : "No materials found. Add materials in Items Pricing first."}
-          </div>
-        ) : displayItems.map((item, idx) => {
-          const matRates = rates[item.materialName] || {};
-          return (
-            <div key={item.id} style={{ display: "grid", gridTemplateColumns: "220px 1fr 1fr 1fr", gap: 0, borderBottom: "1px solid #f0f0f0", background: idx % 2 === 0 ? "#fff" : "#fafafa", padding: "8px 0", alignItems: "start" }}>
-              {/* Material info */}
-              <div style={{ padding: "4px 8px 4px 0" }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{item.materialName}</div>
-                <div style={{ fontSize: 11, color: "#9ca3af" }}>{item.group}{item.materialSpec ? ` · ${item.materialSpec}` : ""}{item.unit ? ` · ${item.unit}` : ""}</div>
-              </div>
-              {/* 3 model columns */}
-              {PROJ_MODELS.map((model) => {
-                const rawCell = matRates[model] || emptyM();
-                // Cells saved back when Profit % existed carry a profit-inflated
-                // `rate`/`rateWithGst` next to the real `baseRate` — the base is
-                // the rate now, so show that (and its GST-inclusive value).
-                const hasBase = rawCell.baseRate !== undefined && rawCell.baseRate !== "";
-                const baseRate = hasBase ? rawCell.baseRate : rawCell.rate;
-                let cell = {
-                  ...rawCell, baseRate, rate: baseRate,
-                  rateWithGst: hasBase && Number(baseRate) > 0
-                    ? String(roundTo2(Number(baseRate) * (1 + (Number(rawCell.gst) || 0) / 100)))
-                    : rawCell.rateWithGst,
-                };
-                // A cell's brand ties it to an Items Pricing row (same name +
-                // brand lookup the Project Quotation uses), and tied cells show
-                // that row's CURRENT rate/GST — so the tab never disagrees with
-                // the Quotation. Only a cell matching no row keeps its own numbers.
-                const live = (rawCell.priceId && prices.find((p) => p.id === rawCell.priceId))
-                  || (rawCell.brand && prices.find((p) => p.materialName === item.materialName && (p.brand || "").trim().toLowerCase() === rawCell.brand.trim().toLowerCase()));
-                if (live) {
-                  const liveRate = live.rate > 0 ? String(live.rate) : "";
-                  const liveGst = live.gst !== undefined && live.gst !== null ? String(live.gst) : cell.gst;
-                  cell = {
-                    ...cell, baseRate: liveRate, rate: liveRate, gst: liveGst,
-                    rateWithGst: liveRate ? String(roundTo2(Number(liveRate) * (1 + (Number(liveGst) || 0) / 100))) : "",
-                  };
-                }
-                const lockedToPricing = !!live;
-                const globalBrand = globalRates?.[item.materialName]?.[model]?.brand || "";
-                const projBrand = cell.brand || "";
-                const brandDiffers = globalBrand !== "" && projBrand !== globalBrand;
+      {tableRows.length === 0 ? (
+        <div style={{ padding: "16px 14px", color: "#9ca3af", fontSize: 13, border: "1px solid #e5e7eb", borderRadius: 8 }}>
+          {sorted.length === 0 ? "No materials or services assigned across any room yet." : "Nothing to show with these filters."}
+        </div>
+      ) : (
+        // The table scrolls inside its own box, so its heading (Group / Material / Qty /
+        // the three models) stays put while you scroll through the materials.
+        <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "auto", maxHeight: "calc(100vh - 230px)" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: showRates ? 1180 : 480 }}>
+            <thead style={{ position: "sticky", top: 0, zIndex: 3 }}>
+              {showRates && (
+                <tr>
+                  <th colSpan={leadCols} style={{ background: "#f1f5f9", color: "#374151", padding: "8px 12px", textAlign: "left", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid #e5e7eb" }}>
+                    Grand Total <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>· incl. GST{activeService !== "All" || activeGroup !== "All" || hideSame || groupQ || nameQ ? " · filtered rows" : ""}</span>
+                  </th>
+                  {PROJ_MODELS.map((mo) => (
+                    <th key={mo} colSpan={3} style={{ background: "#fff", color: PROJ_MODEL_COLORS[mo], padding: "8px 12px", textAlign: "center", fontSize: 17, fontWeight: 800, borderTop: `3px solid ${PROJ_MODEL_COLORS[mo]}`, borderLeft: "2px solid #e5e7eb", borderBottom: "1px solid #e5e7eb", whiteSpace: "nowrap" }}>
+                      {formatCurrency(grand[mo].incl)}
+                    </th>
+                  ))}
+                  <th style={{ background: "#f1f5f9", borderLeft: "2px solid #e5e7eb", borderBottom: "1px solid #e5e7eb" }} />
+                </tr>
+              )}
+              <tr>
+                {["Group", "Material", "Qty", "UOM"].map((h, i) => <th key={h} rowSpan={showRates ? 2 : 1} style={{ ...th, textAlign: i < 2 ? "left" : "center" }}>{h}</th>)}
+                {showRates && PROJ_MODELS.map((mo) => (
+                  <th key={mo} colSpan={3} style={{ ...th, background: PROJ_MODEL_COLORS[mo], textAlign: "center", borderLeft: "2px solid rgba(255,255,255,0.3)" }}>{PROJ_MODEL_LABELS[mo]}</th>
+                ))}
+                {showRates && <th rowSpan={2} style={{ ...th, textAlign: "center", borderLeft: "2px solid rgba(255,255,255,0.3)" }}>Premium vs Economy</th>}
+              </tr>
+              {showRates && (
+                <tr>
+                  {PROJ_MODELS.map((mo) => (
+                    <Fragment key={mo}>
+                      <th style={{ ...sub, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>Brand</th>
+                      <th style={sub}>Rate{basis === "incl" ? " +GST" : ""}</th>
+                      <th style={sub}>Amount</th>
+                    </Fragment>
+                  ))}
+                </tr>
+              )}
+            </thead>
+            <tbody>
+              {tableRows.map((row, i) => {
+                const last = i === tableRows.length - 1 || tableRows[i + 1].group !== row.group;
+                const eco = row.m.economy.amount, prem = row.m.premium.amount;
                 return (
-                  <div key={model} style={{ borderLeft: "2px solid #e5e7eb", paddingLeft: 10, paddingRight: 8, display: "flex", flexDirection: "column", gap: 4 }}>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      <input
-                        type="text" placeholder="Brand" value={cell.brand || ""}
-                        onChange={(e) => updateField(item.materialName, model, "brand", e.target.value)}
-                        title={brandDiffers ? `Global template: "${globalBrand}"` : undefined}
-                        style={{ ...inp, color: PROJ_MODEL_COLORS[model], fontWeight: 600, flex: 1, background: brandDiffers ? "#fef3c7" : undefined, borderColor: brandDiffers ? "#f59e0b" : undefined, boxShadow: brandDiffers ? "0 0 0 2px #fde68a" : undefined }}
-                      />
-                      <button
-                        title="Pick from Items Pricing"
-                        onClick={() => setPicker({ materialName: item.materialName, model, group: item.group || item.category })}
-                        style={{ background: "#f3f4f6", border: "1px solid #d1d5db", borderRadius: 6, padding: "0 8px", cursor: "pointer", fontSize: 14, color: "#6b7280", flexShrink: 0 }}
-                      >🔍</button>
-                    </div>
-                    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>Rate (excl GST)</div>
-                        <input type="number" placeholder="0.00" value={cell.baseRate || ""}
-                          readOnly={lockedToPricing} title={lockedToPricing ? "From Items Pricing — edit it there" : undefined}
-                          onChange={(e) => updateField(item.materialName, model, "rate", e.target.value)}
-                          style={{ ...inp, width: "100%" }} />
-                      </div>
-                      <div style={{ width: 46 }}>
-                        <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>GST %</div>
-                        <input type="number" placeholder="18" value={cell.gst !== undefined ? cell.gst : "18"}
-                          readOnly={lockedToPricing} title={lockedToPricing ? "From Items Pricing — edit it there" : undefined}
-                          onChange={(e) => updateField(item.materialName, model, "gst", e.target.value)}
-                          style={{ ...inp, width: 46 }} />
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>Rate+GST</div>
-                        <input type="number" placeholder="0.00" value={cell.rateWithGst || ""}
-                          readOnly={lockedToPricing} title={lockedToPricing ? "From Items Pricing — edit it there" : undefined}
-                          onChange={(e) => updateField(item.materialName, model, "rateWithGst", e.target.value)}
-                          style={{ ...inp, width: "100%", background: cell.rateWithGst ? "#f0fdf4" : undefined }} />
-                      </div>
-                    </div>
-                  </div>
+                  <Fragment key={`${row.group}::${row.material}::${row.boxLabel || ""}`}>
+                    <tr style={{ background: i % 2 === 0 ? "#f8fafc" : "#fff", opacity: row.unused ? 0.75 : 1 }}>
+                      {row._groupFirst && <td rowSpan={row._groupSpan} style={{ ...td, borderRight: "1px solid #e5e7eb", color: "#6b7280", verticalAlign: "top", background: "#fff" }}>{row.group}</td>}
+                      <td style={{ ...td, fontWeight: 600, color: "#111827" }}>
+                        {row.material}
+                        {row.boxLabel && <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#6b7280" }}>— {row.boxLabel}</span>}
+                        {row.unused && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: "#9ca3af" }}>not used</span>}
+                      </td>
+                      <td style={{ ...td, textAlign: "center", fontWeight: 700, color: "#374151" }}>{row.requiredQty}</td>
+                      <td style={{ ...td, textAlign: "center", color: "#6b7280" }}>{row.unit}</td>
+                      {showRates && PROJ_MODELS.map((mo) => {
+                        const c = row.m[mo];
+                        // Same warning Material Models gives: this project's brand
+                        // for the model differs from the global template's.
+                        const globalBrand = globalRates?.[row.material]?.[mo]?.brand || "";
+                        const brandDiffers = globalBrand !== "" && c.cellBrand !== globalBrand;
+                        const shownRate = c.rate > 0 ? roundTo2(basis === "incl" ? c.rate * (1 + c.gst / 100) : c.rate) : "";
+                        return (
+                          <Fragment key={mo}>
+                            <td style={{ ...td, borderLeft: "1px solid #e5e7eb", minWidth: 120 }}>
+                              <div
+                                title={brandDiffers ? `Global template: "${globalBrand}"` : undefined}
+                                style={{ display: "flex", gap: 3, alignItems: "center", ...(brandDiffers ? { background: "#fef3c7", border: "1px solid #f59e0b", boxShadow: "0 0 0 2px #fde68a", borderRadius: 6, padding: "2px 3px" } : null) }}
+                              >
+                                <span style={{ flex: 1, fontWeight: 600, color: c.isDefault ? "#9ca3af" : PROJ_MODEL_COLORS[mo], fontStyle: c.isDefault ? "italic" : "normal", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={c.isDefault ? "No brand set for this model — using the first Items Pricing row" : c.brand}>
+                                  {c.brand || "—"}
+                                </span>
+                                {canEdit && (
+                                  <button title="Pick from Items Pricing" onClick={() => setPicker({ material: row.material, model: mo, group: row.group })}
+                                    style={{ background: "#f3f4f6", border: "1px solid #d1d5db", borderRadius: 5, padding: "0 5px", cursor: "pointer", fontSize: 12, color: "#6b7280", flexShrink: 0 }}>🔍</button>
+                                )}
+                              </div>
+                            </td>
+                            <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
+                              <input type="number" placeholder="0.00" value={shownRate}
+                                readOnly={c.linked || !canEdit}
+                                title={c.linked ? "From Items Pricing — edit it there" : c.isDefault ? "Default from Items Pricing; type a rate to override for this model" : `Rate (${basis === "incl" ? "incl" : "excl"} GST)`}
+                                onChange={(e) => onRate(row.material, mo, e.target.value, c.gst)}
+                                style={{ ...inp, width: 74, textAlign: "right", background: c.linked || !canEdit ? "#f3f4f6" : "#fff", color: c.isDefault ? "#9ca3af" : "#111827" }} />
+                              {!c.linked && (
+                                <input type="number" placeholder="18" value={c.gst} readOnly={!canEdit} title="GST % for this hand-typed rate"
+                                  onChange={(e) => onGst(row.material, mo, e.target.value, c.rate)}
+                                  style={{ ...inp, width: 34, marginLeft: 3, textAlign: "center", color: "#6b7280" }} />
+                              )}
+                            </td>
+                            <td style={{ ...td, textAlign: "center", fontWeight: 600, color: "#111827" }}>{money(basis === "incl" ? c.inclAmount : c.amount)}</td>
+                          </Fragment>
+                        );
+                      })}
+                      {showRates && (
+                        <td style={{ ...td, borderLeft: "1px solid #e5e7eb", textAlign: "center", fontSize: 11, color: prem > eco ? "#b45309" : "#6b7280" }}>
+                          {eco > 0 && prem > 0 ? <>{prem >= eco ? "+" : "−"}{formatCurrency(Math.abs(prem - eco))} <span style={{ color: "#9ca3af" }}>({prem >= eco ? "+" : "−"}{Math.abs(roundTo2(((prem - eco) / eco) * 100))}%)</span></> : "—"}
+                        </td>
+                      )}
+                    </tr>
+                    {showRates && last && (() => {
+                      const t = totals(visible.filter((r) => r.group === row.group));
+                      return (
+                        <tr style={{ background: "#eef2ff" }}>
+                          <td colSpan={leadCols} style={{ ...td, fontWeight: 700, color: "#374151" }}>{row.group} Total</td>
+                          {PROJ_MODELS.map((mo) => (
+                            <td key={mo} colSpan={3} style={{ ...td, textAlign: "right", fontWeight: 700, color: PROJ_MODEL_COLORS[mo], borderLeft: "1px solid #e0e7ff" }}>{formatCurrency(pick(t, mo))}</td>
+                          ))}
+                          <td style={{ ...td, borderLeft: "1px solid #e0e7ff" }} />
+                        </tr>
+                      );
+                    })()}
+                  </Fragment>
                 );
               })}
-            </div>
-          );
-        })}
-      </div>
-
+            </tbody>
+          </table>
+        </div>
+      )}
       {picker && (
         <ProjItemPickerModal
-          materialName={picker.materialName}
+          materialName={picker.material}
           prices={prices}
           initialGroup={picker.group}
-          onSelect={onPickerSelect}
+          onSelect={onPick}
           onClose={() => setPicker(null)}
         />
       )}
@@ -899,9 +1059,9 @@ function ProjectMaterialModels({ project, prices, globalRates, setProjects }) {
       {resetConfirm && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ background: "#fff", borderRadius: 14, padding: 28, width: 420, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
-            <h3 style={{ margin: "0 0 12px", fontSize: 17 }}>Reset Material Models?</h3>
+            <h3 style={{ margin: "0 0 12px", fontSize: 17 }}>Reset to the global template?</h3>
             <p style={{ margin: "0 0 20px", fontSize: 14, color: "#374151" }}>
-              This will overwrite all project-specific rates with the current global template values. This cannot be undone.
+              This overwrites every project-specific brand and rate with the current global template values. This cannot be undone.
             </p>
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={resetToGlobal} style={{ background: "#dc2626" }}>Yes, Reset</button>
@@ -1034,14 +1194,35 @@ function Projects() {
 
   // Project-level tab: "rooms" | "material-models"
   const [projectTab, setProjectTab] = useState("req");
-  // Summary tab: hides materials whose Economy/Standard/Premium rate all
-  // resolve to the exact same value — usually means no tier differentiation
-  // has been set for that material, so it's just noise once comparing models.
-  const [hideSamePricedSummary, setHideSamePricedSummary] = useState(false);
-  // Summary tab's own GST % for its Sft Rate (Incl. GST) row — independent
-  // of each room's own GST% field, since this tab spans every room.
-  const [summaryGstPercent, setSummaryGstPercent] = useState(18);
 
+  // Which project tabs this person's group allows (the owner has them all).
+  const { user: authUser } = useAuth();
+  const tabAccess = authUser?.access;
+  const PROJECT_TAB_DEFS = [
+    ["req", "📝 Req"], ["design", "📐 Design"], ["rooms", "🏠 Rooms & Boxes"], ["analysis", "📊 Material Analysis"],
+    ["quotation", "🧾 Quotation"], ["customer-view", "🧾 Quotation (Customer View)"],
+  ];
+  const tabPermKey = (tab) => tab;
+  // Material Analysis is governed by three of a group's project-tab rules: open
+  // it with any of them, see rates with "with rates" or "change brands & rates",
+  // and change brands/rates with the latter's Edit.
+  const tabCan = (tab, action) => (tab === "analysis"
+    ? (action === "view"
+      ? ["summary-rates", "summary-norates", "material-models"].some((k) => canTab(tabAccess, k, "view"))
+      : canTab(tabAccess, "material-models", action))
+    : canTab(tabAccess, tabPermKey(tab), action));
+  const analysisSeesRates = canTab(tabAccess, "summary-rates", "view") || canTab(tabAccess, "material-models", "view");
+  const allowedProjectTabs = PROJECT_TAB_DEFS.filter(([t]) => tabCan(t, "view"));
+  const tabCanEdit = tabCan(projectTab, "edit");
+  // Land on a tab they may open, and refuse project edits made from a view-only
+  // tab (see setProjectLock) for as long as it is open.
+  useEffect(() => {
+    if (allowedProjectTabs.length && !allowedProjectTabs.some(([t]) => t === projectTab)) setProjectTab(allowedProjectTabs[0][0]);
+  }, [tabAccess, projectTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setProjectLock({ readOnly: !tabCan(projectTab, "edit"), noDelete: !tabCan(projectTab, "delete") });
+    return () => setProjectLock(null);
+  }, [tabAccess, projectTab]); // eslint-disable-line react-hooks/exhaustive-deps
   // Reset tab when switching projects
   useEffect(() => {
     setProjectTab("req");
@@ -1064,6 +1245,7 @@ function Projects() {
 
   // Template picker modal
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [addServiceTarget, setAddServiceTarget] = useState(null); // { roomId, boxId } (Req row) | { active: true } (Rooms & Boxes)
   const [reqTemplateRoomId, setReqTemplateRoomId] = useState(null); // Req tab: room a picked template is applied to
   const [pendingTemplate, setPendingTemplate] = useState(null); // template awaiting confirm-replace
 
@@ -1245,6 +1427,8 @@ function Projects() {
       // above — these drive the Quotation's Type of Work/Area/Carpenter
       // cost instead (see boxAreaSft/buildBoxCarpenterRow in projectRows.js).
       quotationBoxType: "", quotationDoorType: "",
+      // "" = wardrobe/modular; else a service from utils/services.js.
+      serviceType: "", serviceItem: "", serviceQty: "",
       quotationWidthMm: "", quotationHeightMm: "", quotationDepthMm: "",
       matDoor: "", matDoorId: null, matCarcas: "", matCarcasId: null,
       matOutsideLaminate: "", matOutsideLaminateId: null,
@@ -1282,6 +1466,10 @@ function Projects() {
       quotationWidthMm: tb.quotationWidthMm || "",
       quotationHeightMm: tb.quotationHeightMm || "",
       quotationDepthMm: tb.quotationDepthMm || "",
+      // A template tagged with a service makes service boxes (see utils/services.js).
+      serviceType: template.serviceType || "",
+      serviceItem: tb.serviceItem || "",
+      serviceQty: tb.serviceQty ?? "",
       matDoor: tb.matDoor || "", matDoorId: tb.matDoorId ?? null,
       matCarcas: tb.matCarcas || "", matCarcasId: tb.matCarcasId ?? null,
       matOutsideLaminate: tb.matOutsideLaminate || "", matOutsideLaminateId: tb.matOutsideLaminateId ?? null,
@@ -1310,6 +1498,13 @@ function Projects() {
     setPendingTemplate(null);
   };
 
+
+  // Several fields at once (two updateBox calls in a row would each start
+  // from the same stale `boxes` and the second would undo the first).
+  const updateBoxFields = (patch) => {
+    if (!activeBox) return;
+    updateRoomField("boxes", boxes.map((b) => b.id === activeBox.id ? { ...b, ...patch } : b));
+  };
 
   const updateBox = (field, value) => {
     if (!activeBox) return;
@@ -1623,135 +1818,6 @@ function Projects() {
     return [...sheetRows, ...areaRows, ...edgeRows, ...carpRows, ...hwRows, ...fevicolRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
   };
 
-  // ── Material Summary across EVERY room/box in the project (Summary tab) ─────
-  // Same aggregation as computeMatSummary above, but not scoped to activeRoom —
-  // walks every room, using each room's own persisted Edge/Carpenter extra
-  // buffers (not the currently-active room's local state).
-  const computeProjectMatSummary = () => {
-    // id unset: only trust the raw text if it still names a real priced
-    // material — a stale/placeholder string means nothing is required on
-    // that side, not "some unidentified material is required."
-    const rmat = (name, id) => id != null
-      ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name)
-      : ((prices || []).some((pr) => pr.materialName === name) ? name : "");
-    const rows = [];
-    rooms.forEach((room) => {
-      (room.boxes || []).forEach((box) => {
-        let rowNum = 0;
-        boxPartGroups(box).forEach(({ vars, parts, label: groupLabel }) => {
-          (parts || []).forEach((part) => {
-            if (part.req === false) return;
-            rowNum += 1;
-            const w   = resolveFormula(part.widthMm,  vars);
-            const h   = resolveFormula(part.heightMm, vars);
-            const qty = resolveFormula(part.qty,       vars);
-            const label    = `${groupLabel} ${part.partName}`.trim();
-            const rotation = part.rotation || 1;
-            const edgeData = {
-              top:    part.edgeTopReq    !== false ? (part.edgeTop    ?? 0) : 0,
-              bottom: part.edgeBottomReq !== false ? (part.edgeBottom ?? 0) : 0,
-              left:   part.edgeLeftReq   !== false ? (part.edgeLeft   ?? 0) : 0,
-              right:  part.edgeRightReq  !== false ? (part.edgeRight  ?? 0) : 0,
-            };
-            if (part.material || part.materialId) rows.push({ rowNum, w, h, qty, material: rmat(part.material, part.materialId), rotation, label, ...edgeData });
-            if (part.sideA    || part.sideAId)   rows.push({ rowNum, w, h, qty, material: rmat(part.sideA,    part.sideAId),    rotation, label, ...edgeData });
-            if (part.sideB    || part.sideBId)   rows.push({ rowNum, w, h, qty, material: rmat(part.sideB,    part.sideBId),    rotation, label, ...edgeData });
-          });
-        });
-      });
-    });
-    const getStockSize = (mat) => {
-      const s = materialStockSettings?.[mat];
-      return { sheetW: s?.sheetW || 2440, sheetH: s?.sheetH || 1220, sheetTexture: s?.sheetTexture ?? 1 };
-    };
-    // Deliberately scoped to Wood/Laminate only (see areaRows below) —
-    // nesting a real-world sqft-priced material (glass, mirrors, ...) onto a
-    // "stock sheet" and calling the result its quantity made no sense.
-    const isSheetGroup = (g) => g === "Wood" || g === "Laminate";
-    const sheetableRows = rows.filter((r) => isSheetGroup((prices || []).find((p) => p.materialName === r.material)?.group));
-    const packed = packSheets(sheetableRows, getStockSize);
-    const sheetCount = {};
-    packed.forEach((s) => { sheetCount[s.material] = (sheetCount[s.material] || 0) + 1; });
-    const materials = [...new Set(sheetableRows.map((r) => r.material).filter(Boolean))];
-    const sheetRows = materials.map((material) => {
-      const priceEntry = (prices || []).find((p) => p.materialName === material);
-      const extraSheets = Math.max(0, Number(materialStockSettings?.[material]?.extraQty) || 0);
-      return { material, group: priceEntry?.group || "Other", requiredQty: (sheetCount[material] || 0) + extraSheets, unit: priceEntry?.unit || "Sheet" };
-    });
-
-    // Non-Wood/Laminate cut-list materials priced per sqft (glass, mirrors,
-    // stone tops, ...) — real area used (Σ w×h×qty in sqft), not a sheet
-    // count, since these are bought/priced by area, not whole sheets.
-    const areaTotals = {};
-    rows.forEach((r) => {
-      if (!r.material || !+r.w || !+r.h || !+r.qty) return;
-      const priceEntry = (prices || []).find((p) => p.materialName === r.material);
-      const group = priceEntry?.group;
-      if (group === "Wood" || group === "Laminate") return;
-      if (!/sq\.?\s?ft/i.test(priceEntry?.unit || "")) return;
-      const areaSft = mmToFeet(+r.w) * mmToFeet(+r.h) * (+r.qty);
-      areaTotals[r.material] = (areaTotals[r.material] || 0) + areaSft;
-    });
-    const areaRows = Object.entries(areaTotals).map(([material, area]) => {
-      const priceEntry = (prices || []).find((p) => p.materialName === material);
-      const extraArea = Math.max(0, Number(materialStockSettings?.[material]?.extraQty) || 0);
-      const base = Math.round(area * 100) / 100;
-      return { material, group: priceEntry?.group || "Other", requiredQty: Math.round((base + extraArea) * 100) / 100, unit: priceEntry?.unit || "Sq.ft" };
-    });
-
-    const edgeSummed = {};
-    rooms.forEach((room) => {
-      const extra = Math.max(0, Number(room.edgeExtraMtr) || 0);
-      (room.boxes || []).forEach((box) => {
-        Object.entries(computeBoxEdgeBandingMm(box)).forEach(([material, lengthMm]) => {
-          const base = Math.ceil(lengthMm / 1000);
-          edgeSummed[material] = (edgeSummed[material] || 0) + base + extra;
-        });
-      });
-    });
-    const edgeRows = Object.entries(edgeSummed).map(([material, requiredQty]) => ({
-      material, group: "Edge Beading", requiredQty, unit: "Mtr",
-    }));
-
-    // Each room carries its own Combined/Per Box choice (room.quotationSftMode) —
-    // a room with Per Box set shows each of its boxes as its own line here too,
-    // labeled with the room name so it's clear which room a box row belongs to.
-    const carpSummed = {};
-    rooms.forEach((room) => {
-      const perBoxSft = room.quotationSftMode === "perBox";
-      const extra = Math.max(0, Number(room.carpenterExtraSft) || 0);
-      (room.boxes || []).forEach((box) => {
-        if (!box.boxType) return;
-        const base = Number(BOX_VARS(box).Sft) || 0;
-        const qty = Math.round((base + extra) * 100) / 100;
-        const key = perBoxSft ? `${box.boxType}__${room.id}__${box.id}` : box.boxType;
-        if (!carpSummed[key]) carpSummed[key] = { material: box.boxType, requiredQty: 0, boxLabel: perBoxSft ? `${room.subProject} — ${box.name || box.id}` : null };
-        carpSummed[key].requiredQty += qty;
-      });
-    });
-    const carpRows = Object.values(carpSummed).map(({ material, requiredQty, boxLabel }) => ({
-      material, boxLabel, group: "Carpenter", requiredQty: Math.round(requiredQty * 100) / 100,
-      unit: (prices || []).find((p) => p.materialName === material)?.unit || "Sq.ft",
-    }));
-
-    const hwSummed = {};
-    rooms.forEach((room) => {
-      (room.boxes || []).forEach((box) => {
-        (box.hardwareItems || []).forEach((hw) => {
-          if (!hw.materialName) return;
-          const total = (Number(hw.qty) || 0) + (Number(hw.extra) || 0);
-          hwSummed[hw.materialName] = (hwSummed[hw.materialName] || 0) + total;
-        });
-      });
-    });
-    const hwRows = Object.entries(hwSummed).map(([material, requiredQty]) => {
-      const priceEntry = (prices || []).find((p) => p.materialName === material);
-      return { material, group: priceEntry?.group || "Other", requiredQty, unit: priceEntry?.unit || "Nos" };
-    });
-
-    return [...sheetRows, ...areaRows, ...edgeRows, ...carpRows, ...hwRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
-  };
-
   // ── Part CRUD for Sheets Calculation in Room ─────────────────────────────────
   // Every fn takes an optional trailing subSheetId: omitted (undefined), it acts
   // on the box's own parts as before; given, it acts on that Sub Sheet
@@ -1900,40 +1966,37 @@ function Projects() {
           <>
             {/* ── Project Header ── */}
             <div className="no-print" style={{ padding: "12px 24px 8px", borderBottom: "1px solid #e5e7eb", background: "#fff" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                    <h2 style={{ margin: 0, fontSize: 20 }}>{selectedProject.name}</h2>
-                    <select
-                      value={selectedProject.status || "inProgress"}
-                      onChange={(e) => updateProjectField("status", e.target.value)}
-                      style={{
-                        fontSize: 12, fontWeight: 700, padding: "3px 10px", borderRadius: 20, border: "none", cursor: "pointer",
-                        color: projectStatusInfo(selectedProject.status).color, background: projectStatusInfo(selectedProject.status).bg,
-                      }}
-                      title="Project status — also shown on the Dashboard"
-                    >
-                      {PROJECT_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                    </select>
-                    {selectedProject.leadSource && (
-                      <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20, color: "#6b7280", background: "#f3f4f6" }}>
-                        {leadSourceLabel(selectedProject.leadSource)}
-                        {selectedProject.leadSource === "reference" && selectedProject.referredBy ? ` — ${selectedProject.referredBy}` : ""}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 20px", fontSize: 13, color: "#374151" }}>
-                    <span><strong>Client:</strong> {selectedProject.client || "—"}</span>
-                    {selectedProject.contact && <span>📞 {selectedProject.contact}</span>}
-                    {selectedProject.email && <span>✉ {selectedProject.email}</span>}
-                  </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                {/* Name, status, client and location share one line (it wraps only on a narrow window). */}
+                <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px 18px", flex: 1, minWidth: 0 }}>
+                  <h2 style={{ margin: 0, fontSize: 20, whiteSpace: "nowrap" }}>{selectedProject.name}</h2>
+                  <select
+                    value={selectedProject.status || "inProgress"}
+                    onChange={(e) => updateProjectField("status", e.target.value)}
+                    style={{
+                      fontSize: 12, fontWeight: 700, padding: "3px 10px", borderRadius: 20, border: "none", cursor: "pointer", width: "auto", flexShrink: 0,
+                      color: projectStatusInfo(selectedProject.status).color, background: projectStatusInfo(selectedProject.status).bg,
+                    }}
+                    title="Project status — also shown on the Dashboard"
+                  >
+                    {PROJECT_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  </select>
+                  {selectedProject.leadSource && (
+                    <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20, color: "#6b7280", background: "#f3f4f6", whiteSpace: "nowrap" }}>
+                      {leadSourceLabel(selectedProject.leadSource)}
+                      {selectedProject.leadSource === "reference" && selectedProject.referredBy ? ` — ${selectedProject.referredBy}` : ""}
+                    </span>
+                  )}
+                  <span style={{ fontSize: 13, color: "#374151", whiteSpace: "nowrap" }}><strong>Client:</strong> {selectedProject.client || "—"}</span>
+                  {selectedProject.contact && <span style={{ fontSize: 13, color: "#374151", whiteSpace: "nowrap" }}>📞 {selectedProject.contact}</span>}
+                  {selectedProject.email && <span style={{ fontSize: 13, color: "#374151", whiteSpace: "nowrap" }}>✉ {selectedProject.email}</span>}
                   {(selectedProject.location || selectedProject.address) && (
-                    <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>
+                    <span style={{ fontSize: 13, color: "#6b7280" }}>
                       📍 {[selectedProject.location, selectedProject.address].filter(Boolean).join(", ")}
-                    </div>
+                    </span>
                   )}
                 </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
                   <button onClick={() => openAddProject()} style={{ background: "#2563eb", padding: "6px 14px", fontSize: 13 }}>
                     + New Project
                   </button>
@@ -1957,7 +2020,7 @@ function Projects() {
 
             {/* ── Project-level Tab Bar ── */}
             <div className="no-print" style={{ borderBottom: "2px solid #e5e7eb", padding: "0 24px", display: "flex", alignItems: "flex-end", gap: 0, background: "#fff" }}>
-              {[["req", "📝 Req"], ["design", "📐 Design"], ["rooms", "🏠 Rooms & Boxes"], ["material-models", "📋 Material Models"], ["summary", "📊 Summary"], ["quotation", "🧾 Quotation"]].map(([tab, label]) => {
+              {allowedProjectTabs.map(([tab, label]) => {
                 const active = projectTab === tab;
                 return (
                   <button
@@ -1982,15 +2045,22 @@ function Projects() {
               })}
             </div>
 
+            {!isOwner(tabAccess) && !tabCanEdit && (
+              <div className="no-print" style={{ margin: "10px 24px 0", padding: "8px 12px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, color: "#1e40af", fontSize: 12 }}>
+                🔒 View only — your group can look at this tab but not change it.
+              </div>
+            )}
+
             {/* ── Req Tab — every room's boxes in one table, editing the same
                 Quotation Details fields as Rooms & Boxes (shared state, so each
                 view reflects the other). ── */}
             {projectTab === "req" && (() => {
-              const setBoxField = (roomId, boxId, field, value) =>
+              const setBoxFields = (roomId, boxId, patch) =>
                 setSubProjects((prev) => prev.map((s) => s.id !== roomId ? s : {
                   ...s,
-                  boxes: (s.boxes || []).map((b) => b.id === boxId ? { ...b, [field]: value } : b),
+                  boxes: (s.boxes || []).map((b) => b.id === boxId ? { ...b, ...patch } : b),
                 }));
+              const setBoxField = (roomId, boxId, field, value) => setBoxFields(roomId, boxId, { [field]: value });
               const th = { padding: "8px 10px", textAlign: "left", fontSize: 12, fontWeight: 700, color: "#4c1d95", background: "#f5f3ff", borderBottom: "2px solid #ddd6fe", whiteSpace: "nowrap" };
               const td = { padding: "6px 10px", borderBottom: "1px solid #ede9fe", fontSize: 13 };
               const setRoomName = (roomId, name) =>
@@ -2005,13 +2075,22 @@ function Projects() {
                 }));
               // A room with no boxes yet still gets one (box-less) row.
               const rowsFlat = rooms.flatMap((room) => (room.boxes || []).length ? room.boxes.map((box) => ({ room, box })) : [{ room, box: null }]);
-              let totalSft = 0;
-              rowsFlat.forEach(({ box }) => { if (box && box.includeInQuotation !== false) totalSft += quotationAreaSft(box); });
+              // Included work totalled per unit (sft for wardrobe/area services,
+              // rft for granite, pt for lighting/electrical).
+              const qtyTotals = {};
+              rowsFlat.forEach(({ box }) => {
+                if (!box || box.includeInQuotation === false) return;
+                const { qty, unit } = boxQty(box);
+                qtyTotals[unit] = (qtyTotals[unit] || 0) + qty;
+              });
+              const totalText = Object.entries(qtyTotals).filter(([, q]) => q > 0)
+                .map(([u, q]) => `${Math.round(q * 100) / 100} ${u === "sqft" ? "sft" : u}`).join(" · ") || "—";
               return (
                 <div style={{ padding: "20px 24px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
                     <div style={{ fontSize: 13, color: "#6b7280" }}>
                       Quotation Details of every box. Changes here and in Rooms &amp; Boxes are the same data.
+                      Pick a Service for non-wardrobe work (False Ceiling, Tiles, Lighting, Electrical, Granite).
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
                       <button onClick={openAddRoom} style={{ fontSize: 12, padding: "4px 12px" }}>+ Add Room</button>
@@ -2030,13 +2109,14 @@ function Projects() {
                           <tr>
                             <th style={th}>Room</th>
                             <th style={th}>Box</th>
-                            <th style={th}>Box Type</th>
+                            <th style={th}>Service</th>
+                            <th style={th}>Box Type / Item</th>
                             <th style={th}>Door Type</th>
-                            <th style={{ ...th, textAlign: "center" }}>Include in Quotation</th>
+                            <th style={{ ...th, textAlign: "center", lineHeight: 1.25, width: 84 }}>Include in<br />Quotation</th>
                             <th style={th}>H ({dimUnit})</th>
                             <th style={th}>W ({dimUnit})</th>
                             <th style={th}>D ({dimUnit})</th>
-                            <th style={{ ...th, textAlign: "right" }}>Area Sft</th>
+                            <th style={{ ...th, textAlign: "right" }}>Area / Qty</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -2048,7 +2128,7 @@ function Projects() {
                               return (
                                 <tr key={`${room.id}-empty`}>
                                   <td style={{ ...td, fontWeight: 700, color: "#1e3a5f", borderTop: sep }}><input type="text" value={room.subProject} onChange={(e) => setRoomName(room.id, e.target.value)} placeholder="Room name" style={{ ...nameIn, fontWeight: 700 }} /><button onClick={() => { setReqTemplateRoomId(room.id); setTemplatePickerOpen(true); }} style={{ display: "block", background: "none", border: "none", color: "#1d4ed8", cursor: "pointer", fontSize: 11, padding: 0, fontWeight: 400 }}>📐 Apply Template</button></td>
-                                  <td colSpan={8} style={{ ...td, borderTop: sep, color: "#9ca3af" }}>
+                                  <td colSpan={9} style={{ ...td, borderTop: sep, color: "#9ca3af" }}>
                                     No boxes yet
                                     <button onClick={() => addBoxToRoom(room.id)} style={{ marginLeft: 12, background: "none", border: "none", color: "#7c3aed", cursor: "pointer", fontSize: 12 }}>+ Add Box</button>
                                   </td>
@@ -2056,6 +2136,12 @@ function Projects() {
                               );
                             }
                             const excluded = box.includeInQuotation === false;
+                            const svc = serviceOf(box);
+                            const q = boxQty(box);
+                            // Which of H / W / D apply to this row's service.
+                            const dimEnabled = (key) => !svc
+                              || (svc.measure === "area" && key !== "quotationDepthMm")
+                              || (svc.measure === "length" && key === "quotationWidthMm");
                             return (
                               <tr key={`${room.id}-${box.id}`} style={{ opacity: excluded ? 0.55 : 1 }}>
                                 <td style={{ ...td, fontWeight: 700, color: "#1e3a5f", borderTop: sep }}>{firstOfRoom && (<><input type="text" value={room.subProject} onChange={(e) => setRoomName(room.id, e.target.value)} placeholder="Room name" style={{ ...nameIn, fontWeight: 700 }} /><button onClick={() => { setReqTemplateRoomId(room.id); setTemplatePickerOpen(true); }} style={{ display: "block", background: "none", border: "none", color: "#1d4ed8", cursor: "pointer", fontSize: 11, padding: 0, fontWeight: 400 }}>📐 Apply Template</button></>)}</td>
@@ -2066,19 +2152,38 @@ function Projects() {
                                   )}
                                 </td>
                                 <td style={{ ...td, borderTop: sep }}>
-                                  <select value={box.quotationBoxType || ""} onChange={(e) => setBoxField(room.id, box.id, "quotationBoxType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 130 }}>
+                                  <select
+                                    value={box.serviceType || ""}
+                                    onChange={(e) => e.target.value === "__new__"
+                                      ? setAddServiceTarget({ roomId: room.id, boxId: box.id })
+                                      : setBoxFields(room.id, box.id, { serviceType: e.target.value, serviceItem: "" })}
+                                    style={{ fontSize: 12, padding: "3px 6px", width: 140 }}
+                                  >
+                                    <option value="">{WARDROBE_SERVICE}</option>
+                                    {SERVICE_NAMES.map((n) => <option key={n} value={n}>{n}</option>)}
+                                    <option value="__new__">+ Add new service…</option>
+                                  </select>
+                                </td>
+                                <td style={{ ...td, borderTop: sep }}>
+                                  <select
+                                    value={(svc ? box.serviceItem : box.quotationBoxType) || ""}
+                                    onChange={(e) => setBoxField(room.id, box.id, svc ? "serviceItem" : "quotationBoxType", e.target.value)}
+                                    style={{ fontSize: 12, padding: "3px 6px", width: 130 }}
+                                  >
                                     <option value="">— Select —</option>
-                                    {(prices || []).filter((p) => p.group === "Carpenter").map((p) => (
+                                    {(prices || []).filter((p) => p.group === (svc ? svc.group : "Carpenter")).map((p) => (
                                       <option key={p.id} value={p.materialName}>{p.materialName}</option>
                                     ))}
                                   </select>
                                 </td>
                                 <td style={{ ...td, borderTop: sep }}>
-                                  <select value={box.quotationDoorType || ""} onChange={(e) => setBoxField(room.id, box.id, "quotationDoorType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 130 }}>
-                                    <option value="">— Select —</option>
-                                    <option value="Sliding Door">Sliding Door</option>
-                                    <option value="Swing Door">Swing Door</option>
-                                  </select>
+                                  {svc ? <span style={{ color: "#9ca3af" }}>—</span> : (
+                                    <select value={box.quotationDoorType || ""} onChange={(e) => setBoxField(room.id, box.id, "quotationDoorType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 130 }}>
+                                      <option value="">— Select —</option>
+                                      <option value="Sliding Door">Sliding Door</option>
+                                      <option value="Swing Door">Swing Door</option>
+                                    </select>
+                                  )}
                                 </td>
                                 <td style={{ ...td, textAlign: "center", borderTop: sep }}>
                                   <input
@@ -2091,12 +2196,14 @@ function Projects() {
                                 {["quotationHeightMm", "quotationWidthMm", "quotationDepthMm"].map((key) => {
                                   const mmVal = box[key] ?? "";
                                   const ftVal = mmVal !== "" ? roundTo2(mmToFeet(Number(mmVal))) : "";
+                                  const enabled = dimEnabled(key);
                                   return (
                                     <td key={key} style={{ ...td, borderTop: sep }}>
                                       <input
                                         type="number"
-                                        value={dimUnit === "mm" ? mmVal : ftVal}
-                                        placeholder={dimUnit}
+                                        disabled={!enabled}
+                                        value={enabled ? (dimUnit === "mm" ? mmVal : ftVal) : ""}
+                                        placeholder={enabled ? dimUnit : "—"}
                                         onChange={(e) => {
                                           if (dimUnit === "mm") setBoxField(room.id, box.id, key, e.target.value);
                                           else {
@@ -2104,20 +2211,24 @@ function Projects() {
                                             if (!isNaN(ft)) setBoxField(room.id, box.id, key, e.target.value === "" ? "" : String(Math.round(feetToMm(ft))));
                                           }
                                         }}
-                                        style={dimIn}
+                                        style={{ ...dimIn, ...(enabled ? {} : { background: "#f3f4f6" }) }}
                                       />
                                     </td>
                                   );
                                 })}
-                                <td style={{ ...td, textAlign: "right", fontWeight: 600, borderTop: sep }}>{quotationAreaSft(box) || "—"}</td>
+                                <td style={{ ...td, textAlign: "right", fontWeight: 600, borderTop: sep, whiteSpace: "nowrap" }}>
+                                  {svc?.measure === "points" ? (
+                                    <><input type="number" min="0" value={box.serviceQty ?? ""} onChange={(e) => setBoxField(room.id, box.id, "serviceQty", e.target.value)} placeholder="Qty" style={dimIn} /> pt</>
+                                  ) : (q.qty ? `${q.qty}${q.unit === "sqft" ? "" : ` ${q.unit}`}` : "—")}
+                                </td>
                               </tr>
                             );
                           })}
                         </tbody>
                         <tfoot>
                           <tr>
-                            <td colSpan={8} style={{ ...td, textAlign: "right", fontWeight: 700, background: "#faf5ff" }}>Total (included boxes)</td>
-                            <td style={{ ...td, textAlign: "right", fontWeight: 700, background: "#faf5ff" }}>{totalSft} sft</td>
+                            <td colSpan={9} style={{ ...td, textAlign: "right", fontWeight: 700, background: "#faf5ff" }}>Total (included boxes)</td>
+                            <td style={{ ...td, textAlign: "right", fontWeight: 700, background: "#faf5ff", whiteSpace: "nowrap" }}>{totalText}</td>
                           </tr>
                         </tfoot>
                       </table>
@@ -2127,20 +2238,18 @@ function Projects() {
               );
             })()}
 
-            {/* ── Project Material Models Tab ── */}
-            {projectTab === "material-models" && (
-              <ProjectMaterialModels
-                project={selectedProject}
-                prices={prices}
-                globalRates={materialModelRates}
-                setProjects={setProjects}
-              />
-            )}
-
             {/* ── Project Quotation Tab ── */}
             {projectTab === "quotation" && (
               <div style={{ padding: "20px 24px" }}>
                 <ProjectQuotation initialProjectName={selectedProject.name} lockProject />
+              </div>
+            )}
+
+            {/* ── Quotation, customer's view — just the customer-facing quotation
+                (no settings, no model comparison) with Print / PDF / Share. ── */}
+            {projectTab === "customer-view" && (
+              <div style={{ padding: "20px 24px" }}>
+                <ProjectQuotation initialProjectName={selectedProject.name} lockProject customerView />
               </div>
             )}
 
@@ -2157,201 +2266,28 @@ function Projects() {
               />
             )}
 
-            {/* ── Project Summary Tab — total material required + costed across
-                every room, with each Items Pricing group's own subtotal so a
-                model/budget decision can be made group-by-group, not just on
-                the grand total. ── */}
-            {projectTab === "summary" && (() => {
-              // Rate for a material under one Material Model variant — this
-              // project's own override if set, else the global Items Pricing rate.
-              const modelRateFor = (material, model) => {
-                const modelEntry = selectedProject?.materialModelRates?.[material]?.[model];
-                if (modelEntry?.rate) return Number(modelEntry.rate);
-                const rateData = (prices || []).find((p) => p.materialName === material);
-                return rateData ? Number(rateData.rate) : 0;
-              };
-              // Cost each row (Standard model — the default-selected tier
-              // elsewhere) up front so both the group ordering and the
-              // material ordering within a group can rank by total cost,
-              // highest first, instead of alphabetically.
-              const costedRows = computeProjectMatSummary().map((row) => ({
-                ...row, _stdAmount: row.requiredQty * modelRateFor(row.material, "standard"),
-              }));
-              const groupTotals = {};
-              costedRows.forEach((row) => {
-                const g = (groupTotals[row.group] ??= { economy: 0, standard: 0, premium: 0 });
-                PROJ_MODELS.forEach((model) => {
-                  g[model] += row.requiredQty * modelRateFor(row.material, model);
-                });
-              });
-              const modelTotals = { economy: 0, standard: 0, premium: 0 };
-              Object.values(groupTotals).forEach((g) => {
-                PROJ_MODELS.forEach((model) => { modelTotals[model] += g[model]; });
-              });
-              // Sum of every "Include in Quotation" box's Quotation Details area
-              // (quotationAreaSft, falling back to Section 1's H/W when left blank)
-              // across every room in the project — the denominator for the Sft
-              // Rate row below the Grand Total, matching what the Project
-              // Quotation itself counts.
-              const totalAreaSft = rooms.reduce((sum, room) =>
-                sum + (room.boxes || [])
-                  .filter((b) => b.includeInQuotation !== false)
-                  .reduce((s, b) => s + quotationAreaSft(b), 0),
-              0);
-              const sortedRows = [...costedRows].sort((a, b) =>
-                groupTotals[b.group].standard - groupTotals[a.group].standard ||
-                b._stdAmount - a._stdAmount
-              );
-              // "Same priced" = Economy/Standard/Premium all resolve to the
-              // same non-zero rate — no tier differentiation set for that
-              // material, so it's just noise once you're comparing models.
-              const isSamePriced = (row) => {
-                const rates = PROJ_MODELS.map((m) => modelRateFor(row.material, m));
-                if (rates.some((r) => !r)) return false;
-                return rates.every((r) => r === rates[0]);
-              };
-              const samePricedCount = sortedRows.filter(isSamePriced).length;
-              const visibleRows = hideSamePricedSummary ? sortedRows.filter((r) => !isSamePriced(r)) : sortedRows;
-              const summaryRows = withGroupSpan(visibleRows);
-              return (
-                <div style={{ padding: "20px 24px" }}>
-                  <div style={{ marginBottom: 14, display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                    <div>
-                      <h3 style={{ margin: "0 0 4px", fontSize: 16 }}>Material Summary — All Rooms</h3>
-                      <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
-                        Total material required and costed (Economy/Standard/Premium) across {rooms.length} room{rooms.length !== 1 ? "s" : ""} in this project, with each group's own contribution to the total.
-                      </p>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
-                        <span style={{ fontWeight: 600 }}>GST</span>
-                        <input
-                          type="number" step="1" min={0}
-                          value={summaryGstPercent}
-                          onChange={(e) => setSummaryGstPercent(e.target.value)}
-                          onBlur={(e) => setSummaryGstPercent(Math.max(0, Number(e.target.value) || 0))}
-                          style={{ width: 50, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
-                        />
-                        <span>%</span>
-                      </label>
-                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
-                        <input type="checkbox" checked={hideSamePricedSummary} onChange={(e) => setHideSamePricedSummary(e.target.checked)} />
-                        Hide same-priced items{samePricedCount > 0 ? ` (${samePricedCount})` : ""}
-                      </label>
-                    </div>
-                  </div>
-                  {summaryRows.length === 0 ? (
-                    <div style={{ padding: "16px 14px", color: "#9ca3af", fontSize: 13, border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff" }}>
-                      {sortedRows.length === 0 ? "No materials assigned across any room yet." : "All materials are same-priced across models — nothing left to show with the filter on."}
-                    </div>
-                  ) : (
-                    <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflowX: "auto" }}>
-                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 900 }}>
-                        <thead>
-                          <tr>
-                            <th rowSpan={2} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Group</th>
-                            <th rowSpan={2} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Material</th>
-                            <th rowSpan={2} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Required Qty</th>
-                            <th rowSpan={2} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>UOM</th>
-                            {PROJ_MODELS.map((model) => (
-                              <th key={model} colSpan={2} style={{ background: PROJ_MODEL_COLORS[model], color: "#fff", padding: "6px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.3)" }}>{PROJ_MODEL_LABELS[model]}</th>
-                            ))}
-                          </tr>
-                          <tr>
-                            {PROJ_MODELS.map((model) => (
-                              <Fragment key={model}>
-                                <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.15)" }}>Rate</th>
-                                <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Amount</th>
-                              </Fragment>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {summaryRows.map((row, i) => {
-                            const isLastOfGroup = i === summaryRows.length - 1 || summaryRows[i + 1].group !== row.group;
-                            return (
-                              <Fragment key={`${row.group}::${row.material}::${row.boxLabel || ""}`}>
-                                <tr style={{ background: i % 2 === 0 ? "#f8fafc" : "#fff" }}>
-                                  {row._groupFirst && (
-                                    <td rowSpan={row._groupSpan} style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", borderRight: "1px solid #e5e7eb", color: "#6b7280", verticalAlign: "top", background: "#fff" }}>{row.group}</td>
-                                  )}
-                                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", fontWeight: 600, color: "#111827" }}>
-                                    {row.material}
-                                    {row.boxLabel && <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#6b7280" }}>— {row.boxLabel}</span>}
-                                  </td>
-                                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#374151", fontWeight: 700 }}>{row.requiredQty}</td>
-                                  <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280" }}>{row.unit}</td>
-                                  {PROJ_MODELS.map((model) => {
-                                    const rate = modelRateFor(row.material, model);
-                                    const amount = row.requiredQty * rate;
-                                    return (
-                                      <Fragment key={model}>
-                                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", borderLeft: "1px solid #e5e7eb", textAlign: "center", color: PROJ_MODEL_COLORS[model] }}>
-                                          {rate > 0 ? formatCurrency(rate) : <span style={{ color: "#d1d5db" }}>—</span>}
-                                        </td>
-                                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: "center", fontWeight: 600, color: "#111827" }}>
-                                          {amount > 0 ? formatCurrency(amount) : <span style={{ color: "#d1d5db" }}>—</span>}
-                                        </td>
-                                      </Fragment>
-                                    );
-                                  })}
-                                </tr>
-                                {isLastOfGroup && (
-                                  <tr style={{ background: "#eef2ff" }}>
-                                    <td colSpan={4} style={{ padding: "7px 14px", fontWeight: 700, color: "#374151", fontSize: 12 }}>{row.group} Total</td>
-                                    {PROJ_MODELS.map((model) => (
-                                      <td key={model} colSpan={2} style={{ padding: "7px 14px", textAlign: "center", fontWeight: 700, color: PROJ_MODEL_COLORS[model], fontSize: 12, borderLeft: "1px solid #e0e7ff" }}>
-                                        {formatCurrency(groupTotals[row.group][model])}
-                                      </td>
-                                    ))}
-                                  </tr>
-                                )}
-                              </Fragment>
-                            );
-                          })}
-                          <tr style={{ background: "#1e3a5f" }}>
-                            <td colSpan={4} style={{ padding: "9px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Grand Total (Excl. GST)</td>
-                            {PROJ_MODELS.map((model) => (
-                              <td key={model} colSpan={2} style={{ padding: "9px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 12, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>
-                                {formatCurrency(modelTotals[model])}
-                              </td>
-                            ))}
-                          </tr>
-                          <tr style={{ background: "#334e68" }}>
-                            <td colSpan={4} style={{ padding: "9px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Grand Total (Incl. GST {summaryGstPercent}%)</td>
-                            {PROJ_MODELS.map((model) => (
-                              <td key={model} colSpan={2} style={{ padding: "9px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 12, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>
-                                {formatCurrency(modelTotals[model] * (1 + (Number(summaryGstPercent) || 0) / 100))}
-                              </td>
-                            ))}
-                          </tr>
-                          <tr style={{ background: "#f1f5f9" }}>
-                            <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 700, color: "#374151", fontSize: 12 }}>
-                              Sft Rate (Excl. GST) <span style={{ fontWeight: 400, color: "#9ca3af" }}>(Grand Total ÷ {roundTo2(totalAreaSft)} sqft — Quotation Details area)</span>
-                            </td>
-                            {PROJ_MODELS.map((model) => (
-                              <td key={model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: PROJ_MODEL_COLORS[model], fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>
-                                {totalAreaSft > 0 ? `${formatCurrency(modelTotals[model] / totalAreaSft)}/sqft` : <span style={{ color: "#d1d5db" }}>—</span>}
-                              </td>
-                            ))}
-                          </tr>
-                          <tr style={{ background: "#e5e7eb" }}>
-                            <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 700, color: "#374151", fontSize: 12 }}>
-                              Sft Rate (Incl. GST {summaryGstPercent}%) <span style={{ fontWeight: 400, color: "#9ca3af" }}>(Grand Total ÷ {roundTo2(totalAreaSft)} sqft — Quotation Details area)</span>
-                            </td>
-                            {PROJ_MODELS.map((model) => (
-                              <td key={model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: PROJ_MODEL_COLORS[model], fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>
-                                {totalAreaSft > 0 ? `${formatCurrency((modelTotals[model] * (1 + (Number(summaryGstPercent) || 0) / 100)) / totalAreaSft)}/sqft` : <span style={{ color: "#d1d5db" }}>—</span>}
-                              </td>
-                            ))}
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
+            {/* ── Material Analysis — what the project needs, with the brand and rate
+                chosen per pricing model and the amount each gives. Replaces the old
+                Material Models and Summary (with / without rates) tabs. ── */}
+            {projectTab === "analysis" && (
+              <ProjectAnalysis
+                rows={[
+                  // Quantities as the Quotation counts them, so these totals tie to it.
+                  ...quotationMaterialRows(
+                    rooms.map((room) => ({ ...room, boxes: (room.boxes || []).filter((b) => b.includeInQuotation !== false && !serviceOf(b)) })),
+                    prices,
+                    materialStockSettings
+                  ).map((r) => ({ ...r, service: WARDROBE_SERVICE })),
+                  ...serviceAnalysisRows(rooms),
+                ]}
+                project={selectedProject}
+                prices={prices}
+                globalRates={materialModelRates}
+                setProjects={setProjects}
+                canSeeRates={analysisSeesRates}
+                canEdit={tabCanEdit}
+              />
+            )}
 
             {/* ── Room Tabs — only shown when Rooms tab is active ── */}
             {projectTab === "rooms" && <div style={{ borderBottom: "2px solid #e5e7eb", padding: "0 24px", display: "flex", alignItems: "flex-end", gap: 2, flexWrap: "wrap", background: "#fff" }}>
@@ -2589,10 +2525,28 @@ function Projects() {
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <label style={{ fontSize: 12, fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>Box Type</label>
-                              <select value={activeBox.quotationBoxType || ""} onChange={(e) => updateBox("quotationBoxType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 120 }}>
+                              <label style={{ fontSize: 12, fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>Service</label>
+                              <select
+                                value={activeBox.serviceType || ""}
+                                onChange={(e) => e.target.value === "__new__"
+                                  ? setAddServiceTarget({ active: true })
+                                  : updateBoxFields({ serviceType: e.target.value, serviceItem: "" })}
+                                style={{ fontSize: 12, padding: "3px 6px", width: 140 }}
+                              >
+                                <option value="">{WARDROBE_SERVICE}</option>
+                                {SERVICE_NAMES.map((n) => <option key={n} value={n}>{n}</option>)}
+                                <option value="__new__">+ Add new service…</option>
+                              </select>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <label style={{ fontSize: 12, fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>{serviceOf(activeBox) ? "Item" : "Box Type"}</label>
+                              <select
+                                value={(serviceOf(activeBox) ? activeBox.serviceItem : activeBox.quotationBoxType) || ""}
+                                onChange={(e) => updateBox(serviceOf(activeBox) ? "serviceItem" : "quotationBoxType", e.target.value)}
+                                style={{ fontSize: 12, padding: "3px 6px", width: 120 }}
+                              >
                                 <option value="">— Select —</option>
-                                {(prices || []).filter((p) => p.group === "Carpenter").map((p) => (
+                                {(prices || []).filter((p) => p.group === (serviceOf(activeBox)?.group || "Carpenter")).map((p) => (
                                   <option key={p.id} value={p.materialName}>{p.materialName}</option>
                                 ))}
                               </select>
@@ -2647,16 +2601,22 @@ function Projects() {
                               style={{ fontSize: 11, padding: "3px 10px", background: "#ede9fe", color: "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 6 }}
                             >{dimUnit === "mm" ? "→ ft" : "→ mm"}</button>
                             <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
-                              <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>Area Sft</span>
+                              {serviceOf(activeBox)?.measure === "points" && (
+                              <>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>Qty (points)</span>
+                                <input type="number" min="0" value={activeBox.serviceQty ?? ""} onChange={(e) => updateBox("serviceQty", e.target.value)} style={{ width: 72, fontSize: 12, padding: "3px 6px" }} />
+                              </>
+                            )}
+                              <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>{serviceOf(activeBox) ? "Measured" : "Area Sft"}</span>
                               <input
                                 type="text"
                                 readOnly
-                                value={quotationAreaSft(activeBox) || ""}
+                                value={boxQty(activeBox).qty || ""}
                                 placeholder="—"
                                 title="Auto-calculated: H × W in sq ft — used for Quotation"
                                 style={{ width: 72, fontSize: 12, padding: "3px 6px", background: "#f3f4f6", color: "#374151", fontWeight: 600, cursor: "default" }}
                               />
-                              <span style={{ fontSize: 11, color: "#9ca3af" }}>sq ft</span>
+                              <span style={{ fontSize: 11, color: "#9ca3af" }}>{boxQty(activeBox).unit === "sqft" ? "sq ft" : boxQty(activeBox).unit}</span>
                             </div>
                           </div>
                         </div>
@@ -3791,6 +3751,20 @@ function Projects() {
           prices={prices}
           onSelect={(v) => { matModal.onSelect(v); setMatModal(null); }}
           onClose={() => setMatModal(null)}
+        />
+      )}
+
+      {addServiceTarget && (
+        <AddServiceModal
+          onClose={() => setAddServiceTarget(null)}
+          onAdded={(name) => {
+            const t = addServiceTarget;
+            if (t.active) updateBoxFields({ serviceType: name, serviceItem: "" });
+            else setSubProjects((prev) => prev.map((s) => s.id !== t.roomId ? s : {
+              ...s,
+              boxes: (s.boxes || []).map((b) => b.id === t.boxId ? { ...b, serviceType: name, serviceItem: "" } : b),
+            }));
+          }}
         />
       )}
 

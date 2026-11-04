@@ -3,6 +3,7 @@ import { useAppData } from "../context/AppDataContext";
 import { formatCurrency, roundTo2 } from "../utils/unitConversions";
 import { buildRoomRows, buildRoomEdgeBanding, buildRoomHardware, buildRoomCarpenter } from "../utils/projectRows";
 import { computeSheetCounts } from "../utils/binPack";
+import { serviceOf, boxQty } from "../utils/services";
 
 const MODELS = ["default", "economy", "standard", "premium"];
 const MODEL_LABELS = { default: "Cost (Default)", economy: "Economy", standard: "Standard", premium: "Premium" };
@@ -91,13 +92,29 @@ function ProjectBOQ() {
       });
       const carpDetails = [...carpAutoDetails, ...carpManualDetails];
 
-      const allDetails = [...materialRateDetails, ...edgeDetails, ...hwDetails, ...transportDetails, ...carpDetails];
+      // Non-wardrobe services (False Ceiling, Tiles, Lighting, Electrical,
+      // Granite): quantity × the picked Items Pricing item, one BOQ line per
+      // item with the service as its group, totalled under Services.
+      const serviceTotals = {};
+      (room.boxes || []).filter((b) => b.includeInQuotation !== false && serviceOf(b) && b.serviceItem).forEach((b) => {
+        const key = `${b.serviceType}::${b.serviceItem}`;
+        serviceTotals[key] = serviceTotals[key] || { service: b.serviceType, item: b.serviceItem, qty: 0, unit: boxQty(b).unit };
+        serviceTotals[key].qty += boxQty(b).qty;
+      });
+      const serviceDetails = Object.values(serviceTotals).map(({ service, item, qty, unit }) => {
+        const { rate, brand, source, priceFound } = rateFor(item);
+        const priceEntry = prices.find((p) => p.materialName === item);
+        return { material: item, group: service, qty, unit: priceEntry?.unit || unit, rate, brand, source, priceFound, amount: qty * rate };
+      });
+      const serviceAmount = serviceDetails.reduce((s, d) => s + d.amount, 0);
+
+      const allDetails = [...materialRateDetails, ...edgeDetails, ...hwDetails, ...transportDetails, ...carpDetails, ...serviceDetails];
       const woodAmount = materialRateDetails.reduce((s, d) => s + d.amount, 0);
       const edgeAmount = edgeDetails.reduce((s, d) => s + d.amount, 0);
       const hardwareAmount = hwDetails.reduce((s, d) => s + d.amount, 0);
       const transportationAmount = transportDetails.reduce((s, d) => s + d.amount, 0);
       const laborAmount = carpDetails.reduce((s, d) => s + d.amount, 0);
-      const roomTotal = woodAmount + edgeAmount + hardwareAmount + transportationAmount + laborAmount;
+      const roomTotal = woodAmount + edgeAmount + hardwareAmount + transportationAmount + laborAmount + serviceAmount;
 
       return {
         id: room.id,
@@ -105,7 +122,7 @@ function ProjectBOQ() {
         boxCount: (room.boxes || []).length,
         areaSqFt: roundTo2(areaSqMm / 92903.04),
         materialRateDetails: allDetails,
-        woodAmount, edgeAmount, hardwareAmount, transportationAmount, laborAmount, roomTotal,
+        woodAmount, edgeAmount, hardwareAmount, transportationAmount, laborAmount, serviceAmount, roomTotal,
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     });
@@ -131,7 +148,8 @@ function ProjectBOQ() {
   const totalHardware = roomLineItems.reduce((s, r) => s + r.hardwareAmount, 0);
   const totalTransportation = roomLineItems.reduce((s, r) => s + r.transportationAmount, 0);
   const totalLabor = roomLineItems.reduce((s, r) => s + r.laborAmount, 0);
-  const subTotal = totalWood + totalEdge + totalHardware + totalTransportation + totalLabor;
+  const totalServices = roomLineItems.reduce((s, r) => s + r.serviceAmount, 0);
+  const subTotal = totalWood + totalEdge + totalHardware + totalTransportation + totalLabor + totalServices;
   const gstAmount = (subTotal * Number(gstPercent || 0)) / 100;
   const grandTotal = subTotal + gstAmount;
 
@@ -210,6 +228,7 @@ function ProjectBOQ() {
               <th>Hardware</th>
               <th>Transport</th>
               <th>Labor</th>
+              <th>Services</th>
               <th>Room Total</th>
             </tr>
           </thead>
@@ -224,6 +243,7 @@ function ProjectBOQ() {
                 <td style={{ textAlign: "right" }}>{formatCurrency(room.hardwareAmount)}</td>
                 <td style={{ textAlign: "right" }}>{formatCurrency(room.transportationAmount)}</td>
                 <td style={{ textAlign: "right" }}>{formatCurrency(room.laborAmount)}</td>
+                <td style={{ textAlign: "right" }}>{formatCurrency(room.serviceAmount)}</td>
                 <td style={{ textAlign: "right" }}><strong>{formatCurrency(room.roomTotal)}</strong></td>
               </tr>
             ))}
@@ -273,6 +293,7 @@ function ProjectBOQ() {
           <tr><td>Hardware & Consumables</td><td>{formatCurrency(totalHardware)}</td></tr>
           <tr><td>Transportation</td><td>{formatCurrency(totalTransportation)}</td></tr>
           <tr><td>Carpenter / Labor</td><td>{formatCurrency(totalLabor)}</td></tr>
+          <tr><td>Services (ceiling, tiles, lighting, electrical, granite)</td><td>{formatCurrency(totalServices)}</td></tr>
           <tr style={{ background: "#f3f4f6" }}>
             <td><strong>Sub Total</strong></td>
             <td><strong>{formatCurrency(subTotal)}</strong></td>

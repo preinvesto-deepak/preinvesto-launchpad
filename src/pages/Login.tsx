@@ -39,7 +39,7 @@ const Login = () => {
       seoTitle="Sign In | Preinvesto"
       icon={<LogIn className="w-6 h-6 text-accent" />}
       title="Sign in"
-      subtitle="Access your Interior Quotation workspace."
+      subtitle="Owners sign in with their email, employees with the username they were given."
       footer={
         <>
           Don't have an account?{" "}
@@ -51,11 +51,13 @@ const Login = () => {
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         <AuthInput
-          type="email"
+          type="text"
           value={email}
           onChange={(e) => { setEmail(e.target.value); setError(""); }}
-          placeholder="Email address"
-          autoComplete="email"
+          placeholder="Email or username"
+          autoComplete="username"
+          autoCapitalize="none"
+          spellCheck={false}
           autoFocus
           required
         />
