@@ -71,7 +71,7 @@ function ProjectBOQ() {
       // Manually-added Hardware & Consumables items — split Transportation and
       // Carpenter into their own columns/totals below so nothing is double-counted
       // against the item-priced Carpenter auto-row.
-      const hwTotals = buildRoomHardware(room);
+      const hwTotals = buildRoomHardware(room, prices);
       const allHwDetails = Object.entries(hwTotals).map(([mat, qty]) => {
         const { rate, brand, source, priceFound } = rateFor(mat);
         const priceEntry = prices.find((p) => p.materialName === mat);
@@ -215,7 +215,7 @@ function ProjectBOQ() {
 
       <h3>Rooms & Boxes</h3>
       {roomLineItems.length === 0 ? (
-        <p style={{ color: "#6b7280" }}>No rooms/boxes in this project yet. Apply a template under Rooms &amp; Boxes first.</p>
+        <p style={{ color: "#6b7280" }}>No rooms/boxes in this project yet. Apply a template under Room Estimation first.</p>
       ) : (
         <table border="1" cellPadding="10" cellSpacing="0" width="100%" style={{ marginBottom: 20 }}>
           <thead>

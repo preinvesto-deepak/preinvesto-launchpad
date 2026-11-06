@@ -36,7 +36,7 @@ export function quotationMaterialRows(rooms, prices, materialStockSettings) {
       add(mat, Math.round((lengthMm / 1000) * 100) / 100, "Mtr"));
 
     const unitOf = (mat) => (prices || []).find((p) => p.materialName === mat)?.unit || "Nos";
-    Object.entries(buildRoomHardware(room)).forEach(([mat, qty]) => add(mat, qty, unitOf(mat)));
+    Object.entries(buildRoomHardware(room, prices)).forEach(([mat, qty]) => add(mat, qty, unitOf(mat)));
     Object.entries(buildRoomCarpenter(room)).forEach(([mat, qty]) => add(mat, qty, unitOf(mat)));
   });
 

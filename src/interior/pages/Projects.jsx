@@ -2,7 +2,7 @@ import { useState, useEffect, Fragment } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
 import { formatCurrency, mmToFeet, feetToMm, roundTo2 } from "../utils/unitConversions";
-import { WARDROBE_SERVICE, SERVICE_NAMES, serviceOf, boxQty, ALL_SERVICES, matchesService, serviceTagOf, serviceForGroup } from "../utils/services";
+import { WARDROBE_SERVICE, SERVICES, MEASURE_LABELS, SERVICE_NAMES, serviceOf, boxQty, ALL_SERVICES, matchesService, serviceTagOf, serviceForGroup } from "../utils/services";
 import ServiceFilter from "../components/ServiceFilter";
 import { useAuth } from "@/context/AuthContext";
 import { quotationMaterialRows } from "../utils/quotationMaterials";
@@ -11,6 +11,7 @@ import AddServiceModal from "../components/AddServiceModal";
 import CutSheetOptimizer from "./CutSheetOptimizer";
 import ProjectQuotation from "./ProjectQuotation";
 import { packSheets, findOversizedPieces } from "../utils/binPack";
+import { TAPE_ITEM, DEFAULT_TAPE_DIVISOR } from "../utils/projectRows";
 import { GROUP_OPTIONS } from "../data/priceData";
 import { PROJECT_STATUSES, projectStatusInfo } from "../data/projectStatus";
 import { LEAD_SOURCES, leadSourceLabel } from "../data/leadSource";
@@ -1187,6 +1188,9 @@ function Projects() {
   // times the total Inside + Outside Laminate sheets required in the room —
   // editable, defaults to 0.7. Persisted on the room, same pattern as above.
   const [fevicolMultiplier, setFevicolMultiplierLocal] = useState(0.7);
+  // Masking Tape qty = the room's edge band metres ÷ this, rounded up — editable,
+  // defaults to 10, 0 = off. Persisted on the room like the multiplier above.
+  const [tapeDivisor, setTapeDivisorLocal] = useState(DEFAULT_TAPE_DIVISOR);
   // GST % applied on top of Material Summary's Total/Sft Cost rows to show
   // both Excl. and Incl. GST figures — editable, defaults to 18%. Persisted
   // on the room, same pattern as above.
@@ -1199,7 +1203,7 @@ function Projects() {
   const { user: authUser } = useAuth();
   const tabAccess = authUser?.access;
   const PROJECT_TAB_DEFS = [
-    ["req", "📝 Req"], ["design", "📐 Design"], ["rooms", "🏠 Rooms & Boxes"], ["analysis", "📊 Material Analysis"],
+    ["req", "📝 Req"], ["design", "📐 Design"], ["rooms", "🏠 Room Estimation"], ["analysis", "📊 Material Analysis"],
     ["quotation", "🧾 Quotation"], ["customer-view", "🧾 Quotation (Customer View)"],
   ];
   const tabPermKey = (tab) => tab;
@@ -1245,7 +1249,10 @@ function Projects() {
 
   // Template picker modal
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
-  const [addServiceTarget, setAddServiceTarget] = useState(null); // { roomId, boxId } (Req row) | { active: true } (Rooms & Boxes)
+  const [addServiceTarget, setAddServiceTarget] = useState(null); // { table: true } (Req tab) | { active: true } (Rooms & Boxes)
+  // Req tab: services whose (still empty) table was just added, per project, and the room each table's "+ Add row" targets.
+  const [shownServicesByProject, setShownServicesByProject] = useState({});
+  const [serviceAddRoom, setServiceAddRoom] = useState({});
   const [reqTemplateRoomId, setReqTemplateRoomId] = useState(null); // Req tab: room a picked template is applied to
   const [pendingTemplate, setPendingTemplate] = useState(null); // template awaiting confirm-replace
 
@@ -1267,6 +1274,7 @@ function Projects() {
     setEdgeExtraMtrLocal(Number(activeRoom?.edgeExtraMtr) || 0);
     setCarpenterExtraSftLocal(Number(activeRoom?.carpenterExtraSft) || 0);
     setFevicolMultiplierLocal(activeRoom?.fevicolMultiplier != null ? Number(activeRoom.fevicolMultiplier) : 0.7);
+    setTapeDivisorLocal(activeRoom?.tapeDivisor != null ? Number(activeRoom.tapeDivisor) : DEFAULT_TAPE_DIVISOR);
     setGstPercentLocal(activeRoom?.gstPercent != null ? Number(activeRoom.gstPercent) : 18);
   }, [activeRoomId]); // eslint-disable-line react-hooks/exhaustive-deps
   const setEdgeExtraMtr = (v) => {
@@ -1280,6 +1288,10 @@ function Projects() {
   const setFevicolMultiplier = (v) => {
     setFevicolMultiplierLocal(v);
     if (typeof v === "number") updateRoomField("fevicolMultiplier", v);
+  };
+  const setTapeDivisor = (v) => {
+    setTapeDivisorLocal(v);
+    if (typeof v === "number") updateRoomField("tapeDivisor", v);
   };
   const setGstPercent = (v) => {
     setGstPercentLocal(v);
@@ -1792,11 +1804,13 @@ function Projects() {
     }));
 
     const FEVICOL_NAME = "Fevicol Merino";
+    const tapeDiv = Number(tapeDivisor) || 0;
     const hwSummed = {};
     boxes.forEach((box) => {
       (box.hardwareItems || []).forEach((hw) => {
         if (!hw.materialName) return;
         if (hw.materialName === FEVICOL_NAME) return; // auto-calculated below instead of hand-entered
+        if (tapeDiv > 0 && hw.materialName === TAPE_ITEM) return; // from edge band length, below
         const total = (Number(hw.qty) || 0) + (Number(hw.extra) || 0);
         hwSummed[hw.materialName] = (hwSummed[hw.materialName] || 0) + total;
       });
@@ -1815,7 +1829,15 @@ function Projects() {
       ? [{ material: FEVICOL_NAME, group: fevicolPriceEntry?.group || "Glue", requiredQty: fevicolQty, unit: fevicolPriceEntry?.unit || "KG" }]
       : [];
 
-    return [...sheetRows, ...areaRows, ...edgeRows, ...carpRows, ...hwRows, ...fevicolRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
+    // Masking tape = edge band length ÷ the account's divisor (Items Pricing), rounded up.
+    const edgeMtr = edgeRows.reduce((s, r) => s + r.requiredQty, 0);
+    const tapeQty = tapeDiv > 0 && edgeMtr > 0 ? Math.ceil(edgeMtr / tapeDiv) : 0;
+    const tapePriceEntry = (prices || []).find((p) => p.materialName === TAPE_ITEM);
+    const tapeRows = tapeQty > 0
+      ? [{ material: TAPE_ITEM, group: tapePriceEntry?.group || "Tape", requiredQty: tapeQty, unit: tapePriceEntry?.unit || "Nos" }]
+      : [];
+
+    return [...sheetRows, ...areaRows, ...edgeRows, ...carpRows, ...hwRows, ...fevicolRows, ...tapeRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
   };
 
   // ── Part CRUD for Sheets Calculation in Room ─────────────────────────────────
@@ -2051,9 +2073,9 @@ function Projects() {
               </div>
             )}
 
-            {/* ── Req Tab — every room's boxes in one table, editing the same
-                Quotation Details fields as Rooms & Boxes (shared state, so each
-                view reflects the other). ── */}
+            {/* ── Req Tab — Wardrobe / Modular boxes room by room, then one table
+                per service added to this project. Same box data as Rooms &
+                Boxes (shared state, so each view reflects the other). ── */}
             {projectTab === "req" && (() => {
               const setBoxFields = (roomId, boxId, patch) =>
                 setSubProjects((prev) => prev.map((s) => s.id !== roomId ? s : {
@@ -2067,125 +2089,128 @@ function Projects() {
                 setSubProjects((prev) => prev.map((s) => s.id === roomId ? { ...s, subProject: name } : s));
               const nameIn = { width: 140, fontSize: 13, padding: "3px 6px" };
               const dimIn = { width: 76, fontSize: 12, padding: "3px 6px" };
+              const nextBoxId = (bs) => (bs.length ? Math.max(...bs.map((b) => b.id)) + 1 : 1);
               const addBoxToRoom = (roomId) =>
                 setSubProjects((prev) => prev.map((s) => {
                   if (s.id !== roomId) return s;
                   const bs = s.boxes || [];
-                  return { ...s, boxes: [...bs, makeBlankBox(bs.length ? Math.max(...bs.map((b) => b.id)) + 1 : 1)] };
+                  return { ...s, boxes: [...bs, makeBlankBox(nextBoxId(bs))] };
                 }));
-              // A room with no boxes yet still gets one (box-less) row.
-              const rowsFlat = rooms.flatMap((room) => (room.boxes || []).length ? room.boxes.map((box) => ({ room, box })) : [{ room, box: null }]);
-              // Included work totalled per unit (sft for wardrobe/area services,
-              // rft for granite, pt for lighting/electrical).
-              const qtyTotals = {};
-              rowsFlat.forEach(({ box }) => {
-                if (!box || box.includeInQuotation === false) return;
-                const { qty, unit } = boxQty(box);
-                qtyTotals[unit] = (qtyTotals[unit] || 0) + qty;
+              const addServiceRow = (roomId, serviceName) =>
+                setSubProjects((prev) => prev.map((s) => {
+                  if (s.id !== roomId) return s;
+                  const bs = s.boxes || [];
+                  return { ...s, boxes: [...bs, { ...makeBlankBox(nextBoxId(bs)), serviceType: serviceName }] };
+                }));
+              const removeRow = (roomId, boxId) => {
+                if (!window.confirm("Remove this row?")) return;
+                setSubProjects((prev) => prev.map((s) => s.id !== roomId ? s : { ...s, boxes: (s.boxes || []).filter((b) => b.id !== boxId) }));
+              };
+              // One H / W / D input, shown in mm or feet.
+              const dimCell = (room, box, key, extra) => {
+                const mmVal = box[key] ?? "";
+                const ftVal = mmVal !== "" ? roundTo2(mmToFeet(Number(mmVal))) : "";
+                return (
+                  <td key={key} style={{ ...td, ...extra }}>
+                    <input
+                      type="number"
+                      value={dimUnit === "mm" ? mmVal : ftVal}
+                      placeholder={dimUnit}
+                      onChange={(e) => {
+                        if (dimUnit === "mm") setBoxField(room.id, box.id, key, e.target.value);
+                        else {
+                          const ft = Number(e.target.value);
+                          if (!isNaN(ft)) setBoxField(room.id, box.id, key, e.target.value === "" ? "" : String(Math.round(feetToMm(ft))));
+                        }
+                      }}
+                      style={dimIn}
+                    />
+                  </td>
+                );
+              };
+              const unitText = (u) => (u === "sqft" ? "sft" : u);
+              const sumText = (list) => {
+                const t = {};
+                list.forEach((box) => {
+                  if (!box || box.includeInQuotation === false) return;
+                  const { qty, unit } = boxQty(box);
+                  t[unit] = (t[unit] || 0) + qty;
+                });
+                return Object.entries(t).filter(([, q]) => q > 0).map(([u, q]) => `${Math.round(q * 100) / 100} ${unitText(u)}`).join(" · ") || "—";
+              };
+
+              // ── Wardrobe / Modular table: every room, boxes without a service.
+              // A room with no wardrobe boxes still gets one (box-less) row, so
+              // this table is also where rooms are named and added to.
+              const wardrobeRows = rooms.flatMap((room) => {
+                const bs = (room.boxes || []).filter((b) => !serviceOf(b));
+                return bs.length ? bs.map((box) => ({ room, box })) : [{ room, box: null }];
               });
-              const totalText = Object.entries(qtyTotals).filter(([, q]) => q > 0)
-                .map(([u, q]) => `${Math.round(q * 100) / 100} ${u === "sqft" ? "sft" : u}`).join(" · ") || "—";
-              return (
-                <div style={{ padding: "20px 24px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
-                    <div style={{ fontSize: 13, color: "#6b7280" }}>
-                      Quotation Details of every box. Changes here and in Rooms &amp; Boxes are the same data.
-                      Pick a Service for non-wardrobe work (False Ceiling, Tiles, Lighting, Electrical, Granite).
+
+              // ── One table per service that has rows, or was just added here.
+              const shownNow = shownServicesByProject[selectedProject.id] || [];
+              const hasRows = (n) => rooms.some((r) => (r.boxes || []).some((b) => b.serviceType === n));
+              const serviceTables = SERVICE_NAMES.filter((n) => hasRows(n) || shownNow.includes(n));
+              const addableServices = SERVICE_NAMES.filter((n) => !serviceTables.includes(n));
+
+              const renderServiceTable = (name) => {
+                const svc = SERVICES[name];
+                const rows = rooms.flatMap((room) => (room.boxes || []).filter((b) => b.serviceType === name).map((box) => ({ room, box })));
+                const dimKeys = svc.measure === "area" ? ["quotationHeightMm", "quotationWidthMm"] : svc.measure === "length" ? ["quotationWidthMm"] : [];
+                const dimLabel = { quotationHeightMm: "H", quotationWidthMm: "W" };
+                const qtyHead = svc.measure === "area" ? "Area (sft)" : svc.measure === "length" ? "Length (rft)" : "Qty (pt)";
+                const addRoomId = rooms.some((r) => r.id === serviceAddRoom[name]) ? serviceAddRoom[name] : rooms[0]?.id;
+                return (
+                  <div key={name} style={{ marginTop: 22 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#1e3a5f", marginBottom: 6 }}>
+                      {name}
+                      <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 500, color: "#6b7280" }}>{MEASURE_LABELS[svc.measure]}</span>
+                      {rows.length === 0 && (
+                        <button
+                          onClick={() => setShownServicesByProject((p) => ({ ...p, [selectedProject.id]: (p[selectedProject.id] || []).filter((n) => n !== name) }))}
+                          style={{ marginLeft: 12, fontSize: 11, padding: "1px 8px", background: "none", border: "1px solid #fecaca", borderRadius: 6, color: "#dc2626", cursor: "pointer" }}
+                        >Remove table</button>
+                      )}
                     </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={openAddRoom} style={{ fontSize: 12, padding: "4px 12px" }}>+ Add Room</button>
-                      <button
-                        onClick={() => setDimUnit(dimUnit === "mm" ? "ft" : "mm")}
-                        style={{ fontSize: 11, padding: "3px 10px", background: "#ede9fe", color: "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 6 }}
-                      >Show {dimUnit === "mm" ? "feet" : "mm"}</button>
-                    </div>
-                  </div>
-                  {rowsFlat.length === 0 ? (
-                    <p style={{ color: "#9ca3af" }}>No rooms yet — use + Add Room.</p>
-                  ) : (
                     <div style={{ overflowX: "auto", border: "1px solid #ede9fe", borderRadius: 8 }}>
                       <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
                         <thead>
                           <tr>
                             <th style={th}>Room</th>
-                            <th style={th}>Box</th>
-                            <th style={th}>Service</th>
-                            <th style={th}>Box Type / Item</th>
-                            <th style={th}>Door Type</th>
+                            <th style={th}>Description</th>
+                            <th style={th}>Item</th>
                             <th style={{ ...th, textAlign: "center", lineHeight: 1.25, width: 84 }}>Include in<br />Quotation</th>
-                            <th style={th}>H ({dimUnit})</th>
-                            <th style={th}>W ({dimUnit})</th>
-                            <th style={th}>D ({dimUnit})</th>
-                            <th style={{ ...th, textAlign: "right" }}>Area / Qty</th>
+                            {dimKeys.map((k) => <th key={k} style={th}>{dimLabel[k]} ({dimUnit})</th>)}
+                            <th style={{ ...th, textAlign: "right" }}>{qtyHead}</th>
+                            <th style={th} />
                           </tr>
                         </thead>
                         <tbody>
-                          {rowsFlat.map(({ room, box }, i) => {
-                            const firstOfRoom = i === 0 || rowsFlat[i - 1].room.id !== room.id;
-                            const lastOfRoom = i === rowsFlat.length - 1 || rowsFlat[i + 1].room.id !== room.id;
-                            const sep = firstOfRoom && i ? "2px solid #ddd6fe" : undefined;
-                            if (!box) {
-                              return (
-                                <tr key={`${room.id}-empty`}>
-                                  <td style={{ ...td, fontWeight: 700, color: "#1e3a5f", borderTop: sep }}><input type="text" value={room.subProject} onChange={(e) => setRoomName(room.id, e.target.value)} placeholder="Room name" style={{ ...nameIn, fontWeight: 700 }} /><button onClick={() => { setReqTemplateRoomId(room.id); setTemplatePickerOpen(true); }} style={{ display: "block", background: "none", border: "none", color: "#1d4ed8", cursor: "pointer", fontSize: 11, padding: 0, fontWeight: 400 }}>📐 Apply Template</button></td>
-                                  <td colSpan={9} style={{ ...td, borderTop: sep, color: "#9ca3af" }}>
-                                    No boxes yet
-                                    <button onClick={() => addBoxToRoom(room.id)} style={{ marginLeft: 12, background: "none", border: "none", color: "#7c3aed", cursor: "pointer", fontSize: 12 }}>+ Add Box</button>
-                                  </td>
-                                </tr>
-                              );
-                            }
+                          {rows.length === 0 && (
+                            <tr><td colSpan={6 + dimKeys.length} style={{ ...td, color: "#9ca3af" }}>No rows yet — use + Add row below.</td></tr>
+                          )}
+                          {rows.map(({ room, box }) => {
                             const excluded = box.includeInQuotation === false;
-                            const svc = serviceOf(box);
                             const q = boxQty(box);
-                            // Which of H / W / D apply to this row's service.
-                            const dimEnabled = (key) => !svc
-                              || (svc.measure === "area" && key !== "quotationDepthMm")
-                              || (svc.measure === "length" && key === "quotationWidthMm");
                             return (
                               <tr key={`${room.id}-${box.id}`} style={{ opacity: excluded ? 0.55 : 1 }}>
-                                <td style={{ ...td, fontWeight: 700, color: "#1e3a5f", borderTop: sep }}>{firstOfRoom && (<><input type="text" value={room.subProject} onChange={(e) => setRoomName(room.id, e.target.value)} placeholder="Room name" style={{ ...nameIn, fontWeight: 700 }} /><button onClick={() => { setReqTemplateRoomId(room.id); setTemplatePickerOpen(true); }} style={{ display: "block", background: "none", border: "none", color: "#1d4ed8", cursor: "pointer", fontSize: 11, padding: 0, fontWeight: 400 }}>📐 Apply Template</button></>)}</td>
-                                <td style={{ ...td, borderTop: sep }}>
-                                  <input type="text" value={box.name} onChange={(e) => setBoxField(room.id, box.id, "name", e.target.value)} placeholder="Box name" style={nameIn} />
-                                  {lastOfRoom && (
-                                    <button onClick={() => addBoxToRoom(room.id)} style={{ marginLeft: 10, background: "none", border: "none", color: "#7c3aed", cursor: "pointer", fontSize: 11, padding: 0 }}>+ Add Box</button>
-                                  )}
+                                <td style={{ ...td, fontWeight: 700, color: "#1e3a5f" }}>{room.subProject || "—"}</td>
+                                <td style={td}>
+                                  <input type="text" value={box.name || ""} onChange={(e) => setBoxField(room.id, box.id, "name", e.target.value)} placeholder="Description" style={nameIn} />
                                 </td>
-                                <td style={{ ...td, borderTop: sep }}>
+                                <td style={td}>
                                   <select
-                                    value={box.serviceType || ""}
-                                    onChange={(e) => e.target.value === "__new__"
-                                      ? setAddServiceTarget({ roomId: room.id, boxId: box.id })
-                                      : setBoxFields(room.id, box.id, { serviceType: e.target.value, serviceItem: "" })}
-                                    style={{ fontSize: 12, padding: "3px 6px", width: 140 }}
-                                  >
-                                    <option value="">{WARDROBE_SERVICE}</option>
-                                    {SERVICE_NAMES.map((n) => <option key={n} value={n}>{n}</option>)}
-                                    <option value="__new__">+ Add new service…</option>
-                                  </select>
-                                </td>
-                                <td style={{ ...td, borderTop: sep }}>
-                                  <select
-                                    value={(svc ? box.serviceItem : box.quotationBoxType) || ""}
-                                    onChange={(e) => setBoxField(room.id, box.id, svc ? "serviceItem" : "quotationBoxType", e.target.value)}
-                                    style={{ fontSize: 12, padding: "3px 6px", width: 130 }}
+                                    value={box.serviceItem || ""}
+                                    onChange={(e) => setBoxField(room.id, box.id, "serviceItem", e.target.value)}
+                                    style={{ fontSize: 12, padding: "3px 6px", width: 150 }}
                                   >
                                     <option value="">— Select —</option>
-                                    {(prices || []).filter((p) => p.group === (svc ? svc.group : "Carpenter")).map((p) => (
+                                    {(prices || []).filter((p) => p.group === svc.group).map((p) => (
                                       <option key={p.id} value={p.materialName}>{p.materialName}</option>
                                     ))}
                                   </select>
                                 </td>
-                                <td style={{ ...td, borderTop: sep }}>
-                                  {svc ? <span style={{ color: "#9ca3af" }}>—</span> : (
-                                    <select value={box.quotationDoorType || ""} onChange={(e) => setBoxField(room.id, box.id, "quotationDoorType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 130 }}>
-                                      <option value="">— Select —</option>
-                                      <option value="Sliding Door">Sliding Door</option>
-                                      <option value="Swing Door">Swing Door</option>
-                                    </select>
-                                  )}
-                                </td>
-                                <td style={{ ...td, textAlign: "center", borderTop: sep }}>
+                                <td style={{ ...td, textAlign: "center" }}>
                                   <input
                                     type="checkbox"
                                     checked={!excluded}
@@ -2193,33 +2218,14 @@ function Projects() {
                                     style={{ width: 14, height: 14, cursor: "pointer" }}
                                   />
                                 </td>
-                                {["quotationHeightMm", "quotationWidthMm", "quotationDepthMm"].map((key) => {
-                                  const mmVal = box[key] ?? "";
-                                  const ftVal = mmVal !== "" ? roundTo2(mmToFeet(Number(mmVal))) : "";
-                                  const enabled = dimEnabled(key);
-                                  return (
-                                    <td key={key} style={{ ...td, borderTop: sep }}>
-                                      <input
-                                        type="number"
-                                        disabled={!enabled}
-                                        value={enabled ? (dimUnit === "mm" ? mmVal : ftVal) : ""}
-                                        placeholder={enabled ? dimUnit : "—"}
-                                        onChange={(e) => {
-                                          if (dimUnit === "mm") setBoxField(room.id, box.id, key, e.target.value);
-                                          else {
-                                            const ft = Number(e.target.value);
-                                            if (!isNaN(ft)) setBoxField(room.id, box.id, key, e.target.value === "" ? "" : String(Math.round(feetToMm(ft))));
-                                          }
-                                        }}
-                                        style={{ ...dimIn, ...(enabled ? {} : { background: "#f3f4f6" }) }}
-                                      />
-                                    </td>
-                                  );
-                                })}
-                                <td style={{ ...td, textAlign: "right", fontWeight: 600, borderTop: sep, whiteSpace: "nowrap" }}>
-                                  {svc?.measure === "points" ? (
-                                    <><input type="number" min="0" value={box.serviceQty ?? ""} onChange={(e) => setBoxField(room.id, box.id, "serviceQty", e.target.value)} placeholder="Qty" style={dimIn} /> pt</>
-                                  ) : (q.qty ? `${q.qty}${q.unit === "sqft" ? "" : ` ${q.unit}`}` : "—")}
+                                {dimKeys.map((k) => dimCell(room, box, k))}
+                                <td style={{ ...td, textAlign: "right", fontWeight: 600, whiteSpace: "nowrap" }}>
+                                  {svc.measure === "points" ? (
+                                    <input type="number" min="0" value={box.serviceQty ?? ""} onChange={(e) => setBoxField(room.id, box.id, "serviceQty", e.target.value)} placeholder="Qty" style={dimIn} />
+                                  ) : (q.qty || "—")}
+                                </td>
+                                <td style={{ ...td, textAlign: "center" }}>
+                                  <button onClick={() => removeRow(room.id, box.id)} title="Remove row" style={{ background: "none", border: "none", color: "#dc2626", cursor: "pointer", fontSize: 14, padding: 0 }}>✕</button>
                                 </td>
                               </tr>
                             );
@@ -2227,12 +2233,151 @@ function Projects() {
                         </tbody>
                         <tfoot>
                           <tr>
-                            <td colSpan={9} style={{ ...td, textAlign: "right", fontWeight: 700, background: "#faf5ff" }}>Total (included boxes)</td>
-                            <td style={{ ...td, textAlign: "right", fontWeight: 700, background: "#faf5ff", whiteSpace: "nowrap" }}>{totalText}</td>
+                            <td colSpan={3} style={{ ...td, background: "#faf5ff" }}>
+                              <select
+                                value={addRoomId ?? ""}
+                                onChange={(e) => setServiceAddRoom((p) => ({ ...p, [name]: Number(e.target.value) }))}
+                                style={{ fontSize: 12, padding: "3px 6px", width: 150, marginRight: 8 }}
+                              >
+                                {rooms.map((r) => <option key={r.id} value={r.id}>{r.subProject || `Room ${r.id}`}</option>)}
+                              </select>
+                              <button
+                                disabled={addRoomId == null}
+                                onClick={() => addServiceRow(addRoomId, name)}
+                                style={{ fontSize: 12, padding: "3px 10px", background: "none", border: "none", color: "#7c3aed", cursor: "pointer" }}
+                              >+ Add row</button>
+                            </td>
+                            <td colSpan={1 + dimKeys.length} style={{ ...td, textAlign: "right", fontWeight: 700, background: "#faf5ff" }}>Sub total (included)</td>
+                            <td style={{ ...td, textAlign: "right", fontWeight: 700, background: "#faf5ff", whiteSpace: "nowrap" }}>{sumText(rows.map((r) => r.box))}</td>
+                            <td style={{ ...td, background: "#faf5ff" }} />
                           </tr>
                         </tfoot>
                       </table>
                     </div>
+                  </div>
+                );
+              };
+
+              return (
+                <div style={{ padding: "20px 24px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ fontSize: 13, color: "#6b7280" }}>
+                      Wardrobe / Modular work room by room, then a table for each extra service (False Ceiling, Tiles, Lighting, ...).
+                      Changes here and in Room Estimation are the same data.
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <button onClick={openAddRoom} style={{ fontSize: 12, padding: "4px 12px" }}>+ Add Room</button>
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === "__new__") setAddServiceTarget({ table: true });
+                          else if (v) setShownServicesByProject((p) => ({ ...p, [selectedProject.id]: [...(p[selectedProject.id] || []), v] }));
+                        }}
+                        style={{ fontSize: 12, padding: "4px 8px", width: 150 }}
+                      >
+                        <option value="">+ Add service…</option>
+                        {addableServices.map((n) => <option key={n} value={n}>{n}</option>)}
+                        <option value="__new__">+ New service…</option>
+                      </select>
+                      <button
+                        onClick={() => setDimUnit(dimUnit === "mm" ? "ft" : "mm")}
+                        style={{ fontSize: 11, padding: "3px 10px", background: "#ede9fe", color: "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 6 }}
+                      >Show {dimUnit === "mm" ? "feet" : "mm"}</button>
+                    </div>
+                  </div>
+                  {rooms.length === 0 ? (
+                    <p style={{ color: "#9ca3af" }}>No rooms yet — use + Add Room.</p>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#1e3a5f", marginBottom: 6 }}>{WARDROBE_SERVICE}</div>
+                      <div style={{ overflowX: "auto", border: "1px solid #ede9fe", borderRadius: 8 }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+                          <thead>
+                            <tr>
+                              <th style={th}>Room</th>
+                              <th style={th}>Box</th>
+                              <th style={th}>Box Type</th>
+                              <th style={th}>Door Type</th>
+                              <th style={{ ...th, textAlign: "center", lineHeight: 1.25, width: 84 }}>Include in<br />Quotation</th>
+                              <th style={th}>H ({dimUnit})</th>
+                              <th style={th}>W ({dimUnit})</th>
+                              <th style={th}>D ({dimUnit})</th>
+                              <th style={{ ...th, textAlign: "right" }}>Area (sft)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {wardrobeRows.map(({ room, box }, i) => {
+                              const firstOfRoom = i === 0 || wardrobeRows[i - 1].room.id !== room.id;
+                              const lastOfRoom = i === wardrobeRows.length - 1 || wardrobeRows[i + 1].room.id !== room.id;
+                              const sep = firstOfRoom && i ? "2px solid #ddd6fe" : undefined;
+                              if (!box) {
+                                return (
+                                  <tr key={`${room.id}-empty`}>
+                                    <td style={{ ...td, fontWeight: 700, color: "#1e3a5f", borderTop: sep }}><input type="text" value={room.subProject} onChange={(e) => setRoomName(room.id, e.target.value)} placeholder="Room name" style={{ ...nameIn, fontWeight: 700 }} /><button onClick={() => { setReqTemplateRoomId(room.id); setTemplatePickerOpen(true); }} style={{ display: "block", background: "none", border: "none", color: "#1d4ed8", cursor: "pointer", fontSize: 11, padding: 0, fontWeight: 400 }}>📐 Apply Template</button></td>
+                                    <td colSpan={8} style={{ ...td, borderTop: sep, color: "#9ca3af" }}>
+                                      No {WARDROBE_SERVICE} boxes
+                                      <button onClick={() => addBoxToRoom(room.id)} style={{ marginLeft: 12, background: "none", border: "none", color: "#7c3aed", cursor: "pointer", fontSize: 12 }}>+ Add Box</button>
+                                    </td>
+                                  </tr>
+                                );
+                              }
+                              const excluded = box.includeInQuotation === false;
+                              const q = boxQty(box);
+                              return (
+                                <tr key={`${room.id}-${box.id}`} style={{ opacity: excluded ? 0.55 : 1 }}>
+                                  <td style={{ ...td, fontWeight: 700, color: "#1e3a5f", borderTop: sep }}>{firstOfRoom && (<><input type="text" value={room.subProject} onChange={(e) => setRoomName(room.id, e.target.value)} placeholder="Room name" style={{ ...nameIn, fontWeight: 700 }} /><button onClick={() => { setReqTemplateRoomId(room.id); setTemplatePickerOpen(true); }} style={{ display: "block", background: "none", border: "none", color: "#1d4ed8", cursor: "pointer", fontSize: 11, padding: 0, fontWeight: 400 }}>📐 Apply Template</button></>)}</td>
+                                  <td style={{ ...td, borderTop: sep }}>
+                                    <input type="text" value={box.name} onChange={(e) => setBoxField(room.id, box.id, "name", e.target.value)} placeholder="Box name" style={nameIn} />
+                                    {lastOfRoom && (
+                                      <button onClick={() => addBoxToRoom(room.id)} style={{ marginLeft: 10, background: "none", border: "none", color: "#7c3aed", cursor: "pointer", fontSize: 11, padding: 0 }}>+ Add Box</button>
+                                    )}
+                                  </td>
+                                  <td style={{ ...td, borderTop: sep }}>
+                                    <select
+                                      value={box.quotationBoxType || ""}
+                                      onChange={(e) => setBoxField(room.id, box.id, "quotationBoxType", e.target.value)}
+                                      style={{ fontSize: 12, padding: "3px 6px", width: 130 }}
+                                    >
+                                      <option value="">— Select —</option>
+                                      {(prices || []).filter((p) => p.group === "Carpenter").map((p) => (
+                                        <option key={p.id} value={p.materialName}>{p.materialName}</option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                  <td style={{ ...td, borderTop: sep }}>
+                                    <select value={box.quotationDoorType || ""} onChange={(e) => setBoxField(room.id, box.id, "quotationDoorType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 130 }}>
+                                      <option value="">— Select —</option>
+                                      <option value="Sliding Door">Sliding Door</option>
+                                      <option value="Swing Door">Swing Door</option>
+                                    </select>
+                                  </td>
+                                  <td style={{ ...td, textAlign: "center", borderTop: sep }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={!excluded}
+                                      onChange={(e) => setBoxField(room.id, box.id, "includeInQuotation", e.target.checked)}
+                                      style={{ width: 14, height: 14, cursor: "pointer" }}
+                                    />
+                                  </td>
+                                  {["quotationHeightMm", "quotationWidthMm", "quotationDepthMm"].map((k) => dimCell(room, box, k, { borderTop: sep }))}
+                                  <td style={{ ...td, textAlign: "right", fontWeight: 600, borderTop: sep, whiteSpace: "nowrap" }}>
+                                    {q.qty || "—"}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot>
+                            <tr>
+                              <td colSpan={8} style={{ ...td, textAlign: "right", fontWeight: 700, background: "#faf5ff" }}>Sub total (included boxes)</td>
+                              <td style={{ ...td, textAlign: "right", fontWeight: 700, background: "#faf5ff", whiteSpace: "nowrap" }}>{sumText(wardrobeRows.map((r) => r.box))}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                      {serviceTables.map(renderServiceTable)}
+                    </>
                   )}
                 </div>
               );
@@ -3238,7 +3383,7 @@ function Projects() {
                           });
                         });
                         (box.hardwareItems || []).forEach((hw) => {
-                          if (hw.materialName === "Fevicol Merino") return; // now auto-calculated in Material Summary instead
+                          if (hw.materialName === "Fevicol Merino" || (Number(tapeDivisor) > 0 && hw.materialName === TAPE_ITEM)) return; // now auto-calculated in Material Summary instead
                           allRows.push({
                             ...hw,
                             boxId: box.id,
@@ -3466,7 +3611,7 @@ function Projects() {
                               </div>
                             ) : (
                               <div style={{ border: "1px solid #e5e7eb", borderTop: "none", borderRadius: "0 0 8px 8px", overflowX: "auto" }}>
-                                <div style={{ padding: "8px 14px", background: "#f8fafc", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", gap: 8 }}>
+                                <div style={{ padding: "8px 14px", background: "#f8fafc", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                                   <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>Fevicol Merino qty = </span>
                                   <input
                                     type="number" step="0.05" min={0}
@@ -3476,6 +3621,16 @@ function Projects() {
                                     style={{ width: 60, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
                                   />
                                   <span style={{ fontSize: 12, color: "#6b7280" }}>× total Inside + Outside Laminate sheets required</span>
+<span style={{ width: 1, alignSelf: "stretch", background: "#e5e7eb", margin: "0 4px" }} />
+<span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>Masking Tape qty = edge band (m) ÷</span>
+<input
+  type="number" step="1" min={0}
+  value={tapeDivisor}
+  onChange={(e) => setTapeDivisor(e.target.value)}
+  onBlur={(e) => setTapeDivisor(Math.max(0, Number(e.target.value) || 0))}
+  style={{ width: 50, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
+/>
+<span style={{ fontSize: 12, color: "#6b7280" }}>(rounded up; 0 = type tapes per box)</span>
                                   <span style={{ width: 1, alignSelf: "stretch", background: "#e5e7eb", margin: "0 4px" }} />
                                   <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>GST</span>
                                   <input
@@ -3760,10 +3915,7 @@ function Projects() {
           onAdded={(name) => {
             const t = addServiceTarget;
             if (t.active) updateBoxFields({ serviceType: name, serviceItem: "" });
-            else setSubProjects((prev) => prev.map((s) => s.id !== t.roomId ? s : {
-              ...s,
-              boxes: (s.boxes || []).map((b) => b.id === t.boxId ? { ...b, serviceType: name, serviceItem: "" } : b),
-            }));
+            else if (t.table) setShownServicesByProject((p) => ({ ...p, [selectedProject.id]: [...(p[selectedProject.id] || []), name] }));
           }}
         />
       )}

@@ -141,7 +141,7 @@ function computeRoomCost(room, model, projectObj, prices, materialStockSettings)
   // Manually-added Hardware & Consumables — Transportation and Carpenter split
   // out into their own totals so nothing double-counts against the Carpenter
   // auto-row below.
-  const hwTotals = buildRoomHardware(room);
+  const hwTotals = buildRoomHardware(room, prices);
   const priceGroupOf = (mat) => prices.find((p) => p.materialName === mat)?.group;
   const hardwareAmount = Object.entries(hwTotals).reduce((total, [mat, qty]) => {
     const g = priceGroupOf(mat);
@@ -218,7 +218,7 @@ function computeRoomMrpSavings(room, prices, materialStockSettings) {
   );
   const materials = [...new Set(rows.map((r) => r.material))];
   const edgeTotals = buildRoomEdgeBanding(room, prices);
-  const hwTotals = buildRoomHardware(room);
+  const hwTotals = buildRoomHardware(room, prices);
   const carpTotals = buildRoomCarpenter(room);
 
   let mrpTotal = 0;
@@ -272,7 +272,7 @@ function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj)
       const meters = Math.round((lengthMm / 1000) * 100) / 100;
       byMaterial[mat] = (byMaterial[mat] || 0) + meters;
     });
-    const hwTotals = buildRoomHardware(room);
+    const hwTotals = buildRoomHardware(room, prices);
     Object.entries(hwTotals).forEach(([mat, qty]) => {
       byMaterial[mat] = (byMaterial[mat] || 0) + qty;
     });
@@ -1481,7 +1481,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
         <p style={{ margin: "12px 0" }}><strong>Project:</strong> {selectedProject || "-"}</p>
 
         {lineItems.length === 0 ? (
-          <p>No rooms/boxes in this project yet. Apply a template under Rooms &amp; Boxes first.</p>
+          <p>No rooms/boxes in this project yet. Apply a template under Room Estimation first.</p>
         ) : (
           <>
             {quotationTables(itemsWithSelling).map((t, ti, all) => (

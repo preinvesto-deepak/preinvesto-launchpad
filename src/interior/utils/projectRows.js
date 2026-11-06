@@ -138,6 +138,18 @@ export function buildBoxEdgeBanding(box, prices) {
   return { material: rmat(box.matEdgeBeading, box.matEdgeBeadingId, prices), lengthMm };
 }
 
+// Masking tape isn't typed in: the number of tapes is the room's edge band
+// length (m) divided by the room's own figure (room.tapeDivisor, edited next to
+// the Fevicol multiplier in Material Details), rounded up to a whole tape.
+// 0 turns the rule off, so tapes typed on a box count as before.
+export const TAPE_ITEM = "Masking Tape";
+export const DEFAULT_TAPE_DIVISOR = 10;
+export const tapeDivisorOf = (room) => {
+  const n = Number(room?.tapeDivisor);
+  return room?.tapeDivisor != null && room.tapeDivisor !== "" && Number.isFinite(n) && n >= 0 ? n : DEFAULT_TAPE_DIVISOR;
+};
+export const tapeCount = (edgeMtr, divisor) => (divisor > 0 && edgeMtr > 0 ? Math.ceil(edgeMtr / divisor) : 0);
+
 /** Edge banding for every box in a room, grouped by material — { [material]: lengthMm } */
 export function buildRoomEdgeBanding(room, prices) {
   const totals = {};
@@ -154,16 +166,25 @@ export function buildRoomEdgeBanding(room, prices) {
  * { [material]: qty }. qty is base + extra (the same "Final Qty" shown in
  * Projects.jsx's Hardware & Consumables table), not just the base quantity.
  */
-export function buildRoomHardware(room) {
+export function buildRoomHardware(room, prices) {
   const totals = {};
+  const tapeDivisor = tapeDivisorOf(room);
+  const tapeOn = tapeDivisor > 0 && prices;
   (room.boxes || []).forEach((box) => {
     (box.hardwareItems || []).forEach((item) => {
       if (!item.materialName) return;
+      if (tapeOn && item.materialName === TAPE_ITEM) return; // counted from edge band below
       const qty = (Number(item.qty) || 0) + (Number(item.extra) || 0);
       if (!qty) return;
       totals[item.materialName] = (totals[item.materialName] || 0) + qty;
     });
   });
+  if (tapeOn) {
+    const edgeMtr = Object.values(buildRoomEdgeBanding(room, prices))
+      .reduce((s, lengthMm) => s + Math.round((lengthMm / 1000) * 100) / 100, 0);
+    const tapes = tapeCount(edgeMtr, tapeDivisor);
+    if (tapes) totals[TAPE_ITEM] = (totals[TAPE_ITEM] || 0) + tapes;
+  }
   return totals;
 }
 

@@ -7,6 +7,7 @@ import { useUnsavedChanges } from "../context/UnsavedChangesContext";
 import { mmToFeet, feetToMm, roundTo2, formatCurrency } from "../utils/unitConversions";
 import CutSheetOptimizer from "./CutSheetOptimizer";
 import { packSheets, findOversizedPieces } from "../utils/binPack";
+import { TAPE_ITEM, DEFAULT_TAPE_DIVISOR } from "../utils/projectRows";
 import { GROUP_OPTIONS } from "../data/priceData";
 import ServiceFilter from "../components/ServiceFilter";
 import { ALL_SERVICES, WARDROBE_SERVICE, SERVICES, matchesService, serviceTagOf } from "../utils/services";
@@ -586,6 +587,8 @@ function TemplateMaster() {
   // times the total Inside + Outside Laminate sheets required across all boxes
   // — editable so the coverage-per-sheet ratio can be tuned, defaults to 0.7.
   const [fevicolMultiplier, setFevicolMultiplier] = useState(0.7);
+  // Masking Tape qty = edge band metres ÷ this, rounded up — defaults to 10, 0 = off.
+  const [tapeDivisor, setTapeDivisor] = useState(DEFAULT_TAPE_DIVISOR);
   // GST % applied on top of Material Summary's Total/Sft Cost rows to show
   // both Excl. and Incl. GST figures side by side — editable, defaults to 18%.
   const [gstPercent, setGstPercent] = useState(18);
@@ -882,11 +885,13 @@ function TemplateMaster() {
     // Addons, Tape, ...) across all boxes — same base+extra total shown in
     // Section 3 — summed here by material so nothing added there is missed.
     const FEVICOL_NAME = "Fevicol Merino";
+    const tapeDiv = Number(tapeDivisor) || 0;
     const hwSummed = {};
     (draft.boxes || []).forEach((box) => {
       (box.hardwareItems || []).forEach((hw) => {
         if (!hw.materialName) return;
         if (hw.materialName === FEVICOL_NAME) return; // auto-calculated below instead of hand-entered
+        if (tapeDiv > 0 && hw.materialName === TAPE_ITEM) return; // from edge band length, below
         const total = (Number(hw.qty) || 0) + (Number(hw.extra) || 0);
         hwSummed[hw.materialName] = (hwSummed[hw.materialName] || 0) + total;
       });
@@ -906,7 +911,15 @@ function TemplateMaster() {
       ? [{ material: FEVICOL_NAME, group: fevicolPriceEntry?.group || "Glue", requiredQty: fevicolQty, unit: fevicolPriceEntry?.unit || "KG" }]
       : [];
 
-    return [...sheetRows, ...areaRows, ...edgeRows, ...carpRows, ...hwRows, ...fevicolRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
+    // Masking tape = edge band length ÷ the account's divisor (Items Pricing), rounded up.
+    const edgeMtr = edgeRows.reduce((s, r) => s + r.requiredQty, 0);
+    const tapeQty = tapeDiv > 0 && edgeMtr > 0 ? Math.ceil(edgeMtr / tapeDiv) : 0;
+    const tapePriceEntry = (prices || []).find((p) => p.materialName === TAPE_ITEM);
+    const tapeRows = tapeQty > 0
+      ? [{ material: TAPE_ITEM, group: tapePriceEntry?.group || "Tape", requiredQty: tapeQty, unit: tapePriceEntry?.unit || "Nos" }]
+      : [];
+
+    return [...sheetRows, ...areaRows, ...edgeRows, ...carpRows, ...hwRows, ...fevicolRows, ...tapeRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
   };
 
   // ── Cut Sheet Generator ───────────────────────────────────────────────────────
@@ -2461,7 +2474,7 @@ function TemplateMaster() {
                     });
                   });
                   (box.hardwareItems || []).forEach((hw) => {
-                    if (hw.materialName === "Fevicol Merino") return; // now auto-calculated in Material Summary instead
+                    if (hw.materialName === "Fevicol Merino" || (Number(tapeDivisor) > 0 && hw.materialName === TAPE_ITEM)) return; // now auto-calculated in Material Summary instead
                     allRows.push({
                       ...hw,
                       boxId: box.id,
@@ -2687,7 +2700,7 @@ function TemplateMaster() {
                         </div>
                       ) : (
                         <div style={{ border: "1px solid #e5e7eb", borderTop: "none", borderRadius: "0 0 8px 8px", overflowX: "auto" }}>
-                          <div style={{ padding: "8px 14px", background: "#f8fafc", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", gap: 8 }}>
+                          <div style={{ padding: "8px 14px", background: "#f8fafc", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                             <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>Fevicol Merino qty = </span>
                             <input
                               type="number" step="0.05" min={0}
@@ -2697,6 +2710,16 @@ function TemplateMaster() {
                               style={{ width: 60, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
                             />
                             <span style={{ fontSize: 12, color: "#6b7280" }}>× total Inside + Outside Laminate sheets required</span>
+<span style={{ width: 1, alignSelf: "stretch", background: "#e5e7eb", margin: "0 4px" }} />
+<span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>Masking Tape qty = edge band (m) ÷</span>
+<input
+  type="number" step="1" min={0}
+  value={tapeDivisor}
+  onChange={(e) => setTapeDivisor(e.target.value)}
+  onBlur={(e) => setTapeDivisor(Math.max(0, Number(e.target.value) || 0))}
+  style={{ width: 50, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
+/>
+<span style={{ fontSize: 12, color: "#6b7280" }}>(rounded up; 0 = type tapes per box)</span>
                             <span style={{ width: 1, alignSelf: "stretch", background: "#e5e7eb", margin: "0 4px" }} />
                             <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>GST</span>
                             <input

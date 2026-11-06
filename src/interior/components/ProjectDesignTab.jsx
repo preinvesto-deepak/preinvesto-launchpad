@@ -361,7 +361,7 @@ function ProjectDesignTab({ project, rooms, designGallery, onAddRoom, updateProj
             onEntries={(fn) => updateProject((p) => ({ ...p, cadFiles: fn(p.cadFiles || []) }))}
           />
         ) : (
-          <p style={{ fontSize: 13, color: "#9ca3af" }}>Add a room to this project first (Rooms &amp; Boxes tab).</p>
+          <p style={{ fontSize: 13, color: "#9ca3af" }}>Add a room to this project first (Room Estimation tab).</p>
         )}
       </div>
       <Lightbox url={lightbox} onClose={() => setLightbox("")} />

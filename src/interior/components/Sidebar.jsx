@@ -1,6 +1,6 @@
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useState } from "react";
-import { FolderKanban, Users } from "lucide-react";
+import { FolderKanban, Users, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { useAppData } from "../context/AppDataContext";
 import { useUnsavedChanges } from "../context/UnsavedChangesContext";
 import { useAuth } from "@/context/AuthContext";
@@ -16,6 +16,15 @@ function Sidebar() {
   const location = useLocation();
   const { guardedNavigate } = useUnsavedChanges();
   const [projectsOpen, setProjectsOpen] = useState(true);
+  // The menu panel can be collapsed to just the icon rail (remembered).
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("interior.sidebarCollapsed") === "1"; } catch { return false; }
+  });
+  const toggleSidebar = () => setCollapsed((c) => {
+    const next = !c;
+    try { localStorage.setItem("interior.sidebarCollapsed", next ? "1" : "0"); } catch { /* ignore */ }
+    return next;
+  });
 
   // An employee only sees the screens their group can view.
   const { user } = useAuth();
@@ -49,6 +58,11 @@ function Sidebar() {
   return (
     <>
     <div className="icon-rail no-print">
+      {collapsed && (
+        <button className="icon-rail-toggle" onClick={toggleSidebar} title="Open menu" aria-label="Open menu">
+          <ChevronsRight size={18} />
+        </button>
+      )}
       {railItems.map(({ key, label, icon: Icon, to, active }) => (
         <button
           key={key}
@@ -61,11 +75,16 @@ function Sidebar() {
         </button>
       ))}
     </div>
-    <div className="sidebar">
+    <div className="sidebar" style={collapsed ? { display: "none" } : undefined}>
       {/* Brand */}
-      <div className="sidebar-brand">
-        <div className="sidebar-brand-name">Interior App</div>
-        <div className="sidebar-brand-sub">Quotation & Cut Sheet</div>
+      <div className="sidebar-brand" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div>
+          <div className="sidebar-brand-name">Interior App</div>
+          <div className="sidebar-brand-sub">Quotation & Cut Sheet</div>
+        </div>
+        <button className="sidebar-collapse" onClick={toggleSidebar} title="Collapse menu" aria-label="Collapse menu">
+          <ChevronsLeft size={16} />
+        </button>
       </div>
 
       {/* Search */}

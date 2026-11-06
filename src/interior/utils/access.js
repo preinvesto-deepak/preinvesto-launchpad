@@ -33,7 +33,7 @@ export const KEY_MODULE = {
 export const PROJECT_TABS = [
   { key: "req", label: "Req", actions: ["view", "edit", "delete"] },
   { key: "design", label: "Design", actions: ["view", "edit", "delete"] },
-  { key: "rooms", label: "Rooms & Boxes", actions: ["view", "edit", "delete"] },
+  { key: "rooms", label: "Room Estimation", actions: ["view", "edit", "delete"] },
   { key: "material-models", label: "Material Analysis — change brands & rates", actions: ["view", "edit"] },
   { key: "summary-rates", label: "Material Analysis — with rates (also Project BOQ)", actions: ["view"] },
   { key: "summary-norates", label: "Material Analysis — quantities only", actions: ["view"] },
