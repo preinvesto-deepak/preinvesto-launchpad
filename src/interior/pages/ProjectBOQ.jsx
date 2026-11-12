@@ -3,6 +3,7 @@ import { useAppData } from "../context/AppDataContext";
 import { formatCurrency, roundTo2 } from "../utils/unitConversions";
 import { buildRoomRows, buildRoomEdgeBanding, buildRoomHardware, buildRoomCarpenter } from "../utils/projectRows";
 import { computeSheetCounts } from "../utils/binPack";
+import { kerfFor } from "../utils/kerf";
 import { serviceOf, boxQty } from "../utils/services";
 
 const MODELS = ["default", "economy", "standard", "premium"];
@@ -50,7 +51,8 @@ function ProjectBOQ() {
       const areaSqMm = rows.reduce((s, r) => s + r.w * r.h * r.qty, 0);
       const sheetCounts = computeSheetCounts(
         rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty })),
-        getStockSize
+        getStockSize,
+        kerfFor(selectedProjectObj)
       );
       const materials = [...new Set(rows.map((r) => r.material))];
       const materialRateDetails = materials.map((mat) => {

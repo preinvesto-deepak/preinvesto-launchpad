@@ -240,7 +240,7 @@ export function findOversizedPieces(rows, getStockSize) {
  * getStockSize: (material) => { sheetW, sheetH } — defaults to 2440×1220.
  * returns     : { [material]: sheetCount }
  */
-export function computeSheetCounts(parts, getStockSize = () => ({})) {
+export function computeSheetCounts(parts, getStockSize = () => ({}), kerf = 0) {
   const rows = (parts || [])
     .filter((p) => p.material && +p.lengthMm && +p.widthMm && +p.qty)
     .map((p, idx) => ({
@@ -253,7 +253,7 @@ export function computeSheetCounts(parts, getStockSize = () => ({})) {
       rotation: 0, // legacy parts carry no grain preference — free to rotate for best fit
     }));
 
-  const sheets = packSheets(rows, getStockSize, 0);
+  const sheets = packSheets(rows, getStockSize, kerf);
   const counts = {};
   sheets.forEach((s) => { counts[s.material] = (counts[s.material] || 0) + 1; });
   return counts;

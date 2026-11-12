@@ -19,6 +19,9 @@ import ProjectQuotation from "./pages/ProjectQuotation";
 import Profile from "./pages/Profile";
 import DesignGallery from "./pages/DesignGallery";
 import Teams from "./pages/Teams";
+import AppSettings from "./pages/AppSettings";
+import Requirements from "./pages/Requirements";
+import CustomerPortal, { CustomerPreview } from "./pages/CustomerPortal";
 import { can, canTab, isOwner, ROUTE_SCREEN, ROUTE_TAB, SCREENS, setProjectLock } from "./utils/access";
 
 import "./interior.css";
@@ -36,11 +39,14 @@ const PAGE_TITLES: Record<string, string> = {
   "/interior/dimensions-entry": "Dimensions Entry",
   "/interior/project-boq": "Project BOQ",
   "/interior/project-quotation": "Project Quotation",
+  "/interior/requirements": "Req Form",
+  "/interior/app-settings": "App Settings",
+  "/interior/customer-preview": "Customer form preview",
   "/interior/profile": "Your Profile",
 };
 
 // These pages render their own heading (or none), so the shared bar is suppressed.
-const NO_HEADER = ["/interior/items-pricing", "/interior/material-models", "/interior/projects", "/interior/sub-projects"];
+const NO_HEADER = ["/interior/app-settings", "/interior/items-pricing", "/interior/material-models", "/interior/projects", "/interior/sub-projects"];
 
 function PageHeader() {
   const { pathname } = useLocation();
@@ -297,7 +303,7 @@ function OwnerOnly({ children }: { children: ReactNode }) {
  * stylesheet with element-level rules (button, table, input); the class scopes
  * them so they can't leak into the rest of the Preinvesto site.
  */
-const InteriorApp = () => {
+const InteriorShell = () => {
   const { pathname } = useLocation();
   const noPadTop = ["/interior/items-pricing", "/interior/material-models"].includes(pathname);
 
@@ -326,6 +332,9 @@ const InteriorApp = () => {
                 <Route path="dimensions-entry" element={<Screen route="dimensions-entry"><DimensionsEntry /></Screen>} />
                 <Route path="project-boq" element={<Screen route="project-boq"><ProjectBOQ /></Screen>} />
                 <Route path="project-quotation" element={<Screen route="project-quotation"><ProjectQuotation /></Screen>} />
+                <Route path="requirements" element={<OwnerOnly><Requirements /></OwnerOnly>} />
+                <Route path="app-settings" element={<OwnerOnly><AppSettings /></OwnerOnly>} />
+                <Route path="customer-preview" element={<OwnerOnly><CustomerPreview /></OwnerOnly>} />
                 <Route path="profile" element={<OwnerOnly><Profile /></OwnerOnly>} />
               </Routes>
             </div>
@@ -334,6 +343,19 @@ const InteriorApp = () => {
       </UnsavedChangesProvider>
     </AppDataProvider>
   );
+};
+
+// A customer login gets the one-page requirements form instead of the app.
+const InteriorApp = () => {
+  const { user } = useAuth();
+  if (user?.access?.customer) {
+    return (
+      <AppDataProvider>
+        <div className="interior-app"><CustomerPortal /></div>
+      </AppDataProvider>
+    );
+  }
+  return <InteriorShell />;
 };
 
 export default InteriorApp;

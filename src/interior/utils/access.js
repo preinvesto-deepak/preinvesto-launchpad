@@ -31,7 +31,8 @@ export const KEY_MODULE = {
 // (only the actions listed apply to a tab). The server treats the whole
 // "projects" module as "any tab has it", and the app narrows it tab by tab.
 export const PROJECT_TABS = [
-  { key: "req", label: "Req", actions: ["view", "edit", "delete"] },
+  { key: "req-form", label: "Req Form", actions: ["view", "edit", "delete"] },
+  { key: "req", label: "Measurement", actions: ["view", "edit", "delete"] },
   { key: "design", label: "Design", actions: ["view", "edit", "delete"] },
   { key: "rooms", label: "Room Estimation", actions: ["view", "edit", "delete"] },
   { key: "material-models", label: "Material Analysis — change brands & rates", actions: ["view", "edit"] },
@@ -107,7 +108,8 @@ const lostIds = (prev, next) => {
  * drops any update that removes a row.
  */
 export function guardSetter(access, key, setter) {
-  if (isOwner(access)) return setter;
+  // A customer's page only ever touches answers; the server allows nothing else.
+  if (isOwner(access) || access.customer) return setter;
   const screen = KEY_MODULE[key];
   const canEdit = screen ? can(access, screen, "edit") : anyEdit(access);
   const canDelete = screen ? can(access, screen, "delete") : false;

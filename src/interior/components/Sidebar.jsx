@@ -177,7 +177,7 @@ function Sidebar() {
                         onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
                         title={p.name}
                       >
-                        {p.name}
+                        {p.name}{p.requirementsSubmittedAt ? <span title="The customer submitted their requirements" style={{ color: "#059669" }}> ✓</span> : null}
                       </div>
                     </li>
                   );
@@ -210,6 +210,8 @@ function Sidebar() {
           {show("materialModels") && <li><NavLink to="/interior/material-models" onClick={(e) => goTo(e, "/interior/material-models")}>Material Models</NavLink></li>}
           {show("templates") && <li><NavLink to="/interior/template-master" onClick={(e) => goTo(e, "/interior/template-master")}>Templates</NavLink></li>}
           {show("designGallery") && <li><NavLink to="/interior/design-gallery" onClick={(e) => goTo(e, "/interior/design-gallery")}>Design Gallery</NavLink></li>}
+          {owner && <li><NavLink to="/interior/requirements" onClick={(e) => goTo(e, "/interior/requirements")}>Req Form</NavLink></li>}
+          {owner && <li><NavLink to="/interior/app-settings" onClick={(e) => goTo(e, "/interior/app-settings")}>App Settings</NavLink></li>}
 
           {show("projects") && <GroupLabel label="Output" />}
           {show("projects") && <li><NavLink to="/interior/project-boq" onClick={(e) => goTo(e, "/interior/project-boq")}>Project BOQ</NavLink></li>}

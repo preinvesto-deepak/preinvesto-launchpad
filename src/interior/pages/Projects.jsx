@@ -9,9 +9,13 @@ import { quotationMaterialRows } from "../utils/quotationMaterials";
 import { canTab, isOwner, setProjectLock } from "../utils/access";
 import AddServiceModal from "../components/AddServiceModal";
 import CutSheetOptimizer from "./CutSheetOptimizer";
+import NumInput from "../components/NumInput";
+import RequirementsPanel from "../components/RequirementsPanel";
 import ProjectQuotation from "./ProjectQuotation";
 import { packSheets, findOversizedPieces } from "../utils/binPack";
-import { TAPE_ITEM, DEFAULT_TAPE_DIVISOR } from "../utils/projectRows";
+import { TAPE_ITEM } from "../utils/projectRows";
+import { calcFor, materialCalcGlobals, isMaterialCalcUniversal } from "../utils/materialCalc";
+import { kerfFor, isKerfUniversal } from "../utils/kerf";
 import { GROUP_OPTIONS } from "../data/priceData";
 import { PROJECT_STATUSES, projectStatusInfo } from "../data/projectStatus";
 import { LEAD_SOURCES, leadSourceLabel } from "../data/leadSource";
@@ -122,6 +126,30 @@ function RefChip({ label, style: extraStyle }) {
         ...extraStyle,
       }}
     >{label_}</span>
+  );
+}
+
+// The "⠿" grip next to an editable {ref} box — drag it into a formula field, or
+// click to copy "{ref}" to the clipboard.
+function GripChip({ refName }) {
+  const [status, setStatus] = useState(null); // null | "copied" | "failed"
+  const text = `{${refName}}`;
+  const handleCopy = async (e) => {
+    e.stopPropagation();
+    const ok = await copyToClipboard(text);
+    setStatus(ok ? "copied" : "failed");
+    setTimeout(() => setStatus(null), 1200);
+  };
+  const glyph = status === "copied" ? "✓" : status === "failed" ? "✕" : "⠿";
+  const color = status === "copied" ? "#059669" : status === "failed" ? "#dc2626" : "#7c3aed";
+  return (
+    <span
+      draggable
+      onDragStart={(e) => { e.dataTransfer.setData("text/plain", text); e.dataTransfer.effectAllowed = "copy"; }}
+      onClick={handleCopy}
+      title={status === "copied" ? "Copied!" : status === "failed" ? "Couldn't access the clipboard — try dragging instead" : `Click to copy "${text}", or drag into a formula field`}
+      style={{ fontSize: 11, color, cursor: "pointer", userSelect: "none", padding: "0 2px" }}
+    >{glyph}</span>
   );
 }
 
@@ -374,7 +402,7 @@ function TemplatePickerModal({ templates = [], folders = [], onSelect, onClose }
             {searching ? "No templates found." : activeFolderId ? "This folder is empty." : "No templates found. Create one in Template Master."}
           </p>
         )}
-        <div style={{ overflowY: "auto", flex: 1, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 12, alignContent: "start" }}>
+        <div style={{ overflowY: "auto", flex: 1, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gridAutoRows: "max-content", gap: 12, alignContent: "start" }}>
           {visibleFolders.map((f) => {
             const cover = coverImageOf(f);
             const count = deepTemplateCount(f.id);
@@ -1190,23 +1218,27 @@ function Projects() {
   const [fevicolMultiplier, setFevicolMultiplierLocal] = useState(0.7);
   // Masking Tape qty = the room's edge band metres ÷ this, rounded up — editable,
   // defaults to 10, 0 = off. Persisted on the room like the multiplier above.
-  const [tapeDivisor, setTapeDivisorLocal] = useState(DEFAULT_TAPE_DIVISOR);
+  const [tapeDivisor, setTapeDivisorLocal] = useState(10);
   // GST % applied on top of Material Summary's Total/Sft Cost rows to show
   // both Excl. and Incl. GST figures — editable, defaults to 18%. Persisted
   // on the room, same pattern as above.
   const [gstPercent, setGstPercentLocal] = useState(18);
+  // Those three come from App Settings > Material Calculation: one value for every
+  // room when "apply to all" is on (fields locked), else each room keeps its own.
+  const calcLocked = isMaterialCalcUniversal();
+  const calcG = materialCalcGlobals();
 
   // Project-level tab: "rooms" | "material-models"
-  const [projectTab, setProjectTab] = useState("req");
+  const [projectTab, setProjectTab] = useState("reqform");
 
   // Which project tabs this person's group allows (the owner has them all).
   const { user: authUser } = useAuth();
   const tabAccess = authUser?.access;
   const PROJECT_TAB_DEFS = [
-    ["req", "📝 Req"], ["design", "📐 Design"], ["rooms", "🏠 Room Estimation"], ["analysis", "📊 Material Analysis"],
+    ["reqform", "📋 Req Form"], ["req", "📝 Measurement"], ["design", "📐 Design"], ["rooms", "🏠 Room Estimation"], ["analysis", "📊 Material Analysis"],
     ["quotation", "🧾 Quotation"], ["customer-view", "🧾 Quotation (Customer View)"],
   ];
-  const tabPermKey = (tab) => tab;
+  const tabPermKey = (tab) => (tab === "reqform" ? "req-form" : tab);
   // Material Analysis is governed by three of a group's project-tab rules: open
   // it with any of them, see rates with "with rates" or "change brands & rates",
   // and change brands/rates with the latter's Edit.
@@ -1229,7 +1261,7 @@ function Projects() {
   }, [tabAccess, projectTab]); // eslint-disable-line react-hooks/exhaustive-deps
   // Reset tab when switching projects
   useEffect(() => {
-    setProjectTab("req");
+    setProjectTab("reqform");
   }, [selectedProjectId]);
 
   // Auto-clone global material model rates into project on first open
@@ -1249,11 +1281,13 @@ function Projects() {
 
   // Template picker modal
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
-  const [addServiceTarget, setAddServiceTarget] = useState(null); // { table: true } (Req tab) | { active: true } (Rooms & Boxes)
-  // Req tab: services whose (still empty) table was just added, per project, and the room each table's "+ Add row" targets.
+  // Sub sheet whose Delete button is showing its "Delete? Yes / No" check.
+  const [confirmDeleteSubSheetId, setConfirmDeleteSubSheetId] = useState(null);
+  const [addServiceTarget, setAddServiceTarget] = useState(null); // { table: true } (Measurement tab) | { active: true } (Rooms & Boxes)
+  // Measurement tab: services whose (still empty) table was just added, per project, and the room each table's "+ Add row" targets.
   const [shownServicesByProject, setShownServicesByProject] = useState({});
   const [serviceAddRoom, setServiceAddRoom] = useState({});
-  const [reqTemplateRoomId, setReqTemplateRoomId] = useState(null); // Req tab: room a picked template is applied to
+  const [reqTemplateRoomId, setReqTemplateRoomId] = useState(null); // Measurement tab: room a picked template is applied to
   const [pendingTemplate, setPendingTemplate] = useState(null); // template awaiting confirm-replace
 
   // ── Derived data ────────────────────────────────────────────────────────────
@@ -1273,10 +1307,11 @@ function Projects() {
   useEffect(() => {
     setEdgeExtraMtrLocal(Number(activeRoom?.edgeExtraMtr) || 0);
     setCarpenterExtraSftLocal(Number(activeRoom?.carpenterExtraSft) || 0);
-    setFevicolMultiplierLocal(activeRoom?.fevicolMultiplier != null ? Number(activeRoom.fevicolMultiplier) : 0.7);
-    setTapeDivisorLocal(activeRoom?.tapeDivisor != null ? Number(activeRoom.tapeDivisor) : DEFAULT_TAPE_DIVISOR);
-    setGstPercentLocal(activeRoom?.gstPercent != null ? Number(activeRoom.gstPercent) : 18);
-  }, [activeRoomId]); // eslint-disable-line react-hooks/exhaustive-deps
+    const c = calcFor(activeRoom);
+    setFevicolMultiplierLocal(c.fevicolMultiplier);
+    setTapeDivisorLocal(c.tapeDivisor);
+    setGstPercentLocal(c.gstPercent);
+  }, [activeRoomId, calcLocked, calcG.fevicolMultiplier, calcG.tapeDivisor, calcG.gstPercent]); // eslint-disable-line react-hooks/exhaustive-deps
   const setEdgeExtraMtr = (v) => {
     setEdgeExtraMtrLocal(v);
     if (typeof v === "number") updateRoomField("edgeExtraMtr", v);
@@ -1713,6 +1748,15 @@ function Projects() {
   // else referenced in the cut list) — nesting a 2100×600mm glass panel onto
   // a "stock sheet" and calling the result its quantity made no sense for a
   // material actually priced and bought per sqft.
+  // Saw-blade kerf in force for this project: the App Settings value, or the
+  // project's own when the account lets each project have one.
+  const projectKerf = kerfFor(selectedProject);
+  const setProjectKerf = (v) => setProjects((prev) => prev.map((p) => (p.id === selectedProject?.id ? { ...p, kerfWidth: v } : p)));
+  const kerfProps = {
+    kerf: projectKerf,
+    onKerfChange: isKerfUniversal() ? undefined : setProjectKerf,
+    kerfHint: isKerfUniversal() ? "Same for every project — change it in App Settings" : "Kerf for this project",
+  };
   const computeSheetRows = () => {
     const isSheetGroup = (g) => g === "Wood" || g === "Laminate";
     const rows = generateAllBoxesCutSheet().filter((r) => isSheetGroup((prices || []).find((p) => p.materialName === r.material)?.group));
@@ -1720,7 +1764,7 @@ function Projects() {
       const s = materialStockSettings?.[mat];
       return { sheetW: s?.sheetW || 2440, sheetH: s?.sheetH || 1220, sheetTexture: s?.sheetTexture ?? 1 };
     };
-    const packed = packSheets(rows, getStockSize);
+    const packed = packSheets(rows, getStockSize, projectKerf);
     const sheetCount = {};
     packed.forEach((s) => { sheetCount[s.material] = (sheetCount[s.material] || 0) + 1; });
     const materials = [...new Set(rows.map((r) => r.material).filter(Boolean))];
@@ -2383,6 +2427,14 @@ function Projects() {
               );
             })()}
 
+            {/* ── Req Form Tab — the room requirement questions (picked per room from
+                Configure › Req Form), answered here or by the customer's own login ── */}
+            {projectTab === "reqform" && (
+              <div style={{ padding: "20px 24px" }}>
+                <RequirementsPanel project={selectedProject} rooms={rooms} />
+              </div>
+            )}
+
             {/* ── Project Quotation Tab ── */}
             {projectTab === "quotation" && (
               <div style={{ padding: "20px 24px" }}>
@@ -2421,7 +2473,8 @@ function Projects() {
                   ...quotationMaterialRows(
                     rooms.map((room) => ({ ...room, boxes: (room.boxes || []).filter((b) => b.includeInQuotation !== false && !serviceOf(b)) })),
                     prices,
-                    materialStockSettings
+                    materialStockSettings,
+                    projectKerf
                   ).map((r) => ({ ...r, service: WARDROBE_SERVICE })),
                   ...serviceAnalysisRows(rooms),
                 ]}
@@ -2958,7 +3011,7 @@ function Projects() {
                                               </select>
                                             </td>
                                             <td style={numCell}>
-                                              <input type="number" value={p.rotation ?? 1} onChange={(e) => updatePart(p.id, "rotation", Number(e.target.value), subSheetId)} style={{ width: 44, fontSize: 12, padding: "2px 5px", minWidth: 44 }} min={1} />
+                                              <NumInput value={p.rotation ?? 1} onChange={(v) => updatePart(p.id, "rotation", v, subSheetId)} style={{ width: 44, fontSize: 12, padding: "2px 5px", minWidth: 44 }} min={1} />
                                             </td>
                                             <td style={txtCell}>
                                               <input type="text" readOnly value={autoLabel} style={{ fontSize: 12, padding: "2px 5px", width: "100%", minWidth: 80, background: "#f3f4f6", color: "#374151", cursor: "default" }} />
@@ -2972,7 +3025,7 @@ function Projects() {
                                                       <div key={fld} style={{ display: "flex", alignItems: "center", gap: 4 }}>
                                                         <input type="checkbox" checked={isEdgeReq} onChange={(e) => updatePart(p.id, reqFld, e.target.checked, subSheetId)} style={{ width: 13, height: 13, cursor: "pointer", accentColor: "#7c3aed", flexShrink: 0 }} />
                                                         <span style={{ fontSize: 10, fontWeight: 700, color: isEdgeReq ? "#374151" : "#9ca3af", width: 10 }}>{lbl}</span>
-                                                        <input type="number" value={p[fld] ?? 0} onChange={(e) => updatePart(p.id, fld, Number(e.target.value), subSheetId)} disabled={!isEdgeReq} style={{ width: 42, fontSize: 11, padding: "1px 3px", opacity: isEdgeReq ? 1 : 0.35 }} min={0} />
+                                                        <NumInput value={p[fld] ?? 0} onChange={(v) => updatePart(p.id, fld, v, subSheetId)} disabled={!isEdgeReq} style={{ width: 42, fontSize: 11, padding: "1px 3px", opacity: isEdgeReq ? 1 : 0.35 }} min={0} />
                                                       </div>
                                                     );
                                                   })}
@@ -3215,7 +3268,7 @@ function Projects() {
                                           <tr key={field} style={{ background: i % 2 === 0 ? "#fff" : "#f5f3ff" }}>
                                             <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe", fontWeight: 600, color: "#374151", fontSize: 12 }}>{label}</td>
                                             <td style={{ padding: "4px 10px", borderBottom: "1px solid #ede9fe" }}>
-                                              <input type="number" value={sheet[field] ?? ""} onChange={(e) => updateSheetField(subSheetId, field, Number(e.target.value))} placeholder="0" min={0} style={{ width: "100%", fontSize: 13, padding: "3px 8px" }} />
+                                              <NumInput value={sheet[field] ?? ""} onChange={(v) => updateSheetField(subSheetId, field, v)} placeholder="0" min={0} style={{ width: "100%", fontSize: 13, padding: "3px 8px" }} />
                                             </td>
                                             <td style={{ padding: "4px 8px", borderBottom: "1px solid #ede9fe", whiteSpace: "nowrap" }}>
                                               {varName && <RefChip label={varName} style={{ fontSize: 11, padding: "1px 6px" }} />}
@@ -3233,7 +3286,7 @@ function Projects() {
                                               <input type="text" value={cf.label || ""} onChange={(e) => updateSheetField(subSheetId, "customFields", (sheet.customFields || []).map((f) => f.id === cf.id ? { ...f, label: e.target.value } : f))} placeholder="Field label..." style={{ width: "100%", fontSize: 12, padding: "3px 6px" }} />
                                             </td>
                                             <td style={{ padding: "4px 10px", borderBottom: "1px solid #ede9fe" }}>
-                                              <input type="number" value={cf.value ?? 0} onChange={(e) => { const upd = (sheet.customFields || []).map((f) => f.id === cf.id ? { ...f, value: Number(e.target.value) } : f); updateSheetField(subSheetId, "customFields", upd); }} placeholder="0" style={{ width: "100%", fontSize: 13, padding: "3px 8px" }} />
+                                              <NumInput value={cf.value ?? 0} onChange={(v) => { const upd = (sheet.customFields || []).map((f) => f.id === cf.id ? { ...f, value: v } : f); updateSheetField(subSheetId, "customFields", upd); }} placeholder="0" style={{ width: "100%", fontSize: 13, padding: "3px 8px" }} />
                                             </td>
                                             <td style={{ padding: "4px 8px", borderBottom: "1px solid #ede9fe", whiteSpace: "nowrap" }}>
                                               <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
@@ -3246,6 +3299,7 @@ function Projects() {
                                                   style={{ width: 62, fontSize: 10, padding: "1px 4px", fontFamily: "monospace", color: isDup ? "#dc2626" : "#7c3aed", background: isDup ? "#fee2e2" : "#ede9fe", border: `1px solid ${isDup ? "#fca5a5" : "#ddd6fe"}`, borderRadius: 4, textAlign: "center" }}
                                                 />
                                                 <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`}`}</span>
+                                                {cf.ref && <GripChip refName={cf.ref} />}
                                                 <button
                                                   onClick={() => updateSheetField(subSheetId, "customFields", (sheet.customFields || []).filter((f) => f.id !== cf.id))}
                                                   style={{ background: "#dc2626", padding: "1px 6px", fontSize: 11, marginLeft: 4 }}
@@ -3311,7 +3365,15 @@ function Projects() {
                                           )}
                                           <button onClick={() => copySheetData(subSheetId)} title="Copy this sheet's materials/fields/parts" style={{ background: "#ede9fe", color: "#4c1d95", padding: "3px 10px", fontSize: 11 }}>⧉ Copy</button>
                                           {subSheetId != null && (
-                                            <button onClick={() => deleteSubSheet(subSheetId)} style={{ background: "#dc2626", padding: "3px 10px", fontSize: 11 }}>Delete</button>
+                                            confirmDeleteSubSheetId === subSheetId ? (
+                                          <>
+                                            <span style={{ fontSize: 11, color: "#fecaca", fontWeight: 600 }}>Delete?</span>
+                                            <button onClick={() => { deleteSubSheet(subSheetId); setConfirmDeleteSubSheetId(null); }} style={{ background: "#dc2626", padding: "3px 10px", fontSize: 11 }}>Yes</button>
+                                            <button onClick={() => setConfirmDeleteSubSheetId(null)} style={{ background: "#6b7280", padding: "3px 10px", fontSize: 11 }}>No</button>
+                                          </>
+                                        ) : (
+                                          <button onClick={() => setConfirmDeleteSubSheetId(subSheetId)} style={{ background: "#dc2626", padding: "3px 10px", fontSize: 11 }}>Delete</button>
+                                        )
                                           )}
                                         </div>
                                       }
@@ -3479,8 +3541,8 @@ function Projects() {
                                                   {hw.auto ? (
                                                     <span style={{ fontSize: 12, color: "#374151" }}>{hw.base}</span>
                                                   ) : (
-                                                    <input type="number" min={0} value={hw.base}
-                                                      onChange={(e) => updateHardwareItem(hw.boxId, hw.id, "qty", Math.max(0, Number(e.target.value) || 0))}
+                                                    <NumInput min={0} value={hw.base}
+                                                      onChange={(v) => updateHardwareItem(hw.boxId, hw.id, "qty", Math.max(0, v))}
                                                       style={{ width: 56, fontSize: 12, padding: "2px 4px", textAlign: "center" }} />
                                                   )}
                                                 </td>
@@ -3529,8 +3591,8 @@ function Projects() {
                                           </td>
                                           <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center", color: "#6b7280" }}>{hw.unit || "—"}</td>
                                           <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
-                                            <input type="number" min={0} value={hw.base}
-                                              onChange={(e) => updateHardwareItem(hw.boxId, hw.id, "qty", Math.max(0, Number(e.target.value) || 0))}
+                                            <NumInput min={0} value={hw.base}
+                                              onChange={(v) => updateHardwareItem(hw.boxId, hw.id, "qty", Math.max(0, v))}
                                               style={{ width: 56, fontSize: 12, padding: "2px 4px", textAlign: "center" }} />
                                           </td>
                                           <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
@@ -3616,6 +3678,7 @@ function Projects() {
                                   <input
                                     type="number" step="0.05" min={0}
                                     value={fevicolMultiplier}
+                                    disabled={calcLocked}
                                     onChange={(e) => setFevicolMultiplier(e.target.value)}
                                     onBlur={(e) => setFevicolMultiplier(Math.max(0, Number(e.target.value) || 0))}
                                     style={{ width: 60, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
@@ -3626,16 +3689,18 @@ function Projects() {
 <input
   type="number" step="1" min={0}
   value={tapeDivisor}
+  disabled={calcLocked}
   onChange={(e) => setTapeDivisor(e.target.value)}
   onBlur={(e) => setTapeDivisor(Math.max(0, Number(e.target.value) || 0))}
   style={{ width: 50, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
 />
-<span style={{ fontSize: 12, color: "#6b7280" }}>(rounded up; 0 = type tapes per box)</span>
+<span style={{ fontSize: 12, color: "#6b7280" }}>(rounded up; 0 = type tapes per box){calcLocked ? " · same for every room — change in App Settings" : ""}</span>
                                   <span style={{ width: 1, alignSelf: "stretch", background: "#e5e7eb", margin: "0 4px" }} />
                                   <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>GST</span>
                                   <input
                                     type="number" step="1" min={0}
                                     value={gstPercent}
+                                    disabled={calcLocked}
                                     onChange={(e) => setGstPercent(e.target.value)}
                                     onBlur={(e) => setGstPercent(Math.max(0, Number(e.target.value) || 0))}
                                     style={{ width: 50, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
@@ -3993,6 +4058,7 @@ function Projects() {
       {cutSheetOpen && activeBox && (
         <CutSheetOptimizer
           rows={generateCutSheet()}
+          {...kerfProps}
           title={activeBox.boxName || activeBox.name || ""}
           subtitle={`${activeBox.widthMm || ""}W × ${activeBox.heightMm || ""}H × ${activeBox.depthMm || ""}D mm`}
           onClose={() => setCutSheetOpen(false)}
@@ -4003,6 +4069,7 @@ function Projects() {
       {allCutSheetOpen && activeRoom && (
         <CutSheetOptimizer
           rows={generateAllBoxesCutSheet()}
+          {...kerfProps}
           title={activeRoom.subProject || "All Boxes"}
           subtitle={`All Boxes · ${boxes.length} box${boxes.length !== 1 ? "es" : ""}`}
           onClose={() => setAllCutSheetOpen(false)}

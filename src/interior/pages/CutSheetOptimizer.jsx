@@ -537,7 +537,7 @@ function SummaryTab({ packedSheets, rows, oversizeRows }) {
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export default function CutSheetOptimizer({ rows, title, subtitle, onClose }) {
+export default function CutSheetOptimizer({ rows, title, subtitle, onClose, kerf: kerfProp, onKerfChange, kerfHint }) {
   const [tab, setTab] = useState("list");
   const { materialStockSettings, setMaterialStockSettings, prices, kerfWidth, setKerfWidth } = useAppData();
 
@@ -587,8 +587,11 @@ export default function CutSheetOptimizer({ rows, title, subtitle, onClose }) {
 
   // Saw blade / kerf width (mm) — reserved as a gap between adjacent cuts.
   // Persisted globally so it survives closing and reopening this modal.
-  const kerf = kerfWidth ?? 0;
-  const setKerf = setKerfWidth;
+  // A caller that passes `kerf` owns it (the project's, or the App Settings value
+  // — read-only unless it also passes onKerfChange); otherwise the workspace value.
+  const kerf = kerfProp !== undefined ? kerfProp : (kerfWidth ?? 0);
+  const kerfLocked = kerfProp !== undefined && !onKerfChange;
+  const setKerf = onKerfChange || setKerfWidth;
 
   // Bin-pack — stamp sheetTexture from stock entries onto each packed sheet
   const packedSheets = useMemo(() =>
@@ -811,12 +814,12 @@ export default function CutSheetOptimizer({ rows, title, subtitle, onClose }) {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div
                 onClick={(ev) => ev.stopPropagation()}
-                title="Saw blade width reserved between cuts"
+                title={kerfHint || "Saw blade width reserved between cuts"}
                 style={{ display: "flex", alignItems: "center", gap: 5 }}
               >
                 <span style={{ fontSize: 11, fontWeight: 700, color: "#64748b" }}>Kerf (mm)</span>
                 <input
-                  type="number" min={0} step={0.5} value={kerf}
+                  type="number" min={0} step={0.5} value={kerf} disabled={kerfLocked}
                   onChange={(ev) => setKerf(+ev.target.value)}
                   onBlur={(ev) => setKerf(Math.max(0, +ev.target.value || 0))}
                   style={{ width: 46, fontSize: 11, padding: "2px 4px", textAlign: "center", border: "1px solid #d1d5db", borderRadius: 4 }}

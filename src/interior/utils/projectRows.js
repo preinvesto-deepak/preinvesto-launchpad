@@ -9,6 +9,7 @@
  */
 
 import { mmToFeet } from "./unitConversions";
+import { calcFor } from "./materialCalc";
 
 const DEFAULT_REFS = {
   heightMm: "H", widthMm: "W", depthMm: "D",
@@ -139,15 +140,11 @@ export function buildBoxEdgeBanding(box, prices) {
 }
 
 // Masking tape isn't typed in: the number of tapes is the room's edge band
-// length (m) divided by the room's own figure (room.tapeDivisor, edited next to
-// the Fevicol multiplier in Material Details), rounded up to a whole tape.
+// length (m) divided by the figure from App Settings > Material Calculation
+// (the room's own when each room keeps one), rounded up to a whole tape.
 // 0 turns the rule off, so tapes typed on a box count as before.
 export const TAPE_ITEM = "Masking Tape";
-export const DEFAULT_TAPE_DIVISOR = 10;
-export const tapeDivisorOf = (room) => {
-  const n = Number(room?.tapeDivisor);
-  return room?.tapeDivisor != null && room.tapeDivisor !== "" && Number.isFinite(n) && n >= 0 ? n : DEFAULT_TAPE_DIVISOR;
-};
+export const tapeDivisorOf = (room) => calcFor(room).tapeDivisor;
 export const tapeCount = (edgeMtr, divisor) => (divisor > 0 && edgeMtr > 0 ? Math.ceil(edgeMtr / divisor) : 0);
 
 /** Edge banding for every box in a room, grouped by material — { [material]: lengthMm } */

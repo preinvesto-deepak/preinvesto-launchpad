@@ -59,6 +59,129 @@ function Modal({ title, onClose, children, width = 440 }) {
   );
 }
 
+const emptyCustomer = { name: "", phone: "", projectId: "", username: "", password: "", active: true };
+
+// ── Customers: one login per project, to fill that project's room requirements ──
+export function CustomersPanel({ team, act }) {
+  const { projects } = useAppData();
+  const customers = team.employees.filter((e) => e.customer);
+  const [form, setForm] = useState(null);
+  const [editId, setEditId] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirmId, setConfirmId] = useState(null);
+  const projectOf = (id) => projects.find((p) => String(p.id) === String(id));
+
+  const openAdd = () => { setEditId(null); setForm({ ...emptyCustomer }); setError(""); };
+  const openEdit = (c) => { setEditId(c.id); setForm({ name: c.name, phone: c.phone, projectId: c.projectId || "", username: c.username, password: "", active: c.active }); setError(""); };
+  const save = async () => {
+    setBusy(true); setError("");
+    try { await act({ action: "saveCustomer", id: editId || undefined, ...form }); setForm(null); }
+    catch (e) { setError(e.message); } finally { setBusy(false); }
+  };
+  const remove = async (c) => {
+    try { await act({ action: "deleteEmployee", id: c.id }); } catch (err) { window.alert(err.message); }
+    setConfirmId(null);
+  };
+
+  return (
+    <div style={{ marginTop: 28 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+        <div>
+          <h3 style={{ margin: "0 0 2px", fontSize: 16 }}>Customers</h3>
+          <span style={{ color: "#6b7280", fontSize: 13 }}>
+            A customer signs in with their own username and password and sees only their project's room requirements form — nothing else.
+          </span>
+        </div>
+        <button onClick={openAdd} style={{ background: "#2563eb", padding: "6px 14px", fontSize: 13 }}>+ Add Customer</button>
+      </div>
+
+      <table border="1" cellPadding="10" cellSpacing="0" width="100%">
+        <thead>
+          <tr>
+            <th style={{ textAlign: "left" }}>Name</th>
+            <th style={{ textAlign: "left" }}>Project</th>
+            <th style={{ textAlign: "left" }}>Sign-in</th>
+            <th style={{ textAlign: "left" }}>Requirements</th>
+            <th style={{ textAlign: "left" }}>Last sign-in</th>
+            <th style={{ textAlign: "left", width: 150 }}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {customers.length === 0 ? (
+            <tr><td colSpan="6">No customers yet — add one with "+ Add Customer".</td></tr>
+          ) : customers.map((c) => {
+            const p = projectOf(c.projectId);
+            return (
+              <tr key={c.id}>
+                <td style={{ fontWeight: 700 }}>{c.name}</td>
+                <td>{p ? p.name : <span style={{ color: "#dc2626" }}>Project not found</span>}</td>
+                <td><code>{c.username}</code> {c.active ? <span style={{ color: "#059669", fontSize: 11 }}>Active</span> : <span style={{ color: "#9ca3af", fontSize: 11 }}>Disabled</span>}</td>
+                <td style={{ fontSize: 12 }}>{p?.requirementsSubmittedAt ? <span style={{ color: "#059669" }}>✓ Submitted {new Date(p.requirementsSubmittedAt).toLocaleDateString()}</span> : <span style={{ color: "#9ca3af" }}>Not submitted</span>}</td>
+                <td style={{ fontSize: 12, color: "#6b7280" }}>{fmtDate(c.lastLoginAt)}</td>
+                <td>
+                  {confirmId === c.id ? (
+                    <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <span style={{ fontSize: 11, color: "#dc2626", fontWeight: 600 }}>Delete?</span>
+                      <button onClick={() => remove(c)} style={{ background: "#dc2626", fontSize: 11, padding: "3px 10px" }}>Yes</button>
+                      <button onClick={() => setConfirmId(null)} style={{ background: "#6b7280", fontSize: 11, padding: "3px 10px" }}>No</button>
+                    </span>
+                  ) : (
+                    <span style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => openEdit(c)} style={{ background: "#2563eb", fontSize: 11, padding: "3px 10px" }}>Edit</button>
+                      <button onClick={() => setConfirmId(c.id)} style={{ background: "#dc2626", fontSize: 11, padding: "3px 10px" }}>Delete</button>
+                    </span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
+      {form && (
+        <Modal title={editId ? "Edit Customer" : "Add Customer"} onClose={() => setForm(null)}>
+          {error && <div style={{ color: "#dc2626", fontSize: 12, marginTop: 10 }}>{error}</div>}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+            <div>
+              <label style={label}>Name *</label>
+              <input autoFocus value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Customer's name" />
+            </div>
+            <div>
+              <label style={label}>Project *</label>
+              <select value={form.projectId} onChange={(e) => setForm((f) => ({ ...f, projectId: e.target.value }))}>
+                <option value="">— Choose the project —</option>
+                {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <label style={label}>Username *</label>
+                <input value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value.toLowerCase().replace(/\s/g, "") }))} placeholder="e.g. suresh.villa" autoComplete="off" />
+              </div>
+              <div>
+                <label style={label}>{editId ? "New password" : "Password *"}</label>
+                <input type="text" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} placeholder={editId ? "Leave blank to keep" : "At least 6 characters"} autoComplete="new-password" />
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: "#6b7280", marginTop: -6 }}>
+              They sign in on the normal sign-in page. Share the username and password yourself — the password can't be viewed again, only replaced.
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+              <input type="checkbox" checked={form.active} onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))} style={{ width: 15, height: 15 }} />
+              Active (can sign in)
+            </label>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+              <button onClick={() => setForm(null)} style={{ background: "#6b7280" }}>Cancel</button>
+              <button onClick={save} disabled={busy} style={{ background: "#2563eb" }}>{busy ? "Saving…" : "Save"}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 const fmtDate = (v) => (v ? new Date(v).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "Never");
 
 // ── Team (everyone you work with; some of them can sign in) ─────────────────
@@ -114,9 +237,9 @@ export function TeamPanel({ team, act }) {
           </tr>
         </thead>
         <tbody>
-          {team.employees.length === 0 ? (
+          {team.employees.filter((e) => !e.customer).length === 0 ? (
             <tr><td colSpan="8">No one yet — add a person with "+ Add Person".</td></tr>
-          ) : team.employees.map((e) => (
+          ) : team.employees.filter((e) => !e.customer).map((e) => (
             <tr key={e.id}>
               <td style={{ fontWeight: 700 }}>{e.name}</td>
               <td>{e.role || "—"}</td>

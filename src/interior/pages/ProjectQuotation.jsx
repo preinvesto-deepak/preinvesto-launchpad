@@ -6,6 +6,7 @@ import { useAppData } from "../context/AppDataContext";
 import { roundTo2, formatCurrency, mmToFeet } from "../utils/unitConversions";
 import { buildRoomRows, buildRoomEdgeBanding, buildRoomHardware, buildRoomCarpenter, buildBoxRows, buildBoxEdgeBanding, buildBoxCarpenterRow } from "../utils/projectRows";
 import { computeSheetCounts } from "../utils/binPack";
+import { kerfFor } from "../utils/kerf";
 import ShareWithCustomerModal from "../components/ShareWithCustomerModal";
 import { useAuth } from "@/context/AuthContext";
 import { canTab } from "../utils/access";
@@ -122,7 +123,8 @@ function computeRoomCost(room, model, projectObj, prices, materialStockSettings)
   const getStockSize = (mat) => getStockSizeFor(materialStockSettings, mat);
   const sheetCounts = computeSheetCounts(
     rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty })),
-    getStockSize
+    getStockSize,
+    kerfFor(projectObj)
   );
   const materials = [...new Set(rows.map((r) => r.material))];
   const areaSqMm = rows.reduce((s, r) => s + r.w * r.h * r.qty, 0);
@@ -206,7 +208,7 @@ function computeBoxOwnCost(box, room, model, projectObj, prices, materialStockSe
 // the supplier discount already baked into the item's own Rate, not any
 // markup applied later in this quotation, so "you saved ₹X" always means
 // the discount the supplier actually gave, not a moving target.
-function computeRoomMrpSavings(room, prices, materialStockSettings) {
+function computeRoomMrpSavings(room, prices, materialStockSettings, projectObj) {
   const rows = buildRoomRows(room, prices);
   const getStockSize = (mat) => {
     const s = materialStockSettings?.[mat];
@@ -214,7 +216,8 @@ function computeRoomMrpSavings(room, prices, materialStockSettings) {
   };
   const sheetCounts = computeSheetCounts(
     rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty })),
-    getStockSize
+    getStockSize,
+    kerfFor(projectObj)
   );
   const materials = [...new Set(rows.map((r) => r.material))];
   const edgeTotals = buildRoomEdgeBanding(room, prices);
@@ -684,7 +687,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
   // (see computeRoomMrpSavings above for why).
   const mrpSavings = useMemo(() => {
     return quotationRooms.reduce((acc, room) => {
-      const s = computeRoomMrpSavings(room, prices, materialStockSettings);
+      const s = computeRoomMrpSavings(room, prices, materialStockSettings, selectedProjectObj);
       return { mrpTotal: acc.mrpTotal + s.mrpTotal, netTotal: acc.netTotal + s.netTotal, savings: acc.savings + s.savings };
     }, { mrpTotal: 0, netTotal: 0, savings: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps

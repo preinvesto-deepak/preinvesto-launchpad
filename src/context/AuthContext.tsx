@@ -10,6 +10,8 @@ export interface Access {
   /** null/undefined = every project, else the project ids they may work on. */
   scope?: string[] | null;
   groupName?: string;
+  /** A customer login: sees only its own project's requirements form. */
+  customer?: boolean;
 }
 
 export interface AuthUser {

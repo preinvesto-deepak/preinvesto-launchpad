@@ -128,6 +128,7 @@ function ia_build_principal(array $row): array {
             'perms' => ia_normalize_perms(is_array($perms) ? $perms : []),
             'scope' => ia_normalize_scope($scope),
             'groupName' => $row['group_name'] ?? '',
+            'customer' => is_array($perms) && !empty($perms['customer']),
         ],
     ];
 }
@@ -202,6 +203,7 @@ function ia_issue_employee_session(string $employeeId): string {
 // same stored data), so that module's View/Edit/Delete is simply "any tab has
 // it"; the tab-by-tab limits themselves are applied by the app.
 const IA_PROJECT_TABS = [
+    'req-form'        => ['view', 'edit', 'delete'],
     'req'             => ['view', 'edit', 'delete'],
     'design'          => ['view', 'edit', 'delete'],
     'rooms'           => ['view', 'edit', 'delete'],
@@ -218,11 +220,25 @@ const IA_PROJECT_TABS = [
  * copied onto every tab.
  */
 function ia_normalize_perms(array $raw): array {
+    // A customer's group (made by Teams > Add customer) opens no screen: the
+    // customer only sees the Requirements form of their own project.
+    if (!empty($raw['customer'])) {
+        $none = ['view' => false, 'edit' => false, 'delete' => false];
+        $out = [];
+        foreach (IA_MODULES as $m) $out[$m] = $none;
+        $out['tabs'] = array_map(fn($_) => $none, IA_PROJECT_TABS);
+        $out['customer'] = true;
+        return $out;
+    }
     $given    = isset($raw['tabs']) && is_array($raw['tabs']) ? $raw['tabs'] : null;
     $fallback = isset($raw['projects']) && is_array($raw['projects']) ? $raw['projects'] : [];
     $tabs = [];
     foreach (IA_PROJECT_TABS as $key => $actions) {
-        $src  = $given !== null ? (isset($given[$key]) && is_array($given[$key]) ? $given[$key] : []) : $fallback;
+        // "Req Form" came after the other tabs: a group saved before it follows its Req rule.
+        $src  = $given !== null
+            ? (isset($given[$key]) && is_array($given[$key]) ? $given[$key]
+                : ($key === 'req-form' && isset($given['req']) && is_array($given['req']) ? $given['req'] : []))
+            : $fallback;
         $edit = in_array('edit', $actions, true) && !empty($src['edit']);
         $del  = in_array('delete', $actions, true) && !empty($src['delete']);
         $tabs[$key] = ['view' => !empty($src['view']) || $edit || $del, 'edit' => $edit, 'delete' => $del];
@@ -302,12 +318,189 @@ function ia_same($a, $b): bool {
     return json_encode($a) === json_encode($b);
 }
 
+// ---------------------------------------------------------------------------
+// Customers
+// ---------------------------------------------------------------------------
+// A customer signs in to fill the room requirements of ONE project. They see only
+// that project's name and rooms (no boxes, rates or prices), the question sets
+// those rooms use, and may change only the answers - and "submit", once.
+
+function ia_requirement_sets(array $stored): array {
+    $p = $stored['companyProfile'] ?? null;
+    return is_array($p) && isset($p['requirementSets']) && is_array($p['requirementSets']) ? $p['requirementSets'] : [];
+}
+
+function ia_customer_scope(array $access, array $stored): array {
+    $ids = array_fill_keys($access['scope'] ?? [], true);
+    $projects = [];
+    $names = [];
+    foreach (is_array($stored['projects'] ?? null) ? $stored['projects'] : [] as $p) {
+        if (is_array($p) && isset($p['id']) && isset($ids[(string) $p['id']])) {
+            $projects[] = $p;
+            $names[(string) ($p['name'] ?? '')] = true;
+        }
+    }
+    return ['ids' => $ids, 'projects' => $projects, 'names' => $names];
+}
+
+function ia_view_customer(array $access, array $storedAssoc, array $defaults): array {
+    $out = $defaults;
+    $sc = ia_customer_scope($access, $storedAssoc);
+    $rooms = array_values(array_filter(
+        is_array($storedAssoc['subProjects'] ?? null) ? $storedAssoc['subProjects'] : [],
+        fn($r) => is_array($r) && isset($sc['names'][(string) ($r['project'] ?? '')])
+    ));
+    $used = [];
+    foreach ($rooms as $r) if (!empty($r['requirementSetId'])) $used[(string) $r['requirementSetId']] = true;
+
+    $out['projects'] = array_map(fn($p) => [
+        'id' => $p['id'], 'name' => $p['name'] ?? '',
+        'requirementsSubmittedAt' => $p['requirementsSubmittedAt'] ?? null,
+        'requirementsSubmittedBy' => $p['requirementsSubmittedBy'] ?? null,
+    ], $sc['projects']);
+    $out['subProjects'] = array_map(function ($r) {
+        $req = is_array($r['requirements'] ?? null) ? $r['requirements'] : [];
+        return [
+            'id' => $r['id'] ?? null, 'project' => $r['project'] ?? '', 'subProject' => $r['subProject'] ?? '',
+            'requirementSetId' => $r['requirementSetId'] ?? null,
+            'requirements' => $req ?: new stdClass(),
+            'remarks' => (is_array($r['remarks'] ?? null) && $r['remarks']) ? $r['remarks'] : new stdClass(),
+        ];
+    }, $rooms);
+    $out['companyProfile'] = ['requirementSets' => array_values(array_filter(
+        ia_requirement_sets($storedAssoc),
+        fn($s) => is_array($s) && isset($s['id']) && isset($used[(string) $s['id']])
+    ))];
+    return $out;
+}
+
+/** Keeps only answers to real questions of the set, in the shape each question expects. */
+function ia_clean_answers($set, $raw): array {
+    $out = [];
+    if (!is_array($set) || !is_array($raw)) return $out;
+    foreach (is_array($set['questions'] ?? null) ? $set['questions'] : [] as $q) {
+        if (!is_array($q) || !isset($q['id'])) continue;
+        $id = (string) $q['id'];
+        if (!array_key_exists($id, $raw)) continue;
+        $v = $raw[$id];
+        if ($v === null || $v === '') continue;
+        $type = $q['type'] ?? '';
+        if ($type === 'yesno') {
+            if ($v === 'yes' || $v === 'no') $out[$id] = $v;
+        } elseif ($type === 'choice') {
+            $labels = array_map(fn($o) => is_array($o) ? (string) ($o['label'] ?? '') : (string) $o, is_array($q['options'] ?? null) ? $q['options'] : []);
+            if (is_string($v) && in_array($v, $labels, true)) $out[$id] = $v;
+        } elseif ($type === 'multi') {
+            $labels = array_map(fn($o) => is_array($o) ? (string) ($o['label'] ?? '') : (string) $o, is_array($q['options'] ?? null) ? $q['options'] : []);
+            $picked = [];
+            if (is_array($v)) {
+                foreach ($v as $x) if (is_string($x) && in_array($x, $labels, true) && !in_array($x, $picked, true)) $picked[] = $x;
+            }
+            if ($picked) $out[$id] = $picked;
+        } elseif ($type === 'number') {
+            if (is_numeric($v) && is_finite((float) $v) && $v >= 0 && $v < 1e6) $out[$id] = $v + 0;
+        } elseif ($type === 'text') {
+            if (is_scalar($v)) $out[$id] = mb_substr((string) $v, 0, 500);
+        }
+    }
+    return $out;
+}
+
+/** Remarks: free text per question of the set, trimmed to a sensible length. */
+function ia_clean_remarks($set, $raw): array {
+    $out = [];
+    if (!is_array($set) || !is_array($raw)) return $out;
+    foreach (is_array($set['questions'] ?? null) ? $set['questions'] : [] as $q) {
+        if (!is_array($q) || !isset($q['id'])) continue;
+        $v = $raw[(string) $q['id']] ?? null;
+        if (is_string($v) && trim($v) !== '') $out[(string) $q['id']] = mb_substr($v, 0, 500);
+    }
+    return $out;
+}
+
+/** @return array{0: array, 1: array} [key => value to write, keys refused] */
+function ia_merge_customer(array $access, array $stored, array $incoming): array {
+    $writes = [];
+    $denied = [];
+    $sc = ia_customer_scope($access, $stored);
+    if (!$sc['projects']) return [$writes, []];
+    $sets = ia_requirement_sets($stored);
+    $submitted = function (string $name) use ($sc): bool {
+        foreach ($sc['projects'] as $p) {
+            if ((string) ($p['name'] ?? '') === $name && !empty($p['requirementsSubmittedAt'])) return true;
+        }
+        return false;
+    };
+
+    // Answers, room by room - only for rooms of their project that are not yet submitted.
+    if (is_array($incoming['subProjects'] ?? null) && is_array($stored['subProjects'] ?? null)) {
+        $inById = [];
+        foreach ($incoming['subProjects'] as $r) if (is_array($r) && isset($r['id'])) $inById[(string) $r['id']] = $r;
+        $changed = false;
+        $next = [];
+        foreach ($stored['subProjects'] as $room) {
+            $name = is_array($room) ? (string) ($room['project'] ?? '') : '';
+            if (!is_array($room) || !isset($sc['names'][$name]) || $submitted($name)) { $next[] = $room; continue; }
+            $inc = $inById[(string) ($room['id'] ?? '')] ?? null;
+            $set = null;
+            foreach ($sets as $s) {
+                if (is_array($s) && (string) ($s['id'] ?? '') === (string) ($room['requirementSetId'] ?? '')) { $set = $s; break; }
+            }
+            if ($inc === null || $set === null) { $next[] = $room; continue; }
+            $answers = ia_clean_answers($set, $inc['requirements'] ?? []);
+            $current = is_array($room['requirements'] ?? null) ? $room['requirements'] : [];
+            $currentRemarks = is_array($room['remarks'] ?? null) ? $room['remarks'] : [];
+            $remarks = array_key_exists('remarks', $inc) ? ia_clean_remarks($set, $inc['remarks']) : $currentRemarks;
+            if (ia_same($answers, $current) && ia_same($remarks, $currentRemarks)) { $next[] = $room; continue; }
+            $changed = true;
+            $room['requirements'] = $answers ?: new stdClass();
+            $room['remarks'] = $remarks ?: new stdClass();
+            $next[] = $room;
+        }
+        if ($changed) $writes['subProjects'] = $next;
+    }
+
+    // Submit: stamped by the server, once.
+    if (is_array($incoming['projects'] ?? null) && is_array($stored['projects'] ?? null)) {
+        $inById = [];
+        foreach ($incoming['projects'] as $p) if (is_array($p) && isset($p['id'])) $inById[(string) $p['id']] = $p;
+        $changed = false;
+        $next = [];
+        foreach ($stored['projects'] as $p) {
+            if (!is_array($p) || !isset($sc['ids'][(string) ($p['id'] ?? '')]) || !empty($p['requirementsSubmittedAt'])) { $next[] = $p; continue; }
+            $inc = $inById[(string) $p['id']] ?? null;
+            if (!$inc || empty($inc['requirementsSubmittedAt'])) { $next[] = $p; continue; }
+            // Every required question of the project's rooms must be answered first.
+            $incomplete = false;
+            foreach ($writes['subProjects'] ?? ($stored['subProjects'] ?? []) as $r) {
+                if (!is_array($r) || (string) ($r['project'] ?? '') !== (string) ($p['name'] ?? '')) continue;
+                foreach ($sets as $s) {
+                    if (!is_array($s) || (string) ($s['id'] ?? '') !== (string) ($r['requirementSetId'] ?? '')) continue;
+                    foreach (is_array($s['questions'] ?? null) ? $s['questions'] : [] as $q) {
+                        if (empty($q['required'])) continue;
+                        $a = is_array($r['requirements'] ?? null) ? ($r['requirements'][(string) ($q['id'] ?? '')] ?? null) : null;
+                        if ($a === null || $a === '' || $a === []) $incomplete = true;
+                    }
+                }
+            }
+            if ($incomplete) { $denied[] = 'requirements'; $next[] = $p; continue; }
+            $p['requirementsSubmittedAt'] = gmdate('Y-m-d\TH:i:s') . '.000Z';
+            $p['requirementsSubmittedBy'] = 'customer';
+            $changed = true;
+            $next[] = $p;
+        }
+        if ($changed) $writes['projects'] = $next;
+    }
+    return [$writes, $denied];
+}
+
 /**
  * What an employee sees of the stored workspace. $storedObj / $storedAssoc are
  * the same rows decoded as objects / arrays (objects keep `{}` intact for keys
  * that pass through unchanged); $defaults is the key => empty-value map.
  */
 function ia_view_workspace(array $access, array $storedObj, array $storedAssoc, array $defaults): array {
+    if (!empty($access['customer'])) return ia_view_customer($access, $storedAssoc, $defaults);
     $out = [];
     $scope = ia_scope_of($access, $storedAssoc['projects'] ?? []);
     foreach ($defaults as $key => $def) {
@@ -371,6 +564,7 @@ function ia_merge_array(array $stored, array $incoming, string $key, ?array $sco
  * @return array{0: array, 1: array} [key => value to write (only real changes), keys refused]
  */
 function ia_merge_workspace(array $access, array $stored, array $incoming, array $defaults): array {
+    if (!empty($access['customer'])) return ia_merge_customer($access, $stored, $incoming);
     $writes = [];
     $denied = [];
     $editAny = ia_any_edit($access);

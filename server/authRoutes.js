@@ -166,6 +166,7 @@ export default function registerAuthRoutes(app, pool) {
       perms: normalizePerms(row.perms_json ? JSON.parse(row.perms_json) : {}),
       scope: row.scope_json ? normalizeScope(JSON.parse(row.scope_json)) : null,
       groupName: row.group_name || '',
+      customer: !!(row.perms_json && JSON.parse(row.perms_json).customer === true),
     },
   });
 
@@ -575,18 +576,26 @@ export default function registerAuthRoutes(app, pool) {
 
   async function teamSnapshot(ownerId) {
     const [emps] = await pool.query(
-      `SELECT id, name, username, role, phone, email, group_id, active, created_at, last_login_at
-         FROM interior_employees WHERE owner_id = ? ORDER BY name`, [ownerId]);
+      `SELECT e.id, e.name, e.username, e.role, e.phone, e.email, e.group_id, e.active, e.created_at, e.last_login_at,
+              g.perms_json AS g_perms, g.scope_json AS g_scope
+         FROM interior_employees e LEFT JOIN interior_groups g ON g.id = e.group_id
+        WHERE e.owner_id = ? ORDER BY e.name`, [ownerId]);
     const [groups] = await pool.query(
       'SELECT id, name, perms_json, scope_json FROM interior_groups WHERE owner_id = ? ORDER BY name', [ownerId]);
     const counts = {};
     emps.forEach((e) => { if (e.group_id) counts[e.group_id] = (counts[e.group_id] || 0) + 1; });
+    const isCustomerGroup = (permsJson) => { try { return JSON.parse(permsJson || '{}').customer === true; } catch { return false; } };
     return {
-      employees: emps.map((e) => ({
-        id: e.id, name: e.name, username: e.username || '', hasLogin: !!e.username, role: e.role || '', phone: e.phone || '', email: e.email || '',
-        groupId: e.group_id, active: !!e.active, createdAt: e.created_at, lastLoginAt: e.last_login_at,
-      })),
-      groups: groups.map((g) => groupOut(g, counts)),
+      employees: emps.map((e) => {
+        const customer = isCustomerGroup(e.g_perms);
+        const scope = customer && e.g_scope ? normalizeScope(JSON.parse(e.g_scope)) : null;
+        return {
+          id: e.id, name: e.name, username: e.username || '', hasLogin: !!e.username, role: e.role || '', phone: e.phone || '', email: e.email || '',
+          groupId: customer ? null : e.group_id, active: !!e.active, createdAt: e.created_at, lastLoginAt: e.last_login_at,
+          customer, projectId: customer && scope ? scope[0] || null : null,
+        };
+      }),
+      groups: groups.filter((g) => !isCustomerGroup(g.perms_json)).map((g) => groupOut(g, counts)),
     };
   }
 
@@ -694,8 +703,66 @@ export default function registerAuthRoutes(app, pool) {
             [crypto.randomUUID(), user.id, name, String(c?.role ?? '').trim().slice(0, 100) || null,
               /^[0-9]{10}$/.test(phone) ? phone : null, EMAIL_RE.test(email) ? email : null]);
         }
+      } else if (b.action === 'saveCustomer') {
+        // A customer: one login tied to one project, in a hidden group that opens
+        // no screen (only the project's Requirements form — see access.js).
+        const name = String(b.name ?? '').trim();
+        const username = String(b.username ?? '').trim().toLowerCase();
+        const password = String(b.password ?? '');
+        const phone = String(b.phone ?? '').replace(/[^0-9]/g, '');
+        const active = b.active === false ? 0 : 1;
+        if (!name || name.length > 100) return fail(400, 'Enter the customer\'s name.');
+        if (phone && !/^[0-9]{10}$/.test(phone)) return fail(400, 'Phone must be exactly 10 digits.');
+        if (!USERNAME_RE.test(username)) return fail(400, 'Username must be 3-40 characters: letters, numbers, dot, dash or underscore.');
+        if (password && password.length < 6) return fail(400, 'Password must be at least 6 characters.');
+
+        const [st] = await pool.query("SELECT data_json FROM interior_app_state WHERE user_id = ? AND data_key = 'projects'", [user.id]);
+        const projects = st[0] ? JSON.parse(st[0].data_json) : [];
+        const project = projects.find((p) => String(p.id) === String(b.projectId));
+        if (!project) return fail(400, 'Choose the customer\'s project.');
+
+        let existing = null;
+        if (b.id) {
+          const [own] = await pool.query('SELECT id, password_hash, group_id FROM interior_employees WHERE id = ? AND owner_id = ?', [b.id, user.id]);
+          if (!own.length) return fail(404, 'Customer not found.');
+          existing = own[0];
+        }
+        if (!password && !(existing && existing.password_hash)) return fail(400, 'Set a password of at least 6 characters.');
+        const [taken] = await pool.query('SELECT id FROM interior_employees WHERE username = ? AND id != ? LIMIT 1', [username, String(b.id ?? '')]);
+        if (taken.length) return fail(409, 'That username is already taken.');
+
+        const groupName = `Customer: ${project.name}`.slice(0, 100);
+        const perms = JSON.stringify(normalizePerms({ customer: true }));
+        const scope = JSON.stringify([String(project.id)]);
+        let groupId = existing && existing.group_id ? existing.group_id : null;
+        if (groupId) {
+          await pool.query('UPDATE interior_groups SET name = ?, perms_json = ?, scope_json = ? WHERE id = ? AND owner_id = ?', [groupName, perms, scope, groupId, user.id]);
+        } else {
+          groupId = crypto.randomUUID();
+          await pool.query('INSERT INTO interior_groups (id, owner_id, name, perms_json, scope_json) VALUES (?, ?, ?, ?, ?)', [groupId, user.id, groupName, perms, scope]);
+        }
+        if (existing) {
+          const sets = ['name = ?', 'username = ?', 'phone = ?', 'group_id = ?', 'active = ?'];
+          const args = [name, username, phone || null, groupId, active];
+          if (password) { sets.push('password_hash = ?'); args.push(bcrypt.hashSync(password, 10)); }
+          await pool.query(`UPDATE interior_employees SET ${sets.join(', ')} WHERE id = ?`, [...args, b.id]);
+          if (password || !active) await pool.query('DELETE FROM interior_employee_sessions WHERE employee_id = ?', [b.id]);
+        } else {
+          await pool.query(
+            `INSERT INTO interior_employees (id, owner_id, username, password_hash, name, role, phone, email, group_id, active)
+             VALUES (?, ?, ?, ?, ?, 'Customer', ?, NULL, ?, ?)`,
+            [crypto.randomUUID(), user.id, username, bcrypt.hashSync(password, 10), name, phone || null, groupId, active]);
+        }
       } else if (b.action === 'deleteEmployee') {
+        const [gone] = await pool.query('SELECT group_id FROM interior_employees WHERE id = ? AND owner_id = ?', [String(b.id ?? ''), user.id]);
         await pool.query('DELETE FROM interior_employees WHERE id = ? AND owner_id = ?', [String(b.id ?? ''), user.id]);
+        // A customer's own hidden group goes with them.
+        if (gone[0] && gone[0].group_id) {
+          const [g] = await pool.query('SELECT perms_json FROM interior_groups WHERE id = ? AND owner_id = ?', [gone[0].group_id, user.id]);
+          let isCustomer = false;
+          try { isCustomer = !!g[0] && JSON.parse(g[0].perms_json || '{}').customer === true; } catch { /* keep the group */ }
+          if (isCustomer) await pool.query('DELETE FROM interior_groups WHERE id = ? AND owner_id = ?', [gone[0].group_id, user.id]);
+        }
       } else {
         return fail(400, 'Unknown action.');
       }

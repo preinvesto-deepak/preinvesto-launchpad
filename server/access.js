@@ -55,6 +55,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 // same stored data), so that module's View/Edit/Delete is simply "any tab has
 // it"; the tab-by-tab limits themselves are applied by the app.
 export const PROJECT_TABS = {
+  'req-form': ['view', 'edit', 'delete'],
   req: ['view', 'edit', 'delete'],
   design: ['view', 'edit', 'delete'],
   rooms: ['view', 'edit', 'delete'],
@@ -72,11 +73,21 @@ export const PROJECT_TABS = {
  */
 export function normalizePerms(raw) {
   const out = {};
+  // A customer's group (made by Teams > Add customer) opens no screen: the
+  // customer only sees the Requirements form of their own project.
+  if (raw && raw.customer === true) {
+    const none = { view: false, edit: false, delete: false };
+    for (const m of MODULES) out[m] = { ...none };
+    out.tabs = Object.fromEntries(Object.keys(PROJECT_TABS).map((k) => [k, { ...none }]));
+    out.customer = true;
+    return out;
+  }
   const given = raw && raw.tabs && typeof raw.tabs === 'object' ? raw.tabs : null;
   const fallback = (raw && raw.projects) || {};
   const tabs = {};
   for (const [key, actions] of Object.entries(PROJECT_TABS)) {
-    const src = given ? (given[key] || {}) : fallback;
+    // "Req Form" came after the other tabs: a group saved before it follows its Req rule.
+    const src = given ? (given[key] || (key === 'req-form' ? given.req : null) || {}) : fallback;
     const edit = actions.includes('edit') && !!src.edit;
     const del = actions.includes('delete') && !!src.delete;
     tabs[key] = { view: !!src.view || edit || del, edit, delete: del };
@@ -125,8 +136,124 @@ function scopeOf(access, projects) {
   return { ids, names };
 }
 
+// ── Customers ───────────────────────────────────────────────────────────────
+// A customer signs in to fill the room requirements of ONE project. They see only
+// that project's name and rooms (no boxes, rates or prices), the question sets
+// those rooms use, and may change only the answers — and "submit", once.
+const isAnswered = (v) => (Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== '');
+
+const requirementSets = (stored) => {
+  const p = stored.companyProfile;
+  return p && Array.isArray(p.requirementSets) ? p.requirementSets : [];
+};
+
+function customerScope(access, stored) {
+  const ids = new Set((access.scope || []).map(String));
+  const projects = (Array.isArray(stored.projects) ? stored.projects : []).filter((p) => ids.has(String(p.id)));
+  return { ids, projects, names: new Set(projects.map((p) => p.name)) };
+}
+
+function viewCustomer(access, stored, defaults) {
+  const out = { ...defaults };
+  const { projects, names } = customerScope(access, stored);
+  const rooms = (Array.isArray(stored.subProjects) ? stored.subProjects : []).filter((r) => names.has(r.project));
+  const used = new Set(rooms.map((r) => r.requirementSetId).filter(Boolean));
+  out.projects = projects.map((p) => ({
+    id: p.id, name: p.name,
+    requirementsSubmittedAt: p.requirementsSubmittedAt || null,
+    requirementsSubmittedBy: p.requirementsSubmittedBy || null,
+  }));
+  out.subProjects = rooms.map((r) => ({
+    id: r.id, project: r.project, subProject: r.subProject,
+    requirementSetId: r.requirementSetId || null,
+    requirements: r.requirements || {},
+    remarks: r.remarks || {},
+  }));
+  out.companyProfile = { requirementSets: requirementSets(stored).filter((s) => used.has(s.id)) };
+  return out;
+}
+
+// Keeps only answers to real questions of the set, in the shape the question expects.
+export function cleanAnswers(set, raw) {
+  const out = {};
+  if (!set || !raw || typeof raw !== 'object') return out;
+  for (const q of Array.isArray(set.questions) ? set.questions : []) {
+    const v = raw[q.id];
+    if (v === undefined || v === null || v === '') continue;
+    if (q.type === 'yesno') { if (v === 'yes' || v === 'no') out[q.id] = v; }
+    else if (q.type === 'choice') { if ((q.options || []).some((o) => (typeof o === 'string' ? o : o && o.label) === v)) out[q.id] = v; }
+    else if (q.type === 'multi') {
+      const labels = (q.options || []).map((o) => (typeof o === 'string' ? o : o && o.label));
+      const picked = Array.isArray(v) ? [...new Set(v)].filter((x) => typeof x === 'string' && labels.includes(x)) : [];
+      if (picked.length) out[q.id] = picked;
+    }
+    else if (q.type === 'number') { const n = Number(v); if (Number.isFinite(n) && n >= 0 && n < 1e6) out[q.id] = n; }
+    else if (q.type === 'text') out[q.id] = String(v).slice(0, 500);
+  }
+  return out;
+}
+
+// Remarks: free text per question of the set, trimmed to a sensible length.
+export function cleanRemarks(set, raw) {
+  const out = {};
+  if (!set || !raw || typeof raw !== 'object') return out;
+  for (const q of Array.isArray(set.questions) ? set.questions : []) {
+    const v = raw[q.id];
+    if (typeof v === 'string' && v.trim() !== '') out[q.id] = v.slice(0, 500);
+  }
+  return out;
+}
+
+function mergeCustomer(access, stored, incoming) {
+  const writes = {};
+  const denied = [];
+  const { ids, projects, names } = customerScope(access, stored);
+  if (!projects.length) return { writes, denied: [] };
+  const sets = requirementSets(stored);
+  const submitted = (name) => projects.some((p) => p.name === name && p.requirementsSubmittedAt);
+
+  if (Array.isArray(incoming.subProjects) && Array.isArray(stored.subProjects)) {
+    const inById = new Map(incoming.subProjects.filter((r) => r && r.id !== undefined).map((r) => [String(r.id), r]));
+    let changed = false;
+    const next = stored.subProjects.map((room) => {
+      if (!names.has(room.project) || submitted(room.project)) return room;
+      const inc = inById.get(String(room.id));
+      const set = sets.find((s) => s.id === room.requirementSetId);
+      if (!inc || !set) return room;
+      const answers = cleanAnswers(set, inc.requirements);
+      const remarks = inc.remarks === undefined ? (room.remarks || {}) : cleanRemarks(set, inc.remarks);
+      if (same(answers, room.requirements || {}) && same(remarks, room.remarks || {})) return room;
+      changed = true;
+      return { ...room, requirements: answers, remarks };
+    });
+    if (changed) writes.subProjects = next;
+  }
+
+  if (Array.isArray(incoming.projects)) {
+    const inById = new Map(incoming.projects.filter((p) => p && p.id !== undefined).map((p) => [String(p.id), p]));
+    let changed = false;
+    const next = stored.projects.map((p) => {
+      if (!ids.has(String(p.id)) || p.requirementsSubmittedAt) return p;
+      const inc = inById.get(String(p.id));
+      if (!inc || !inc.requirementsSubmittedAt) return p;
+      // Every required question of the project's rooms must be answered first.
+      const rooms = (writes.subProjects || stored.subProjects || []).filter((r) => r.project === p.name);
+      const incomplete = rooms.some((r) => {
+        const set = sets.find((s) => s.id === r.requirementSetId);
+        return set && (set.questions || []).some((q) => q.required && !isAnswered((r.requirements || {})[q.id]));
+      });
+      if (incomplete) { denied.push('requirements'); return p; }
+      changed = true;
+      return { ...p, requirementsSubmittedAt: new Date().toISOString(), requirementsSubmittedBy: 'customer' };
+    });
+    if (changed) writes.projects = next;
+  }
+  return { writes, denied };
+}
+
 /** What an employee sees of the stored workspace (owners see all of it). */
 export function viewWorkspace(access, stored, defaults) {
+  if (access.customer) return viewCustomer(access, stored, defaults);
   const out = {};
   const scope = scopeOf(access, stored.projects);
   for (const [key, def] of Object.entries(defaults)) {
@@ -180,6 +307,7 @@ function mergeArray(stored, incoming, { visible, canEdit, canDelete, canAdd }) {
  * { writes: { key: value } (only keys that really change), denied: [keys] }.
  */
 export function mergeWorkspace(access, stored, incoming, defaults) {
+  if (access.customer) return mergeCustomer(access, stored, incoming);
   const writes = {};
   const denied = [];
   const editAny = anyEdit(access);

@@ -6,8 +6,11 @@ import { useAppData } from "../context/AppDataContext";
 import { useUnsavedChanges } from "../context/UnsavedChangesContext";
 import { mmToFeet, feetToMm, roundTo2, formatCurrency } from "../utils/unitConversions";
 import CutSheetOptimizer from "./CutSheetOptimizer";
+import NumInput from "../components/NumInput";
 import { packSheets, findOversizedPieces } from "../utils/binPack";
-import { TAPE_ITEM, DEFAULT_TAPE_DIVISOR } from "../utils/projectRows";
+import { TAPE_ITEM } from "../utils/projectRows";
+import { materialCalcGlobals } from "../utils/materialCalc";
+import { globalKerfMm } from "../utils/kerf";
 import { GROUP_OPTIONS } from "../data/priceData";
 import ServiceFilter from "../components/ServiceFilter";
 import { ALL_SERVICES, WARDROBE_SERVICE, SERVICES, matchesService, serviceTagOf } from "../utils/services";
@@ -565,6 +568,8 @@ function TemplateMaster() {
   const [nameDraft, setNameDraft] = useState("");
   const [cropSrc, setCropSrc] = useState(null); // data URL of a freshly-picked photo, awaiting crop
   const [confirmDeleteBoxId, setConfirmDeleteBoxId] = useState(null);
+  // Sub sheet whose Delete button is showing its "Delete? Yes / No" check.
+  const [confirmDeleteSubSheetId, setConfirmDeleteSubSheetId] = useState(null);
   const [matPicker, setMatPicker] = useState(null);
   const [hardwarePicker, setHardwarePicker] = useState(null); // { hwId }
   const [expandedEdgeId, setExpandedEdgeId] = useState(null);
@@ -586,12 +591,12 @@ function TemplateMaster() {
   // Fevicol Merino qty is auto-calculated (not hand-entered) as this multiplier
   // times the total Inside + Outside Laminate sheets required across all boxes
   // — editable so the coverage-per-sheet ratio can be tuned, defaults to 0.7.
-  const [fevicolMultiplier, setFevicolMultiplier] = useState(0.7);
+  // Fevicol multiplier, masking-tape divisor and GST % are App Settings values here.
+  const { fevicolMultiplier, tapeDivisor, gstPercent } = materialCalcGlobals();
+  const setFevicolMultiplier = () => {}, setTapeDivisor = () => {}, setGstPercent = () => {};
   // Masking Tape qty = edge band metres ÷ this, rounded up — defaults to 10, 0 = off.
-  const [tapeDivisor, setTapeDivisor] = useState(DEFAULT_TAPE_DIVISOR);
   // GST % applied on top of Material Summary's Total/Sft Cost rows to show
   // both Excl. and Incl. GST figures side by side — editable, defaults to 18%.
-  const [gstPercent, setGstPercent] = useState(18);
   const toggleSection = (key) => setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
 
   // Load draft whenever selected template changes
@@ -795,7 +800,7 @@ function TemplateMaster() {
       const s = materialStockSettings?.[mat];
       return { sheetW: s?.sheetW || 2440, sheetH: s?.sheetH || 1220, sheetTexture: s?.sheetTexture ?? 1 };
     };
-    const packed = packSheets(rows, getStockSize);
+    const packed = packSheets(rows, getStockSize, globalKerfMm());
     const sheetCount = {};
     packed.forEach((s) => { sheetCount[s.material] = (sheetCount[s.material] || 0) + 1; });
     const materials = [...new Set(rows.map((r) => r.material).filter(Boolean))];
@@ -1777,10 +1782,10 @@ function TemplateMaster() {
                                 ) : parts.map((p, i) => {
                                   const autoLabel = `${labelPrefix} ${p.partName}`.trim();
                                   const inp = (field, type = "text", width = "100%", min) => (
-                                    <input
+                                    <NumInput
                                       type={type}
                                       value={p[field] ?? ""}
-                                      onChange={(e) => updatePart(p.id, field, type === "number" ? Number(e.target.value) : e.target.value, subSheetId)}
+                                      onChange={(v) => updatePart(p.id, field, v, subSheetId)}
                                       style={{ width, fontSize: 12, padding: "2px 5px", minWidth: type === "number" ? 44 : 60 }}
                                       min={min}
                                     />
@@ -1966,10 +1971,9 @@ function TemplateMaster() {
                                                     title={isEdgeReq ? `${lbl} edge required` : `${lbl} edge not required`}
                                                   />
                                                   <span style={{ fontSize: 10, fontWeight: 700, color: isEdgeReq ? "#374151" : "#9ca3af", width: 10 }}>{lbl}</span>
-                                                  <input
-                                                    type="number"
+                                                  <NumInput
                                                     value={p[fld] ?? 0}
-                                                    onChange={(e) => updatePart(p.id, fld, Number(e.target.value), subSheetId)}
+                                                    onChange={(v) => updatePart(p.id, fld, v, subSheetId)}
                                                     disabled={!isEdgeReq}
                                                     style={{ width: 42, fontSize: 11, padding: "1px 3px", opacity: isEdgeReq ? 1 : 0.35 }}
                                                     min={0}
@@ -2276,10 +2280,10 @@ function TemplateMaster() {
                                         />
                                       </td>
                                       <td style={{ padding: "4px 10px", borderBottom: "1px solid #ede9fe" }}>
-                                        <input
+                                        <NumInput
                                           type={type}
                                           value={sheet[field] ?? ""}
-                                          onChange={(e) => updateSheetField(subSheetId, field, type === "number" ? Number(e.target.value) : e.target.value)}
+                                          onChange={(v) => updateSheetField(subSheetId, field, v)}
                                           style={{ width: "100%", fontSize: 13, padding: "3px 8px" }}
                                           placeholder={type === "text" ? "e.g. MBR" : "0"}
                                           min={type === "number" ? 0 : undefined}
@@ -2320,10 +2324,9 @@ function TemplateMaster() {
                                           />
                                         </td>
                                         <td style={{ padding: "4px 10px", borderBottom: "1px solid #ede9fe" }}>
-                                          <input
-                                            type="number"
+                                          <NumInput
                                             value={cf.value ?? ""}
-                                            onChange={(e) => updateSheetField(subSheetId, "customFields", (sheet.customFields || []).map((f) => f.id === cf.id ? { ...f, value: Number(e.target.value) } : f))}
+                                            onChange={(v) => updateSheetField(subSheetId, "customFields", (sheet.customFields || []).map((f) => f.id === cf.id ? { ...f, value: v } : f))}
                                             placeholder="0"
                                             style={{ width: "100%", fontSize: 13, padding: "3px 8px" }}
                                           />
@@ -2339,6 +2342,7 @@ function TemplateMaster() {
                                               style={{ width: 62, fontSize: 10, padding: "1px 4px", fontFamily: "monospace", color: isDup ? "#dc2626" : "#7c3aed", background: isDup ? "#fee2e2" : "#ede9fe", border: `1px solid ${isDup ? "#fca5a5" : "#ddd6fe"}`, borderRadius: 4, textAlign: "center" }}
                                             />
                                             <span style={{ fontSize: 10, color: isDup ? "#dc2626" : "#7c3aed", fontFamily: "monospace" }}>{`}`}</span>
+                                            {cf.ref && <GripChip refName={cf.ref} />}
                                             <button
                                               onClick={() => updateSheetField(subSheetId, "customFields", (sheet.customFields || []).filter((f) => f.id !== cf.id))}
                                               style={{ background: "#dc2626", padding: "1px 6px", fontSize: 11, marginLeft: 4 }}
@@ -2404,7 +2408,15 @@ function TemplateMaster() {
                                       )}
                                       <button onClick={() => copySheetData(subSheetId)} title="Copy this sheet's materials/fields/parts" style={{ background: "#ede9fe", color: "#4c1d95", padding: "3px 10px", fontSize: 11 }}>⧉ Copy</button>
                                       {subSheetId != null && (
-                                        <button onClick={() => deleteSubSheet(subSheetId)} style={{ background: "#dc2626", padding: "3px 10px", fontSize: 11 }}>Delete</button>
+                                        confirmDeleteSubSheetId === subSheetId ? (
+                                          <>
+                                            <span style={{ fontSize: 11, color: "#fecaca", fontWeight: 600 }}>Delete?</span>
+                                            <button onClick={() => { deleteSubSheet(subSheetId); setConfirmDeleteSubSheetId(null); }} style={{ background: "#dc2626", padding: "3px 10px", fontSize: 11 }}>Yes</button>
+                                            <button onClick={() => setConfirmDeleteSubSheetId(null)} style={{ background: "#6b7280", padding: "3px 10px", fontSize: 11 }}>No</button>
+                                          </>
+                                        ) : (
+                                          <button onClick={() => setConfirmDeleteSubSheetId(subSheetId)} style={{ background: "#dc2626", padding: "3px 10px", fontSize: 11 }}>Delete</button>
+                                        )
                                       )}
                                     </div>
                                   }
@@ -2570,8 +2582,8 @@ function TemplateMaster() {
                                             {hw.auto ? (
                                               <span style={{ fontSize: 12, color: "#374151" }}>{hw.base}</span>
                                             ) : (
-                                              <input type="number" min={0} value={hw.base}
-                                                onChange={(e) => updateHardwareItem(hw.boxId, hw.id, "qty", Math.max(0, Number(e.target.value) || 0))}
+                                              <NumInput min={0} value={hw.base}
+                                                onChange={(v) => updateHardwareItem(hw.boxId, hw.id, "qty", Math.max(0, v))}
                                                 style={{ width: 56, fontSize: 12, padding: "2px 4px", textAlign: "center" }} />
                                             )}
                                           </td>
@@ -2620,8 +2632,8 @@ function TemplateMaster() {
                                     </td>
                                     <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center", color: "#6b7280" }}>{hw.unit || "—"}</td>
                                     <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
-                                      <input type="number" min={0} value={hw.base}
-                                        onChange={(e) => updateHardwareItem(hw.boxId, hw.id, "qty", Math.max(0, Number(e.target.value) || 0))}
+                                      <NumInput min={0} value={hw.base}
+                                        onChange={(v) => updateHardwareItem(hw.boxId, hw.id, "qty", Math.max(0, v))}
                                         style={{ width: 56, fontSize: 12, padding: "2px 4px", textAlign: "center" }} />
                                     </td>
                                     <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
@@ -2705,6 +2717,7 @@ function TemplateMaster() {
                             <input
                               type="number" step="0.05" min={0}
                               value={fevicolMultiplier}
+                              disabled
                               onChange={(e) => setFevicolMultiplier(e.target.value)}
                               onBlur={(e) => setFevicolMultiplier(Math.max(0, Number(e.target.value) || 0))}
                               style={{ width: 60, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
@@ -2715,16 +2728,18 @@ function TemplateMaster() {
 <input
   type="number" step="1" min={0}
   value={tapeDivisor}
+  disabled
   onChange={(e) => setTapeDivisor(e.target.value)}
   onBlur={(e) => setTapeDivisor(Math.max(0, Number(e.target.value) || 0))}
   style={{ width: 50, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
 />
-<span style={{ fontSize: 12, color: "#6b7280" }}>(rounded up; 0 = type tapes per box)</span>
+<span style={{ fontSize: 12, color: "#6b7280" }}>(rounded up; 0 = type tapes per box) · set in App Settings</span>
                             <span style={{ width: 1, alignSelf: "stretch", background: "#e5e7eb", margin: "0 4px" }} />
                             <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>GST</span>
                             <input
                               type="number" step="1" min={0}
                               value={gstPercent}
+                              disabled
                               onChange={(e) => setGstPercent(e.target.value)}
                               onBlur={(e) => setGstPercent(Math.max(0, Number(e.target.value) || 0))}
                               style={{ width: 50, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
@@ -2851,6 +2866,8 @@ function TemplateMaster() {
       {cutSheetOpen && activeBox && (
         <CutSheetOptimizer
           rows={generateCutSheet()}
+          kerf={globalKerfMm()}
+          kerfHint="Set in App Settings"
           title={activeBox.boxName || ""}
           subtitle={`Template · ${activeBox.widthMm || ""}W × ${activeBox.heightMm || ""}H mm`}
           onClose={() => setCutSheetOpen(false)}
@@ -2861,6 +2878,8 @@ function TemplateMaster() {
       {allCutSheetOpen && draft && (
         <CutSheetOptimizer
           rows={generateAllBoxesCutSheet()}
+          kerf={globalKerfMm()}
+          kerfHint="Set in App Settings"
           title={draft.templateName || "All Boxes"}
           subtitle={`All Boxes · ${(draft.boxes || []).length} box${(draft.boxes || []).length !== 1 ? "es" : ""}`}
           onClose={() => setAllCutSheetOpen(false)}

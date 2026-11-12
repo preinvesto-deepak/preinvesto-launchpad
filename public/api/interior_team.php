@@ -6,6 +6,7 @@
 //        deleteGroup   { id }
 //        saveEmployee  { id?, name, role, phone, email, active, canSignIn, username?, password?, groupId? }
 //        importContacts{ contacts: [{ name, role, phone, email }] }   (one-time move of the old contact list)
+//        saveCustomer  { id?, name, phone, projectId, username, password?, active }   (a customer login for one project)
 //        deleteEmployee{ id }
 // Header: Authorization: Bearer <token>
 
@@ -23,8 +24,10 @@ ia_ensure_team_tables();
 /** Employees + groups as the app expects them. */
 function team_snapshot(string $ownerId): array {
     $stmt = db()->prepare(
-        'SELECT id, name, username, role, phone, email, group_id, active, created_at, last_login_at
-           FROM interior_employees WHERE owner_id = ? ORDER BY name'
+        'SELECT e.id, e.name, e.username, e.role, e.phone, e.email, e.group_id, e.active, e.created_at, e.last_login_at,
+                g.perms_json AS g_perms, g.scope_json AS g_scope
+           FROM interior_employees e LEFT JOIN interior_groups g ON g.id = e.group_id
+          WHERE e.owner_id = ? ORDER BY e.name'
     );
     $stmt->bind_param('s', $ownerId);
     $stmt->execute();
@@ -40,19 +43,29 @@ function team_snapshot(string $ownerId): array {
     $counts = [];
     foreach ($emps as $e) if ($e['group_id']) $counts[$e['group_id']] = ($counts[$e['group_id']] ?? 0) + 1;
 
+    $isCustomerGroup = function ($permsJson): bool {
+        $p = json_decode((string) ($permsJson ?: '{}'), true);
+        return is_array($p) && !empty($p['customer']);
+    };
+
     return [
-        'employees' => array_map(fn($e) => [
-            'id' => $e['id'], 'name' => $e['name'], 'username' => $e['username'] ?? '', 'hasLogin' => !empty($e['username']),
-            'role' => $e['role'] ?? '', 'phone' => $e['phone'] ?? '', 'email' => $e['email'] ?? '',
-            'groupId' => $e['group_id'], 'active' => (bool) $e['active'],
-            'createdAt' => $e['created_at'], 'lastLoginAt' => $e['last_login_at'],
-        ], $emps),
+        'employees' => array_map(function ($e) use ($isCustomerGroup) {
+            $customer = $isCustomerGroup($e['g_perms']);
+            $scope = $customer && $e['g_scope'] ? ia_normalize_scope(json_decode($e['g_scope'], true)) : null;
+            return [
+                'id' => $e['id'], 'name' => $e['name'], 'username' => $e['username'] ?? '', 'hasLogin' => !empty($e['username']),
+                'role' => $e['role'] ?? '', 'phone' => $e['phone'] ?? '', 'email' => $e['email'] ?? '',
+                'groupId' => $customer ? null : $e['group_id'], 'active' => (bool) $e['active'],
+                'createdAt' => $e['created_at'], 'lastLoginAt' => $e['last_login_at'],
+                'customer' => $customer, 'projectId' => $customer && $scope ? ($scope[0] ?? null) : null,
+            ];
+        }, $emps),
         'groups' => array_map(fn($g) => [
             'id' => $g['id'], 'name' => $g['name'],
             'perms' => ia_normalize_perms(json_decode($g['perms_json'] ?: '{}', true) ?: []),
             'scope' => $g['scope_json'] ? ia_normalize_scope(json_decode($g['scope_json'], true)) : null,
             'employeeCount' => $counts[$g['id']] ?? 0,
-        ], $groups),
+        ], array_values(array_filter($groups, fn($g) => !$isCustomerGroup($g['perms_json'])))),
     ];
 }
 
@@ -214,12 +227,127 @@ if ($action === 'saveGroup') {
         $ins->execute();
     }
     $ins->close();
+} elseif ($action === 'saveCustomer') {
+    // A customer: one login tied to one project, in a hidden group that opens no
+    // screen (only the project's Requirements form - see interior_access.php).
+    $name     = trim((string) ($b['name'] ?? ''));
+    $username = strtolower(trim((string) ($b['username'] ?? '')));
+    $password = (string) ($b['password'] ?? '');
+    $phone    = preg_replace('/[^0-9]/', '', (string) ($b['phone'] ?? ''));
+    $active   = (array_key_exists('active', $b) && $b['active'] === false) ? 0 : 1;
+    $editId   = (string) ($b['id'] ?? '');
+
+    if ($name === '' || mb_strlen($name) > 100) json_fail(400, "Enter the customer's name.");
+    if ($phone !== '' && !preg_match('/^[0-9]{10}$/', $phone)) json_fail(400, 'Phone must be exactly 10 digits.');
+    if (!preg_match('/^[a-z0-9._-]{3,40}$/', $username)) json_fail(400, 'Username must be 3-40 characters: letters, numbers, dot, dash or underscore.');
+    if ($password !== '' && strlen($password) < 6) json_fail(400, 'Password must be at least 6 characters.');
+
+    $stmt = db()->prepare("SELECT data_json FROM interior_app_state WHERE user_id = ? AND data_key = 'projects'");
+    $stmt->bind_param('s', $ownerId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    $projects = $row ? (json_decode($row['data_json'], true) ?: []) : [];
+    $project = null;
+    foreach ($projects as $p) {
+        if (is_array($p) && (string) ($p['id'] ?? '') === (string) ($b['projectId'] ?? '')) { $project = $p; break; }
+    }
+    if ($project === null) json_fail(400, "Choose the customer's project.");
+
+    $hasHash = false;
+    $groupId = null;
+    if ($editId !== '') {
+        $stmt = db()->prepare('SELECT id, password_hash, group_id FROM interior_employees WHERE id = ? AND owner_id = ?');
+        $stmt->bind_param('ss', $editId, $ownerId);
+        $stmt->execute();
+        $own = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        if (!$own) json_fail(404, 'Customer not found.');
+        $hasHash = !empty($own['password_hash']);
+        $groupId = $own['group_id'] ?: null;
+    }
+    if ($password === '' && !$hasHash) json_fail(400, 'Set a password of at least 6 characters.');
+
+    $stmt = db()->prepare('SELECT id FROM interior_employees WHERE username = ? AND id != ? LIMIT 1');
+    $stmt->bind_param('ss', $username, $editId);
+    $stmt->execute();
+    $taken = (bool) $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    if ($taken) json_fail(409, 'That username is already taken.');
+
+    $groupName = mb_substr('Customer: ' . ($project['name'] ?? ''), 0, 100);
+    $perms = json_encode(ia_normalize_perms(['customer' => true]));
+    $scope = json_encode([(string) $project['id']]);
+    if ($groupId !== null) {
+        $stmt = db()->prepare('UPDATE interior_groups SET name = ?, perms_json = ?, scope_json = ? WHERE id = ? AND owner_id = ?');
+        $stmt->bind_param('sssss', $groupName, $perms, $scope, $groupId, $ownerId);
+        $stmt->execute();
+        $stmt->close();
+    } else {
+        $groupId = new_uuid();
+        $stmt = db()->prepare('INSERT INTO interior_groups (id, owner_id, name, perms_json, scope_json) VALUES (?, ?, ?, ?, ?)');
+        $stmt->bind_param('sssss', $groupId, $ownerId, $groupName, $perms, $scope);
+        if (!$stmt->execute()) json_fail(500, 'Could not save the customer.');
+        $stmt->close();
+    }
+
+    $phoneV = $phone !== '' ? $phone : null;
+    if ($editId !== '') {
+        if ($password !== '') {
+            $hash = password_hash($password, PASSWORD_BCRYPT);
+            $stmt = db()->prepare('UPDATE interior_employees SET name=?, username=?, phone=?, group_id=?, active=?, password_hash=? WHERE id=?');
+            $stmt->bind_param('ssssiss', $name, $username, $phoneV, $groupId, $active, $hash, $editId);
+        } else {
+            $stmt = db()->prepare('UPDATE interior_employees SET name=?, username=?, phone=?, group_id=?, active=? WHERE id=?');
+            $stmt->bind_param('ssssis', $name, $username, $phoneV, $groupId, $active, $editId);
+        }
+        if (!$stmt->execute()) json_fail(500, 'Could not save the customer.');
+        $stmt->close();
+        if ($password !== '' || !$active) {
+            $stmt = db()->prepare('DELETE FROM interior_employee_sessions WHERE employee_id = ?');
+            $stmt->bind_param('s', $editId);
+            $stmt->execute();
+            $stmt->close();
+        }
+    } else {
+        $id   = new_uuid();
+        $hash = password_hash($password, PASSWORD_BCRYPT);
+        $stmt = db()->prepare(
+            "INSERT INTO interior_employees (id, owner_id, username, password_hash, name, role, phone, email, group_id, active)
+             VALUES (?, ?, ?, ?, ?, 'Customer', ?, NULL, ?, ?)"
+        );
+        $stmt->bind_param('sssssssi', $id, $ownerId, $username, $hash, $name, $phoneV, $groupId, $active);
+        if (!$stmt->execute()) json_fail(500, 'Could not save the customer.');
+        $stmt->close();
+    }
 } elseif ($action === 'deleteEmployee') {
     $id = (string) ($b['id'] ?? '');
+    $stmt = db()->prepare('SELECT group_id FROM interior_employees WHERE id = ? AND owner_id = ?');
+    $stmt->bind_param('ss', $id, $ownerId);
+    $stmt->execute();
+    $gone = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
     $stmt = db()->prepare('DELETE FROM interior_employees WHERE id = ? AND owner_id = ?');
     $stmt->bind_param('ss', $id, $ownerId);
     $stmt->execute();
     $stmt->close();
+
+    // A customer's own hidden group goes with them.
+    if ($gone && !empty($gone['group_id'])) {
+        $stmt = db()->prepare('SELECT perms_json FROM interior_groups WHERE id = ? AND owner_id = ?');
+        $stmt->bind_param('ss', $gone['group_id'], $ownerId);
+        $stmt->execute();
+        $g = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        $p = $g ? json_decode((string) $g['perms_json'], true) : null;
+        if (is_array($p) && !empty($p['customer'])) {
+            $stmt = db()->prepare('DELETE FROM interior_groups WHERE id = ? AND owner_id = ?');
+            $stmt->bind_param('ss', $gone['group_id'], $ownerId);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
 } else {
     json_fail(400, 'Unknown action.');
 }

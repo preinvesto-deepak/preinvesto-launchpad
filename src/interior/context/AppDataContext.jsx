@@ -7,6 +7,8 @@ import { priceList } from "../data/priceData";
 import { templateList } from "../data/templateData";
 import { fetchState, saveState } from "../utils/api";
 import { syncCustomServices } from "../utils/services";
+import { setKerfSettings } from "../utils/kerf";
+import { setMaterialCalcSettings } from "../utils/materialCalc";
 import { guardSetter } from "../utils/access";
 
 const AppDataContext = createContext();
@@ -89,6 +91,9 @@ function AppDataProvider({ children }) {
   // built-in ones in the shared registry before any child renders. Kept inside
   // companyProfile so no new top-level key (and no backend change) is needed.
   syncCustomServices(companyProfile?.customServices, companyProfile?.wardrobeName, companyProfile?.wardrobeHidden);
+  // Same for the saw-blade kerf: App Settings value + whether projects share it.
+  setKerfSettings(kerfWidth, companyProfile?.kerfUniversal);
+  setMaterialCalcSettings(companyProfile);
   const [designGallery, setDesignGalleryRaw] = useState(defaultData.designGallery);
   const [leads, setLeadsRaw] = useState(defaultData.leads);
   const [leadViews, setLeadViewsRaw] = useState(defaultData.leadViews);
