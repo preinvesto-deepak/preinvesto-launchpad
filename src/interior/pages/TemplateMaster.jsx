@@ -1,5 +1,6 @@
 import MaterialModelPicker from "../components/MaterialModelPicker";
 import { useSheetClipboard } from "../utils/sheetClipboard";
+import SheetTemplates, { isSheetTemplate } from "../components/SheetTemplates";
 import { useState, useEffect, Fragment } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
@@ -571,6 +572,8 @@ function TemplateMaster() {
   const [confirmDeleteBoxId, setConfirmDeleteBoxId] = useState(null);
   // Sub sheet whose Delete button is showing its "Delete? Yes / No" check.
   const [confirmDeleteSubSheetId, setConfirmDeleteSubSheetId] = useState(null);
+  const [confirmPasteKey, setConfirmPasteKey] = useState(null); // sheet whose Paste is waiting for Yes / No
+  const [sheetTplKey, setSheetTplKey] = useState(null); // sheet whose "Apply template" dialog is open
   const [matPicker, setMatPicker] = useState(null);
   const [hardwarePicker, setHardwarePicker] = useState(null); // { hwId }
   const [expandedEdgeId, setExpandedEdgeId] = useState(null);
@@ -1263,6 +1266,23 @@ function TemplateMaster() {
     }
   };
 
+  // Saved sheet templates: read a sheet's data / replace a sheet's data.
+  const sheetFieldsOf = (subSheetId) => {
+    const sheet = subSheetId == null ? activeBox : (activeBox?.subSheets || []).find((s) => s.id === subSheetId);
+    const fields = {};
+    SHEET_COPY_FIELDS.forEach((f) => { const v = sheet?.[f]; fields[f] = v === undefined ? v : JSON.parse(JSON.stringify(v)); });
+    return fields;
+  };
+  const applySheetFields = (subSheetId, fields) => {
+    if (!activeBox) return;
+    if (subSheetId == null) {
+      setDraft((prev) => ({ ...prev, boxes: prev.boxes.map((b) => b.id === activeBox.id ? { ...b, ...fields } : b) }));
+      setIsDirty(true);
+    } else {
+      updateBox("subSheets", (activeBox.subSheets || []).map((s) => s.id === subSheetId ? { ...s, ...fields } : s));
+    }
+  };
+
   // ── Hardware & Consumables CRUD (operates on any box within draft, given its
   // id — Section 3 always passes activeBox.id; the cross-box editor in Section
   // 4 passes whichever box a row belongs to) ───────────────────────────────────
@@ -1438,7 +1458,7 @@ function TemplateMaster() {
                         </div>
                       )}
                       <div style={{ padding: "9px 14px", display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.templateName}</div>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.templateName}{isSheetTemplate(t) && <span title="A sheet calculation + cut list you can apply to any sheet" style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: "#92400e", background: "#fef3c7", borderRadius: 999, padding: "1px 7px", verticalAlign: "middle" }}>Sheet</span>}</div>
                         <div style={{ fontSize: 12, color: "#9ca3af", flexShrink: 0 }}>{boxCount} box{boxCount !== 1 ? "es" : ""}</div>
                       </div>
                       <div style={{ padding: "0 14px 9px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }} onClick={(e) => e.stopPropagation()}>
@@ -2405,9 +2425,27 @@ function TemplateMaster() {
                                   action={
                                     <div style={{ display: "flex", gap: 6 }}>
                                       {copiedSheet && (
-                                        <button onClick={() => pasteSheetData(subSheetId)} title={`Paste ${copiedSheet.sourceLabel}'s data here`} style={{ background: "#059669", padding: "3px 10px", fontSize: 11 }}>📋 Paste</button>
+                                        (confirmPasteKey === (subSheetId ?? "main") ? (
+                                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                          <span style={{ fontSize: 11, color: "#fde68a", fontWeight: 600 }}>Replace this sheet with the copied one?</span>
+                                          <button onClick={() => { pasteSheetData(subSheetId); setConfirmPasteKey(null); }} style={{ background: "#dc2626", padding: "3px 10px", fontSize: 11 }}>Yes</button>
+                                          <button onClick={() => setConfirmPasteKey(null)} style={{ background: "#6b7280", padding: "3px 10px", fontSize: 11 }}>No</button>
+                                        </span>
+                                      ) : (
+                                        <button onClick={() => setConfirmPasteKey(subSheetId ?? "main")} title={`Paste ${copiedSheet.sourceLabel}'s data here`} style={{ background: "#059669", padding: "3px 10px", fontSize: 11 }}>📋 Paste</button>
+                                      ))
                                       )}
                                       <button onClick={() => copySheetData(subSheetId)} title="Copy this sheet's materials/fields/parts" style={{ background: "#ede9fe", color: "#4c1d95", padding: "3px 10px", fontSize: 11 }}>⧉ Copy</button>
+                                      <button onClick={() => setSheetTplKey(subSheetId ?? "main")} title="Apply a saved sheet template here, or save this sheet as one" style={{ background: "#fef3c7", color: "#92400e", padding: "3px 10px", fontSize: 11 }}>🗂 Apply template</button>
+                                      {sheetTplKey === (subSheetId ?? "main") && (
+                                        <SheetTemplates
+                                          sheetName={subSheetId == null ? (sheet.boxName || "this sheet") : (sheet.name || "Sub Sheet")}
+                                          getFields={() => sheetFieldsOf(subSheetId)}
+                                          fieldNames={SHEET_COPY_FIELDS}
+                                          onApply={(fields) => applySheetFields(subSheetId, fields)}
+                                          onClose={() => setSheetTplKey(null)}
+                                        />
+                                      )}
                                       {subSheetId != null && (
                                         confirmDeleteSubSheetId === subSheetId ? (
                                           <>
