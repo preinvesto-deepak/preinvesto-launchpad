@@ -167,6 +167,7 @@ const newSubSheet = (id) => ({
   boxType: "", doorType: "", includeInMaterialCalc: true,
   heightMm: "", widthMm: "", depthMm: "",
   matDoor: "", matDoorId: null,
+  matBack: "", matBackId: null,
   matCarcas: "", matCarcasId: null,
   matOutsideLaminate: "", matOutsideLaminateId: null,
   matInsideLaminate: "", matInsideLaminateId: null,
@@ -231,6 +232,7 @@ function resolveFormula(expr, vars) {
 
 const MATERIAL_FIELDS = [
   ["Door Ply",         "matDoor"],
+  ["Back Ply",         "matBack"],
   ["Carcase Ply",      "matCarcas"],
   ["Outside Laminate", "matOutsideLaminate"],
   ["Inside Laminate",  "matInsideLaminate"],
@@ -246,7 +248,7 @@ const SHEET_COPY_FIELDS = [
   "boxType", "doorType", "includeInMaterialCalc",
   "heightMm", "widthMm", "depthMm",
   "shortName",
-  "matDoor", "matDoorId", "matCarcas", "matCarcasId",
+  "matDoor", "matDoorId", "matBack", "matBackId", "matCarcas", "matCarcasId",
   "matOutsideLaminate", "matOutsideLaminateId",
   "matInsideLaminate", "matInsideLaminateId",
   "matEdgeBeading", "matEdgeBeadingId",
@@ -292,6 +294,7 @@ const emptyBox = (id) => ({
   quotationBoxType: "", quotationDoorType: "",
   quotationWidthMm: "", quotationHeightMm: "", quotationDepthMm: "",
   matDoor: "",        matDoorId: null,
+  matBack: "",        matBackId: null,
   matCarcas: "",      matCarcasId: null,
   matOutsideLaminate: "", matOutsideLaminateId: null,
   matInsideLaminate: "", matInsideLaminateId: null,
@@ -2052,9 +2055,11 @@ function TemplateMaster() {
                         const priceLaminates = (prices || [])
                           .filter((pr) => (pr.group || "").toLowerCase() === "laminate" && pr.materialName)
                           .map((pr) => pr.materialName);
-                        const sheetLaminates = [sheet.matInsideLaminate, sheet.matOutsideLaminate].filter(Boolean);
+                        const pickedName = (fld) => { const iid = sheet[`${fld}Id`]; return iid != null ? ((prices || []).find((pr) => pr.id === iid)?.materialName ?? sheet[fld]) : sheet[fld]; };
+                        const isLamName = (n) => (prices || []).some((pr) => pr.materialName === n && (pr.group || "").toLowerCase() === "laminate");
+                        const sheetLaminates = [pickedName("matInsideLaminate"), pickedName("matOutsideLaminate"), ...(sheet.customMaterials || []).map((cm) => cm.value || cm.label).filter(isLamName)].filter(Boolean);
                         const existingSides = [...new Set(sheetParts.flatMap((pt) => [resolveMat(pt.sideA, pt.sideAId), resolveMat(pt.sideB, pt.sideBId)]).filter(Boolean))];
-                        const laminateOptions = [...new Set([...(priceLaminates.length > 0 ? priceLaminates : sheetLaminates), ...existingSides])];
+                        const laminateOptions = [...new Set([...sheetLaminates, ...existingSides])]; // only what the Material section has picked
                         const matOptions = [
                           ...MATERIAL_FIELDS.map(([lbl, fld]) => {
                             const idf = `${fld}Id`;
@@ -2062,8 +2067,8 @@ function TemplateMaster() {
                             const res = iid != null
                               ? (prices || []).find((pr) => pr.id === iid)?.materialName ?? sheet[fld]
                               : sheet[fld];
-                            return res || lbl;
-                          }),
+                            return res || "";
+                          }).filter(Boolean),
                           ...(sheet.customMaterials || []).map((cm) => cm.value || cm.label).filter(Boolean),
                           ...[...new Set(sheetParts.map((pt) => resolveMat(pt.material, pt.materialId)).filter(Boolean))],
                         ];

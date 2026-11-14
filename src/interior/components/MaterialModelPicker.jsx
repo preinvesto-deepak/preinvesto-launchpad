@@ -5,6 +5,7 @@ import { GROUP_OPTIONS } from "../data/priceData";
 // picker on the right tab so "Door Ply" starts in Wood, etc.
 const LABEL_TO_GROUP = {
   "Door Ply":         "Wood",
+  "Back Ply":         "Wood",
   "Carcase Ply":      "Wood",
   "Outside Laminate": "Laminate",
   "Inside Laminate":  "Laminate",

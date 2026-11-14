@@ -41,6 +41,7 @@ function withGroupSpan(rows, groupKey = "group") {
 
 const LABEL_TO_GROUP = {
   "Door Ply":         "Wood",
+  "Back Ply":         "Wood",
   "Carcase Ply":      "Wood",
   "Outside Laminate": "Laminate",
   "Inside Laminate":  "Laminate",
@@ -172,7 +173,7 @@ const PART_GROUP_COLORS = {
 };
 const CUT_MAT_COLORS = ["#dbeafe","#fef3c7","#dcfce7","#fce7f3","#ede9fe","#fef9c3","#d1fae5","#fee2e2"];
 const SHEET_MAT_FIELDS = [
-  ["Door Ply", "matDoor"], ["Carcase Ply", "matCarcas"],
+  ["Door Ply", "matDoor"], ["Back Ply", "matBack"], ["Carcase Ply", "matCarcas"],
   ["Outside Laminate", "matOutsideLaminate"], ["Inside Laminate", "matInsideLaminate"],
   ["Edge Beading", "matEdgeBeading"],
 ];
@@ -185,7 +186,7 @@ const SHEET_COPY_FIELDS = [
   "boxType", "doorType", "includeInMaterialCalc",
   "heightMm", "widthMm", "depthMm",
   "shortName",
-  "matDoor", "matDoorId", "matCarcas", "matCarcasId",
+  "matDoor", "matDoorId", "matBack", "matBackId", "matCarcas", "matCarcasId",
   "matOutsideLaminate", "matOutsideLaminateId",
   "matInsideLaminate", "matInsideLaminateId",
   "matEdgeBeading", "matEdgeBeadingId",
@@ -238,6 +239,7 @@ const newSubSheet = (id) => ({
   boxType: "", doorType: "", includeInMaterialCalc: true,
   heightMm: "", widthMm: "", depthMm: "",
   matDoor: "", matDoorId: null,
+  matBack: "", matBackId: null,
   matCarcas: "", matCarcasId: null,
   matOutsideLaminate: "", matOutsideLaminateId: null,
   matInsideLaminate: "", matInsideLaminateId: null,
@@ -1474,7 +1476,7 @@ function Projects() {
       // "" = wardrobe/modular; else a service from utils/services.js.
       serviceType: "", serviceItem: "", serviceQty: "",
       quotationWidthMm: "", quotationHeightMm: "", quotationDepthMm: "",
-      matDoor: "", matDoorId: null, matCarcas: "", matCarcasId: null,
+      matDoor: "", matDoorId: null, matBack: "", matBackId: null, matCarcas: "", matCarcasId: null,
       matOutsideLaminate: "", matOutsideLaminateId: null,
       matInsideLaminate: "", matInsideLaminateId: null,
       matEdgeBeading: "", matEdgeBeadingId: null,
@@ -1515,6 +1517,7 @@ function Projects() {
       serviceItem: tb.serviceItem || "",
       serviceQty: tb.serviceQty ?? "",
       matDoor: tb.matDoor || "", matDoorId: tb.matDoorId ?? null,
+      matBack: tb.matBack || "", matBackId: tb.matBackId ?? null,
       matCarcas: tb.matCarcas || "", matCarcasId: tb.matCarcasId ?? null,
       matOutsideLaminate: tb.matOutsideLaminate || "", matOutsideLaminateId: tb.matOutsideLaminateId ?? null,
       matInsideLaminate: tb.matInsideLaminate || "", matInsideLaminateId: tb.matInsideLaminateId ?? null,
@@ -3079,9 +3082,11 @@ function Projects() {
                             const priceLaminates = (prices || [])
                               .filter((pr) => (pr.group || "").toLowerCase() === "laminate" && pr.materialName)
                               .map((pr) => pr.materialName);
-                            const sheetLaminates = [sheet.matInsideLaminate, sheet.matOutsideLaminate].filter(Boolean);
+                            const pickedName = (fld) => { const iid = sheet[`${fld}Id`]; return iid != null ? ((prices || []).find((pr) => pr.id === iid)?.materialName ?? sheet[fld]) : sheet[fld]; };
+                            const isLamName = (n) => (prices || []).some((pr) => pr.materialName === n && (pr.group || "").toLowerCase() === "laminate");
+                            const sheetLaminates = [pickedName("matInsideLaminate"), pickedName("matOutsideLaminate"), ...(sheet.customMaterials || []).map((cm) => cm.value || cm.label).filter(isLamName)].filter(Boolean);
                             const existingSides = [...new Set(sheetParts.flatMap((p) => [resolveMat(p.sideA, p.sideAId), resolveMat(p.sideB, p.sideBId)]).filter(Boolean))];
-                            const laminateOptions = [...new Set([...(priceLaminates.length > 0 ? priceLaminates : sheetLaminates), ...existingSides])];
+                            const laminateOptions = [...new Set([...sheetLaminates, ...existingSides])]; // only what the Material section has picked
                             const existingMats = [...new Set(sheetParts.map((p) => resolveMat(p.material, p.materialId)).filter(Boolean))];
                             const matOptions = [...new Set([
                               ...SHEET_MAT_FIELDS.map(([lbl, fld]) => {
@@ -3090,8 +3095,8 @@ function Projects() {
                                 const res = iid != null
                                   ? (prices || []).find((pr) => pr.id === iid)?.materialName ?? sheet[fld]
                                   : sheet[fld];
-                                return res || lbl;
-                              }),
+                                return res || "";
+                              }).filter(Boolean),
                               ...(sheet.customMaterials || []).map((cm) => cm.value || cm.label).filter(Boolean),
                               ...existingMats,
                             ])];
@@ -3205,6 +3210,7 @@ function Projects() {
                                     <tbody>
                                       {[
                                         ["Door Ply", "matDoor"],
+                                        ["Back Ply", "matBack"],
                                         ["Carcase Ply", "matCarcas"],
                                         ["Outside Laminate", "matOutsideLaminate"],
                                         ["Inside Laminate", "matInsideLaminate"],
