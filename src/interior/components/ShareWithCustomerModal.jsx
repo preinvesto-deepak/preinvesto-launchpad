@@ -111,8 +111,7 @@ function ShareWithCustomerModal({ projectId, projectName, designInfo, galleryFol
             </label>
             {opts.quotation && (
               <div style={{ marginLeft: 24 }}>
-                <label style={checkRow}><input type="checkbox" style={checkbox} checked={opts.savings} onChange={(e) => setOpt({ savings: e.target.checked })} /> Show "You save vs MRP" box</label>
-                <label style={checkRow}><input type="checkbox" style={checkbox} checked={opts.hardware} onChange={(e) => setOpt({ hardware: e.target.checked })} /> Show Hardware &amp; Consumables page (MRP, discount, warranty)</label>
+                <label style={checkRow}><input type="checkbox" style={checkbox} checked={opts.hardware} onChange={(e) => setOpt({ hardware: e.target.checked })} /> Show Specification page (Ply, Laminate, Hardware: MRP, discount, warranty)</label>
                 <label style={checkRow}><input type="checkbox" style={checkbox} checked={opts.cutList} onChange={(e) => setOpt({ cutList: e.target.checked })} /> Show Cut List page</label>
                 <p style={{ margin: "2px 0 4px", fontSize: 11, color: "#9ca3af" }}>Hardware and Cut List pages also follow your "Include in Quotation" switches below.</p>
               </div>

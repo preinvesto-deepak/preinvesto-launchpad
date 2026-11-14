@@ -268,15 +268,23 @@ function fmtWarranty(years, empty = "—") {
 // the numbers taken live from Items Pricing) — so Economy/Standard/Premium
 // genuinely show different savings, matching what that tier actually
 // charges, instead of all three collapsing to Items Pricing's flat base rate.
-function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj) {
+function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj, materialStockSettings) {
   const byMaterial = {};
   projectRooms.forEach((room) => {
+    // Ply / Laminate: real sheet counts, nested the same way the Quotation prices them.
+    const sheetRows = buildRoomRows(room, prices);
+    const sheetCounts = computeSheetCounts(
+      sheetRows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty, rotation: r.rotation })),
+      (mat) => getStockSizeFor(materialStockSettings, mat),
+      kerfFor(projectObj)
+    );
+    Object.entries(sheetCounts).forEach(([mat, n]) => { byMaterial[mat] = (byMaterial[mat] || 0) + n; });
     const edgeTotals = buildRoomEdgeBanding(room, prices);
     Object.entries(edgeTotals).forEach(([mat, lengthMm]) => {
       const meters = Math.round((lengthMm / 1000) * 100) / 100;
       byMaterial[mat] = (byMaterial[mat] || 0) + meters;
     });
-    const hwTotals = buildRoomHardware(room, prices);
+    const hwTotals = buildRoomHardware(room, prices, sheetCounts);
     Object.entries(hwTotals).forEach(([mat, qty]) => {
       byMaterial[mat] = (byMaterial[mat] || 0) + qty;
     });
@@ -286,7 +294,7 @@ function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj)
     });
   });
 
-  return Object.entries(byMaterial)
+  const list = Object.entries(byMaterial)
     .map(([material, qty]) => {
       // Several brands can share one material name (e.g. Ebco and Hettich
       // "0 Crank Hinges"), each with its own MRP/GST — same row the rate
@@ -306,16 +314,54 @@ function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj)
       const mrpAmount = mrp > 0 ? qty * mrp : netAmount;
       const discountPercent = mrp > 0 ? ((mrp - rate * gstMult) / mrp) * 100 : 0;
       return {
-        material, group: p.group || "Other", unit: p.unit || "",
+        material, group: p.group || "Other", unit: p.unit || "", spec: (p.materialSpec || "").trim(),
         warranty: Number(p.warranty) > 0 ? Number(p.warranty) : 0,
         // `rate` is shown in the "Your Rate" column, so it's GST-inclusive
         // like MRP and the amounts (qty × rate = Your Amount).
-        qty: roundTo2(qty), mrp, rate: roundTo2(rate * gstMult), discountPercent: roundTo2(discountPercent),
-        mrpAmount, netAmount, savings: mrpAmount - netAmount,
+        qty: Number(roundTo2(qty)), mrp, rate: Number(roundTo2(rate * gstMult)), discountPercent: Number(roundTo2(discountPercent)) || 0,
+        mrpAmount, netAmount, savings: Math.round((mrpAmount - netAmount) * 100) / 100 || 0,
       };
     })
     .filter(Boolean)
     .sort((a, b) => (a.group || "").localeCompare(b.group) || a.material.localeCompare(b.material));
+  // groupSpan: rows the Group cell merges over (0 = continuation of the group above).
+  return list.map((row, i) => {
+    if (i > 0 && list[i - 1].group === row.group) return { ...row, groupSpan: 0 };
+    let span = 1;
+    while (list[i + span] && list[i + span].group === row.group) span++;
+    return { ...row, groupSpan: span };
+  });
+}
+
+// Columns of the Specification page (Ply, Laminate and Hardware marked "Show in
+// Quotation"). Each has a tick under its heading to show/hide it in the Quotation.
+const SPEC_COLS = [
+  { k: "group", label: "Group", align: "left" }, { k: "item", label: "Item", align: "left" },
+  { k: "spec", label: "Specification", align: "left" }, { k: "qty", label: "Qty", align: "center" },
+  { k: "unit", label: "Unit", align: "center" }, { k: "warranty", label: "Warranty", align: "center" },
+  { k: "mrp", label: "MRP (₹)", align: "right" }, { k: "rate", label: "Your Rate (₹)", align: "right" },
+  { k: "disc", label: "Discount %", align: "center" }, { k: "mrpAmt", label: "MRP Amount", align: "right" },
+  { k: "amt", label: "Your Amount", align: "right" }, { k: "save", label: "You Save", align: "right" },
+];
+const SPEC_AMOUNT_KEYS = ["mrpAmt", "amt", "save"];
+// Cell text for one Specification column. amt formats amounts, price formats the
+// per-unit MRP/rate, dash stands in for "nothing here".
+function specText(row, k, { amt, price, dash }) {
+  const hasMrp = row.mrp > 0;
+  switch (k) {
+    case "item": return row.material;
+    case "spec": return row.spec || dash;
+    case "qty": return String(row.qty);
+    case "unit": return row.unit || dash;
+    case "warranty": return fmtWarranty(row.warranty, dash);
+    case "mrp": return hasMrp ? price(row.mrp) : dash;
+    case "rate": return price(row.rate);
+    case "disc": return hasMrp ? `${row.discountPercent}%` : dash;
+    case "mrpAmt": return hasMrp ? amt(row.mrpAmount) : dash;
+    case "amt": return amt(row.netAmount);
+    case "save": return hasMrp ? amt(row.savings) : dash;
+    default: return "";
+  }
 }
 
 // Flat cut-list rows (every panel, every box) across every room in the
@@ -697,9 +743,9 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
   // Itemized Hardware & Consumables MRP/Discount breakdown — feeds the
   // Quotation's dedicated savings page (see computeHardwareMrpSavingsItems).
   const hardwareMrpItems = useMemo(
-    () => computeHardwareMrpSavingsItems(quotationRooms, prices, selectedModel, selectedProjectObj),
+    () => computeHardwareMrpSavingsItems(quotationRooms, prices, selectedModel, selectedProjectObj, materialStockSettings),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [quotationRooms, prices, selectedModel, selectedProjectObj]
+    [quotationRooms, prices, selectedModel, selectedProjectObj, materialStockSettings]
   );
   const hardwareSavingsTotal = hardwareMrpItems.reduce((s, r) => s + r.savings, 0);
 
@@ -735,6 +781,9 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
   const fmtCurrency = (n) =>
     "₹" + Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  const SPEC_FMT_HTML = { amt: fmtCurrency, price: (n) => "₹" + Number(n).toLocaleString("en-IN"), dash: "—" };
+  const SPEC_FMT_SCREEN = { amt: formatCurrency, price: (n) => "₹" + Number(n).toLocaleString("en-IN"), dash: "—" };
+
   // Columns before Amount in a quotation table: "#" plus whichever are shown.
   const beforeAmountCols = () => 1 + ["room", "box", "type", "w", "h", "area", "rate"].filter(colOn).length;
 
@@ -753,7 +802,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
       const prop = ct > 0 ? item.costTotal / ct : 0;
       return { ...item, sellingAmount: gt * prop };
     });
-    const hardwareItems = computeHardwareMrpSavingsItems(quotationRooms, prices, model, selectedProjectObj);
+    const hardwareItems = computeHardwareMrpSavingsItems(quotationRooms, prices, model, selectedProjectObj, materialStockSettings);
     return { model, items: withSelling, ct, st, net, gst, gt, adv, hardwareItems };
   };
 
@@ -792,7 +841,10 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
             ${customerMobile ? `<p style="margin:4px 0"><strong>Mobile:</strong> ${customerMobile}</p>` : ""}
           </div>
         </div>
-        <p><strong>Project:</strong> ${selectedProject}</p>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin:12px 0">
+          <p style="margin:0"><strong>Project:</strong> ${selectedProject}</p>
+          <p style="margin:0;font-size:16px;white-space:nowrap"><strong>Grand Total:</strong> <strong style="color:${modelColor}">${fmtCurrency(v.gt)}</strong></p>
+        </div>
         ${quotationTables(v.items).map((t, ti, all) => `
         <h3>${t.title}</h3>
         <table border="1" cellpadding="7" cellspacing="0" width="100%" style="margin-bottom:16px;font-size:13px">
@@ -820,25 +872,6 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
           ${all.length > 1 ? `<tfoot><tr style="background:#f3f4f6"><td colspan="${beforeAmountCols()}" style="text-align:right"><strong>${t.title} Sub Total (Incl. GST)</strong></td><td style="text-align:right"><strong>${fmtCurrency(tableTotal(t))}</strong></td></tr></tfoot>` : ""}
         </table>
         `).join("")}
-        ${!opts.omitSavings && mrpSavings.mrpTotal > 0 ? `
-        <div style="padding:12px 14px;border:1px solid #a7f3d0;background:#ecfdf5;border-radius:8px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center">
-          <div>
-            <div style="font-size:13px;font-weight:700;color:#065f46">You save ${fmtCurrency(mrpSavings.savings)} vs MRP</div>
-            <div style="font-size:11px;color:#047857;margin-top:2px">MRP Value ${fmtCurrency(mrpSavings.mrpTotal)} &rarr; Your Price ${fmtCurrency(mrpSavings.netTotal)} (incl. GST, on items with MRP set)</div>
-          </div>
-          <div style="font-size:20px;font-weight:800;color:#059669">${roundTo2((mrpSavings.savings / mrpSavings.mrpTotal) * 100)}% OFF</div>
-        </div>` : ""}
-        <div style="display:flex;justify-content:flex-end;margin-bottom:20px">
-          <table border="1" cellpadding="7" cellspacing="0" style="min-width:300px;font-size:13px">
-            <tbody>
-              <tr style="background:#f3f4f6"><td><strong>Sub Total</strong></td><td><strong>${fmtCurrency(v.st)}</strong></td></tr>
-              ${Number(discountAmount) > 0 ? `<tr><td>Discount</td><td>- ${fmtCurrency(discountAmount)}</td></tr>` : ""}
-              <tr><td>GST ${gstPercent}%</td><td>${fmtCurrency(v.gst)}</td></tr>
-              <tr style="background:${modelColor}22"><td><strong>Grand Total</strong></td><td><strong style="color:${modelColor}">${fmtCurrency(v.gt)}</strong></td></tr>
-              <tr><td>Advance ${advancePercent}%</td><td>${fmtCurrency(v.adv)}</td></tr>
-            </tbody>
-          </table>
-        </div>
         <p><strong>Scope Included:</strong> ${scopeIncluded}</p>
         <p><strong>Scope Excluded:</strong> ${scopeExcluded}</p>
         <p>Validity: ${validityDays} days · Delivery: ${deliveryDays} days · ${termsText}</p>
@@ -853,12 +886,12 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
           ${companyProfile.logo ? `<img src="${companyProfile.logo}" alt="" style="width:72px;height:72px;object-fit:contain;flex-shrink:0" />` : ""}
           <h2 style="margin:0">${companyName}</h2>
         </div>
-        <p style="margin:0 0 16px;color:#6b7280">Hardware &amp; Consumables — Your Discount <span style="color:${modelColor};font-weight:700">(${modelLabel})</span></p>
+        <p style="margin:0 0 16px;color:#6b7280">Specification <span style="color:${modelColor};font-weight:700">(${modelLabel})</span></p>
         <table border="1" cellpadding="7" cellspacing="0" width="100%" style="font-size:12px">
           <thead>
             <tr>
-              ${["Group", "Item", "Qty", "Unit", "Warranty", "MRP (₹)", "Your Rate (₹)", "Discount %", "MRP Amount", "Your Amount", "You Save"]
-                .map((h) => `<th style="background:#1e3a5f;color:#fff">${h}</th>`)
+              ${SPEC_COLS.filter((c) => colOn("spec_" + c.k))
+                .map((c) => `<th style="background:#1e3a5f;color:#fff">${c.label}</th>`)
                 .join("")}
             </tr>
           </thead>
@@ -867,29 +900,23 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
               .map(
                 (row) => `
               <tr>
-                <td>${row.group}</td>
-                <td>${row.material}</td>
-                <td style="text-align:center">${row.qty}</td>
-                <td style="text-align:center">${row.unit}</td>
-                <td style="text-align:center">${fmtWarranty(row.warranty)}</td>
-                <td style="text-align:right">${row.mrp > 0 ? `₹${row.mrp.toLocaleString("en-IN")}` : "—"}</td>
-                <td style="text-align:right">₹${row.rate.toLocaleString("en-IN")}</td>
-                <td style="text-align:center;color:${row.mrp > 0 ? "#059669" : "#9ca3af"};font-weight:700">${row.mrp > 0 ? `${row.discountPercent}%` : "—"}</td>
-                <td style="text-align:right">${row.mrp > 0 ? fmtCurrency(row.mrpAmount) : "—"}</td>
-                <td style="text-align:right">${fmtCurrency(row.netAmount)}</td>
-                <td style="text-align:right;color:${row.mrp > 0 ? "#059669" : "#9ca3af"};font-weight:700">${row.mrp > 0 ? fmtCurrency(row.savings) : "—"}</td>
+                ${SPEC_COLS.filter((c) => colOn("spec_" + c.k)).map((c) => {
+                  if (c.k === "group") return row.groupSpan > 0 ? `<td rowspan="${row.groupSpan}" style="vertical-align:top;font-weight:600">${row.group}</td>` : "";
+                  const bold = (c.k === "disc" || c.k === "save") && row.mrp > 0 ? ";color:#059669;font-weight:700" : "";
+                  return `<td style="text-align:${c.align}${bold}">${specText(row, c.k, SPEC_FMT_HTML)}</td>`;
+                }).join("")}
               </tr>`
               )
               .join("")}
           </tbody>
-          <tfoot>
+          ${SPEC_AMOUNT_KEYS.some((k) => colOn("spec_" + k)) ? `<tfoot>
             <tr style="background:#ecfdf5;font-weight:700">
-              <td colspan="8" style="text-align:right">Total You Save on Hardware &amp; Consumables</td>
-              <td style="text-align:right">${fmtCurrency(v.hardwareItems.reduce((s, r) => s + r.mrpAmount, 0))}</td>
-              <td style="text-align:right">${fmtCurrency(v.hardwareItems.reduce((s, r) => s + r.netAmount, 0))}</td>
-              <td style="text-align:right;color:#059669">${fmtCurrency(v.hardwareItems.reduce((s, r) => s + r.savings, 0))}</td>
+              <td colspan="${SPEC_COLS.filter((c) => colOn("spec_" + c.k) && !SPEC_AMOUNT_KEYS.includes(c.k)).length || 1}" style="text-align:right">Total</td>
+              ${colOn("spec_mrpAmt") ? `<td style="text-align:right">${fmtCurrency(v.hardwareItems.reduce((s, r) => s + r.mrpAmount, 0))}</td>` : ""}
+              ${colOn("spec_amt") ? `<td style="text-align:right">${fmtCurrency(v.hardwareItems.reduce((s, r) => s + r.netAmount, 0))}</td>` : ""}
+              ${colOn("spec_save") ? `<td style="text-align:right;color:#059669">${fmtCurrency(v.hardwareItems.reduce((s, r) => s + r.savings, 0))}</td>` : ""}
             </tr>
-          </tfoot>
+          </tfoot>` : ""}
         </table>
       </div>` : ""}
       ${includeCutList && !opts.omitCutList && cutListRows.length > 0 ? `
@@ -1064,6 +1091,9 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
     y = Math.max(y + 10, ry) + 4;
     doc.setFontSize(10);
     doc.text(`Project: ${selectedProject}`, margin, y);
+    doc.setFontSize(12);
+    doc.text(`Grand Total: ${fmtPdf(v.gt)}`, pageW - margin, y, { align: "right" });
+    doc.setFontSize(10);
     y += 6;
 
     quotationTables(v.items).forEach((t, ti, all) => {
@@ -1093,37 +1123,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
       y = doc.lastAutoTable.finalY + 6;
     });
 
-    if (mrpSavings.mrpTotal > 0) {
-      doc.setFillColor(236, 253, 245);
-      doc.setDrawColor(167, 243, 208);
-      doc.roundedRect(margin, y, pageW - margin * 2, 16, 2, 2, "FD");
-      doc.setFontSize(10);
-      doc.setTextColor(6, 95, 70);
-      doc.text(`You save ${fmtPdf(mrpSavings.savings)} vs MRP`, margin + 4, y + 6);
-      doc.setFontSize(8);
-      doc.setTextColor(4, 120, 87);
-      doc.text(`MRP Value ${fmtPdf(mrpSavings.mrpTotal)} -> Your Price ${fmtPdf(mrpSavings.netTotal)}`, margin + 4, y + 11);
-      doc.setFontSize(12);
-      doc.setTextColor(5, 150, 105);
-      doc.text(`${roundTo2((mrpSavings.savings / mrpSavings.mrpTotal) * 100)}% OFF`, pageW - margin - 4, y + 9, { align: "right" });
-      doc.setTextColor(0);
-      y += 22;
-    }
-
-    const totalsBody = [["Sub Total", fmtPdf(v.st)]];
-    if (Number(discountAmount) > 0) totalsBody.push(["Discount", `- ${fmtPdf(discountAmount)}`]);
-    totalsBody.push([`GST ${gstPercent}%`, fmtPdf(v.gst)]);
-    totalsBody.push(["Grand Total", fmtPdf(v.gt)]);
-    totalsBody.push([`Advance ${advancePercent}%`, fmtPdf(v.adv)]);
-    autoTable(doc, {
-      startY: y,
-      margin: { left: pageW - margin - 80, right: margin },
-      tableWidth: 80,
-      body: totalsBody,
-      styles: { fontSize: 9 },
-      theme: "grid",
-    });
-    y = doc.lastAutoTable.finalY + 8;
+    y += 4;
 
     doc.setFontSize(9);
     const wrapW = pageW - margin * 2;
@@ -1144,19 +1144,21 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
     if (includeHardwareDiscount && v.hardwareItems.length > 0) {
       doc.addPage();
       doc.setFontSize(14);
-      doc.text("Hardware & Consumables - Your Discount", margin, 16);
+      doc.text("Specification", margin, 16);
       autoTable(doc, {
         startY: 22,
         margin: { left: margin, right: margin },
-        head: [["Group", "Item", "Qty", "Unit", "Warranty", "MRP", "Your Rate", "Disc %", "MRP Amt", "Your Amt", "You Save"]],
-        body: v.hardwareItems.map((r) => [
-          r.group, r.material, r.qty, r.unit, fmtWarranty(r.warranty, "-"),
-          r.mrp > 0 ? fmtPdf(r.mrp) : "-", fmtPdf(r.rate),
-          r.mrp > 0 ? `${r.discountPercent}%` : "-",
-          r.mrp > 0 ? fmtPdf(r.mrpAmount) : "-", fmtPdf(r.netAmount),
-          r.mrp > 0 ? fmtPdf(r.savings) : "-",
-        ]),
-        foot: [["", "", "", "", "", "", "", "Total", fmtPdf(v.hardwareItems.reduce((s, r) => s + r.mrpAmount, 0)), fmtPdf(v.hardwareItems.reduce((s, r) => s + r.netAmount, 0)), fmtPdf(v.hardwareItems.reduce((s, r) => s + r.savings, 0))]],
+        head: [SPEC_COLS.filter((c) => colOn("spec_" + c.k)).map((c) => c.label)],
+        body: v.hardwareItems.map((r) => SPEC_COLS.filter((c) => colOn("spec_" + c.k)).flatMap((c) => {
+          if (c.k === "group") return r.groupSpan > 0 ? [{ content: r.group, rowSpan: r.groupSpan, styles: { valign: "top", fontStyle: "bold" } }] : [];
+          return [specText(r, c.k, { amt: fmtPdf, price: fmtPdf, dash: "-" })];
+        })),
+        foot: SPEC_AMOUNT_KEYS.some((k) => colOn("spec_" + k)) ? [[
+          { content: "Total", colSpan: SPEC_COLS.filter((c) => colOn("spec_" + c.k) && !SPEC_AMOUNT_KEYS.includes(c.k)).length || 1, styles: { halign: "right" } },
+          ...(colOn("spec_mrpAmt") ? [fmtPdf(v.hardwareItems.reduce((s, r) => s + r.mrpAmount, 0))] : []),
+          ...(colOn("spec_amt") ? [fmtPdf(v.hardwareItems.reduce((s, r) => s + r.netAmount, 0))] : []),
+          ...(colOn("spec_save") ? [fmtPdf(v.hardwareItems.reduce((s, r) => s + r.savings, 0))] : []),
+        ]] : undefined,
         styles: { fontSize: 7 },
         headStyles: { fillColor: [30, 58, 95] },
         footStyles: { fillColor: [236, 253, 245], textColor: [5, 150, 105], fontStyle: "bold" },
@@ -1430,7 +1432,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
               </tr>
               {hardwareSavingsTotal > 0 && (
                 <tr style={{ background: "#ecfdf5" }}>
-                  <td colSpan={6} style={{ padding: "8px 14px", fontWeight: 700, color: "#065f46", fontSize: 12 }}>You Save (Hardware &amp; Consumables)</td>
+                  <td colSpan={6} style={{ padding: "8px 14px", fontWeight: 700, color: "#065f46", fontSize: 12 }}>You Save (Specification)</td>
                   {compareVariants.map((v) => (
                     <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#059669", fontSize: 13, borderLeft: "1px solid #d1fae5" }}>
                       {formatCurrency(v.hardwareItems.reduce((s, r) => s + r.savings, 0))}
@@ -1482,7 +1484,13 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
 
         <hr />
 
-        <p style={{ margin: "12px 0" }}><strong>Project:</strong> {selectedProject || "-"}</p>
+        <div style={{ margin: "12px 0", display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 16, flexWrap: "wrap" }}>
+          <p style={{ margin: 0 }}><strong>Project:</strong> {selectedProject || "-"}</p>
+          <p style={{ margin: 0, fontSize: 16, whiteSpace: "nowrap" }}>
+            <strong>Grand Total:</strong>{" "}
+            <strong style={{ color: activeModel ? modelColor : undefined }}>{formatCurrency(grandTotal)}</strong>
+          </p>
+        </div>
 
         {lineItems.length === 0 ? (
           <p>No rooms/boxes in this project yet. Apply a template under Room Estimation first.</p>
@@ -1536,38 +1544,6 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
               Amount includes wood/laminate, edge banding, hardware &amp; consumables, transportation, and carpenter/labor for each room.
             </div>
 
-            {mrpSavings.mrpTotal > 0 && (
-              <div style={{ padding: "14px 16px", border: "1px solid #a7f3d0", background: "#ecfdf5", borderRadius: 8, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#065f46" }}>You save {formatCurrency(mrpSavings.savings)} vs MRP</div>
-                  <div style={{ fontSize: 11, color: "#047857", marginTop: 2 }}>
-                    MRP Value {formatCurrency(mrpSavings.mrpTotal)} → Your Price {formatCurrency(mrpSavings.netTotal)} (incl. GST, on items with MRP set)
-                  </div>
-                </div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: "#059669" }}>
-                  {roundTo2((mrpSavings.savings / mrpSavings.mrpTotal) * 100)}% OFF
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 24 }}>
-              <table border="1" cellPadding="8" cellSpacing="0" style={{ minWidth: 320 }}>
-                <tbody>
-                  <tr><td>Cost Sub Total</td><td>{formatCurrency(costTotal)}</td></tr>
-                  {markupPercent > 0 && <tr><td>Markup {markupPercent}%</td><td>{formatCurrency(markupAmount)}</td></tr>}
-                  <tr style={{ background: "#f3f4f6" }}><td><strong>Sub Total</strong></td><td><strong>{formatCurrency(subTotal)}</strong></td></tr>
-                  {Number(discountAmount) > 0 && <tr><td>Discount</td><td>- {formatCurrency(discountAmount)}</td></tr>}
-                  {Number(discountAmount) > 0 && <tr><td><strong>Net Amount</strong></td><td><strong>{formatCurrency(netAmount)}</strong></td></tr>}
-                  <tr><td>GST {gstPercent}%</td><td>{formatCurrency(gstAmount)}</td></tr>
-                  <tr style={{ background: activeModel ? `${modelColor}15` : "#eff6ff" }}>
-                    <td><strong>Grand Total</strong></td>
-                    <td><strong style={{ color: activeModel ? modelColor : undefined }}>{formatCurrency(grandTotal)}</strong></td>
-                  </tr>
-                  <tr><td>Advance {advancePercent}%</td><td>{formatCurrency(advanceAmount)}</td></tr>
-                </tbody>
-              </table>
-            </div>
-
             {hardwareMrpItems.length > 0 && (
               <div className="hardware-discount-section" style={{ marginBottom: 24 }}>
                 <div
@@ -1575,7 +1551,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
                 >
                   <div onClick={() => setHardwareDiscountOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flex: 1 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: "#6b7280", transition: "transform 0.15s", display: "inline-block", transform: hardwareDiscountOpen ? "rotate(90deg)" : "none" }}>▶</span>
-                    <h3 style={{ margin: 0 }}>Hardware &amp; Consumables — Your Discount</h3>
+                    <h3 style={{ margin: 0 }}>Specification</h3>
                   </div>
                   <label className="no-print" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
                     <input
@@ -1596,31 +1572,37 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
                 <table border="1" cellPadding="7" cellSpacing="0" width="100%" style={{ fontSize: 12 }}>
                   <thead>
                     <tr>
-                      {["Group", "Item", "Qty", "Unit", "Warranty", "MRP (₹)", "Your Rate (₹)", "Discount %", "MRP Amount", "Your Amount", "You Save"].map((h) => (
-                        <th key={h} style={{ background: "#1e3a5f", color: "#fff" }}>{h}</th>
+                      {SPEC_COLS.map((c) => (
+                        <th key={c.k} style={{ background: "#1e3a5f", color: "#fff" }}>
+                          <div style={{ opacity: colOn("spec_" + c.k) ? 1 : 0.5 }}>{c.label}</div>
+                          <label className="no-print" style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 4, cursor: "pointer", fontSize: 10, fontWeight: 600, color: "#cbd5e1" }} title={`Show "${c.label}" in the Quotation (preview, print, PDF, share link)`}>
+                            <input
+                              type="checkbox"
+                              checked={colOn("spec_" + c.k)}
+                              onChange={(e) => { const next = { ...quotCols, ["spec_" + c.k]: e.target.checked }; setQuotCols(next); persistField("quotationColumns", next); }}
+                              style={{ width: 13, height: 13, cursor: "pointer" }}
+                            />
+                            Show
+                          </label>
+                        </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {hardwareMrpItems.map((row) => (
                       <tr key={row.material}>
-                        <td>{row.group}</td>
-                        <td>{row.material}</td>
-                        <td style={{ textAlign: "center" }}>{row.qty}</td>
-                        <td style={{ textAlign: "center" }}>{row.unit}</td>
-                        <td style={{ textAlign: "center" }}>{fmtWarranty(row.warranty)}</td>
-                        <td style={{ textAlign: "right" }}>{row.mrp > 0 ? `₹${row.mrp.toLocaleString("en-IN")}` : "—"}</td>
-                        <td style={{ textAlign: "right" }}>₹{row.rate.toLocaleString("en-IN")}</td>
-                        <td style={{ textAlign: "center", color: row.mrp > 0 ? "#059669" : "#9ca3af", fontWeight: 700 }}>{row.mrp > 0 ? `${row.discountPercent}%` : "—"}</td>
-                        <td style={{ textAlign: "right" }}>{row.mrp > 0 ? formatCurrency(row.mrpAmount) : "—"}</td>
-                        <td style={{ textAlign: "right" }}>{formatCurrency(row.netAmount)}</td>
-                        <td style={{ textAlign: "right", color: row.mrp > 0 ? "#059669" : "#9ca3af", fontWeight: 700 }}>{row.mrp > 0 ? formatCurrency(row.savings) : "—"}</td>
+                        {SPEC_COLS.map((c) => {
+                          const dim = colOn("spec_" + c.k) ? {} : { opacity: 0.35 };
+                          if (c.k === "group") return row.groupSpan > 0 ? <td key={c.k} rowSpan={row.groupSpan} style={{ verticalAlign: "top", fontWeight: 600, ...dim }}>{row.group}</td> : null;
+                          const accent = (c.k === "disc" || c.k === "save") && row.mrp > 0 ? { color: "#059669", fontWeight: 700 } : {};
+                          return <td key={c.k} style={{ textAlign: c.align, ...accent, ...dim }}>{specText(row, c.k, SPEC_FMT_SCREEN)}</td>;
+                        })}
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
                     <tr style={{ background: "#ecfdf5", fontWeight: 700 }}>
-                      <td colSpan={8} style={{ textAlign: "right" }}>Total You Save on Hardware &amp; Consumables</td>
+                      <td colSpan={8} style={{ textAlign: "right" }}>Total</td>
                       <td style={{ textAlign: "right" }}>{formatCurrency(hardwareMrpItems.reduce((s, r) => s + r.mrpAmount, 0))}</td>
                       <td style={{ textAlign: "right" }}>{formatCurrency(hardwareMrpItems.reduce((s, r) => s + r.netAmount, 0))}</td>
                       <td style={{ textAlign: "right", color: "#059669" }}>{formatCurrency(hardwareMrpItems.reduce((s, r) => s + r.savings, 0))}</td>
@@ -1691,7 +1673,6 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
 
               <h3>Terms & Conditions</h3>
               <p>Validity: {validityDays} days from quotation date</p>
-              <p>Advance: {advancePercent}% ({formatCurrency(advanceAmount)}) on order confirmation</p>
               <p>Delivery: {deliveryDays} days from advance and final measurements</p>
               {termsText && <p>{termsText}</p>}
             </div>
