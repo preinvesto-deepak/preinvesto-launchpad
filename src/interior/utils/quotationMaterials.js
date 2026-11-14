@@ -27,7 +27,7 @@ export function quotationMaterialRows(rooms, prices, materialStockSettings, kerf
   (rooms || []).forEach((room) => {
     const rows = buildRoomRows(room, prices);
     const sheets = computeSheetCounts(
-      rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty })),
+      rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty, rotation: r.rotation })),
       getStock,
       kerf
     );
@@ -37,7 +37,7 @@ export function quotationMaterialRows(rooms, prices, materialStockSettings, kerf
       add(mat, Math.round((lengthMm / 1000) * 100) / 100, "Mtr"));
 
     const unitOf = (mat) => (prices || []).find((p) => p.materialName === mat)?.unit || "Nos";
-    Object.entries(buildRoomHardware(room, prices)).forEach(([mat, qty]) => add(mat, qty, unitOf(mat)));
+    Object.entries(buildRoomHardware(room, prices, sheets)).forEach(([mat, qty]) => add(mat, qty, unitOf(mat)));
     Object.entries(buildRoomCarpenter(room)).forEach(([mat, qty]) => add(mat, qty, unitOf(mat)));
   });
 

@@ -93,7 +93,9 @@ export function buildBoxRows(box, prices) {
       if (!w || !h || w === "?" || h === "?" || !qty || qty === "?") return;
       rowNum += 1;
       const label = `${groupLabel} ${part.partName || ""}`.trim();
-      const push = (mat) => { if (mat) rows.push({ rowNum, w, h, qty, material: mat, label }); };
+      // rotation: grain direction (1 = horizontal by default), same as the Material Summary packs with.
+      const rotation = part.rotation || 1;
+      const push = (mat) => { if (mat) rows.push({ rowNum, w, h, qty, material: mat, label, rotation }); };
       if (part.material || part.materialId) push(rmat(part.material, part.materialId));
       if (part.sideA    || part.sideAId)   push(rmat(part.sideA,    part.sideAId));
       if (part.sideB    || part.sideBId)   push(rmat(part.sideB,    part.sideBId));
@@ -150,10 +152,13 @@ export const tapeCount = (edgeMtr, divisor) => (divisor > 0 && edgeMtr > 0 ? Mat
 /** Edge banding for every box in a room, grouped by material — { [material]: lengthMm } */
 export function buildRoomEdgeBanding(room, prices) {
   const totals = {};
+  // Same as the Material Summary: each box's edge band is rounded up to whole
+  // metres (plus the room's extra metres) before the boxes are added together.
+  const extraMtr = Math.max(0, Number(room.edgeExtraMtr) || 0);
   (room.boxes || []).forEach((box) => {
     const { material, lengthMm } = buildBoxEdgeBanding(box, prices);
     if (!material || !lengthMm) return;
-    totals[material] = (totals[material] || 0) + lengthMm;
+    totals[material] = (totals[material] || 0) + (Math.ceil(lengthMm / 1000) + extraMtr) * 1000;
   });
   return totals;
 }
@@ -163,13 +168,26 @@ export function buildRoomEdgeBanding(room, prices) {
  * { [material]: qty }. qty is base + extra (the same "Final Qty" shown in
  * Projects.jsx's Hardware & Consumables table), not just the base quantity.
  */
-export function buildRoomHardware(room, prices) {
+export const FEVICOL_ITEM = "Fevicol Merino";
+
+/**
+ * Fevicol Merino is not typed in: multiplier (App Settings) × the room's total
+ * Laminate sheets. `sheetCounts` is { [material]: sheets } for the room.
+ */
+export function fevicolQty(room, prices, sheetCounts) {
+  const sheets = Object.entries(sheetCounts || {}).reduce((s, [mat, n]) =>
+    (prices || []).find((p) => p.materialName === mat)?.group === "Laminate" ? s + (Number(n) || 0) : s, 0);
+  return Math.round(sheets * (Number(calcFor(room).fevicolMultiplier) || 0) * 100) / 100;
+}
+
+export function buildRoomHardware(room, prices, sheetCounts) {
   const totals = {};
   const tapeDivisor = tapeDivisorOf(room);
   const tapeOn = tapeDivisor > 0 && prices;
   (room.boxes || []).forEach((box) => {
     (box.hardwareItems || []).forEach((item) => {
       if (!item.materialName) return;
+      if (item.materialName === FEVICOL_ITEM) return; // worked out from laminate sheets below
       if (tapeOn && item.materialName === TAPE_ITEM) return; // counted from edge band below
       const qty = (Number(item.qty) || 0) + (Number(item.extra) || 0);
       if (!qty) return;
@@ -181,6 +199,10 @@ export function buildRoomHardware(room, prices) {
       .reduce((s, lengthMm) => s + Math.round((lengthMm / 1000) * 100) / 100, 0);
     const tapes = tapeCount(edgeMtr, tapeDivisor);
     if (tapes) totals[TAPE_ITEM] = (totals[TAPE_ITEM] || 0) + tapes;
+  }
+  if (sheetCounts) {
+    const glue = fevicolQty(room, prices, sheetCounts);
+    if (glue > 0) totals[FEVICOL_ITEM] = (totals[FEVICOL_ITEM] || 0) + glue;
   }
   return totals;
 }
@@ -197,7 +219,7 @@ export function buildRoomHardware(room, prices) {
 export function boxAreaSft(box) {
   const hMm = Number(box.quotationHeightMm) || Number(box.heightMm) || 0;
   const wMm = Number(box.quotationWidthMm) || Number(box.widthMm) || 0;
-  return hMm && wMm ? Math.round(mmToFeet(hMm) * mmToFeet(wMm)) : 0;
+  return hMm && wMm ? Math.ceil(mmToFeet(hMm) * mmToFeet(wMm)) : 0;
 }
 
 /**

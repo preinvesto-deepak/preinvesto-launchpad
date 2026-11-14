@@ -50,7 +50,7 @@ function ProjectBOQ() {
       const rows = buildRoomRows(room, prices);
       const areaSqMm = rows.reduce((s, r) => s + r.w * r.h * r.qty, 0);
       const sheetCounts = computeSheetCounts(
-        rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty })),
+        rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty, rotation: r.rotation })),
         getStockSize,
         kerfFor(selectedProjectObj)
       );
@@ -73,7 +73,7 @@ function ProjectBOQ() {
       // Manually-added Hardware & Consumables items — split Transportation and
       // Carpenter into their own columns/totals below so nothing is double-counted
       // against the item-priced Carpenter auto-row.
-      const hwTotals = buildRoomHardware(room, prices);
+      const hwTotals = buildRoomHardware(room, prices, sheetCounts);
       const allHwDetails = Object.entries(hwTotals).map(([mat, qty]) => {
         const { rate, brand, source, priceFound } = rateFor(mat);
         const priceEntry = prices.find((p) => p.materialName === mat);

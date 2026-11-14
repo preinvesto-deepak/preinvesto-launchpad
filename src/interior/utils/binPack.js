@@ -250,7 +250,7 @@ export function computeSheetCounts(parts, getStockSize = () => ({}), kerf = 0) {
       qty: +p.qty,
       label: p.partName || "",
       rowNum: idx + 1,
-      rotation: 0, // legacy parts carry no grain preference — free to rotate for best fit
+      rotation: +p.rotation || 0, // 0 = free to rotate for best fit; 1/2 = keep grain direction
     }));
 
   const sheets = packSheets(rows, getStockSize, kerf);

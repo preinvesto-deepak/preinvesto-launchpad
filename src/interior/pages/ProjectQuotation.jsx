@@ -123,7 +123,7 @@ function computeRoomCost(room, model, projectObj, prices, materialStockSettings)
   const rows = buildRoomRows(room, prices);
   const getStockSize = (mat) => getStockSizeFor(materialStockSettings, mat);
   const sheetCounts = computeSheetCounts(
-    rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty })),
+    rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty, rotation: r.rotation })),
     getStockSize,
     kerfFor(projectObj)
   );
@@ -144,7 +144,7 @@ function computeRoomCost(room, model, projectObj, prices, materialStockSettings)
   // Manually-added Hardware & Consumables — Transportation and Carpenter split
   // out into their own totals so nothing double-counts against the Carpenter
   // auto-row below.
-  const hwTotals = buildRoomHardware(room, prices);
+  const hwTotals = buildRoomHardware(room, prices, sheetCounts);
   const priceGroupOf = (mat) => prices.find((p) => p.materialName === mat)?.group;
   const hardwareAmount = Object.entries(hwTotals).reduce((total, [mat, qty]) => {
     const g = priceGroupOf(mat);
@@ -216,13 +216,13 @@ function computeRoomMrpSavings(room, prices, materialStockSettings, projectObj) 
     return { sheetW: s?.sheetW || 2440, sheetH: s?.sheetH || 1220, sheetTexture: s?.sheetTexture ?? 1 };
   };
   const sheetCounts = computeSheetCounts(
-    rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty })),
+    rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty, rotation: r.rotation })),
     getStockSize,
     kerfFor(projectObj)
   );
   const materials = [...new Set(rows.map((r) => r.material))];
   const edgeTotals = buildRoomEdgeBanding(room, prices);
-  const hwTotals = buildRoomHardware(room, prices);
+  const hwTotals = buildRoomHardware(room, prices, sheetCounts);
   const carpTotals = buildRoomCarpenter(room);
 
   let mrpTotal = 0;
