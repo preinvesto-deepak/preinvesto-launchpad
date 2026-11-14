@@ -9,7 +9,7 @@ import { fetchState, saveState } from "../utils/api";
 import { syncCustomServices } from "../utils/services";
 import { setKerfSettings } from "../utils/kerf";
 import { setMaterialCalcSettings } from "../utils/materialCalc";
-import { guardSetter } from "../utils/access";
+import { guardSetter, previewView } from "../utils/access";
 
 const AppDataContext = createContext();
 
@@ -105,10 +105,14 @@ function AppDataProvider({ children }) {
   // An employee gets setters that refuse changes their group doesn't allow (see
   // utils/access.js — the server enforces the same rules); the owner's are the
   // plain React setters.
-  const { user } = useAuth();
+  const { user, impersonation } = useAuth();
   const access = user?.access;
   const accessKey = JSON.stringify(access ?? null);
-  const guarded = useMemo(() => ({
+  // The owner previewing another person's view: nothing may change or be saved.
+  const previewing = !!impersonation;
+  const previewRef = useRef(false);
+  previewRef.current = previewing;
+  const guardedRaw = useMemo(() => ({
     setProjects: guardSetter(access, "projects", setProjectsRaw),
     setSubProjects: guardSetter(access, "subProjects", setSubProjectsRaw),
     setDimensions: guardSetter(access, "dimensions", setDimensionsRaw),
@@ -129,6 +133,11 @@ function AppDataProvider({ children }) {
     setTemplateFolders: guardSetter(access, "templateFolders", setTemplateFoldersRaw),
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [accessKey]);
+  const guarded = useMemo(() => {
+    if (!previewing) return guardedRaw;
+    const noop = () => {};
+    return Object.fromEntries(Object.keys(guardedRaw).map((k) => [k, noop]));
+  }, [guardedRaw, previewing]);
   const {
     setProjects, setSubProjects, setDimensions, setPrices, setMaterialModelRates, setMaterialModelProfitPercent, setTemplates, setSelectedTemplateId, setMaterialStockSettings, setKerfWidth, setCompanyProfile, setDesignGallery, setLeads, setLeadViews, setLeadStatuses, setLeadTagColors, setTeamMembers, setTemplateFolders,
   } = guarded;
@@ -217,6 +226,7 @@ function AppDataProvider({ children }) {
   // ── Save to MySQL (via /api/interior_state.php) ──────────────────────────
   // Writes the newest snapshot, then again if more changes landed meanwhile.
   const runSave = useCallback(() => {
+    if (previewRef.current) return Promise.resolve();
     if (inFlightRef.current) { queuedRef.current = true; return inFlightRef.current; }
     const job = (async () => {
       try {
@@ -408,6 +418,12 @@ function AppDataProvider({ children }) {
     // Same as resetAllData — the debounced save effect persists this.
   };
 
+  // While previewing, pages get the workspace as that group would see it.
+  const shown = useMemo(() => (previewing ? previewView(access, {
+    projects, subProjects, dimensions, prices, materialModelRates, materialModelProfitPercent, templates,
+    selectedTemplateId, designGallery, leads, leadViews, leadStatuses, leadTagColors, templateFolders,
+  }, defaultData) : null), [previewing, accessKey, projects, subProjects, dimensions, prices, materialModelRates, materialModelProfitPercent, templates, selectedTemplateId, designGallery, leads, leadViews, leadStatuses, leadTagColors, templateFolders]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <AppDataContext.Provider
       value={{
@@ -459,6 +475,7 @@ function AppDataProvider({ children }) {
         retrySave,
         requestImmediateSave,
         flushPendingSave,
+        ...(shown || {}),
       }}
     >
       {children}

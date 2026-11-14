@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useAppData } from "../context/AppDataContext";
 import { formatCurrency, roundTo2 } from "../utils/unitConversions";
+import { resolveModelRate } from "../utils/modelRates";
 import { buildRoomRows, buildRoomEdgeBanding, buildRoomHardware, buildRoomCarpenter } from "../utils/projectRows";
 import { computeSheetCounts } from "../utils/binPack";
 import { kerfFor } from "../utils/kerf";
@@ -34,9 +35,8 @@ function ProjectBOQ() {
 
   const rateFor = (material) => {
     if (selectedModel !== "default") {
-      const modelEntry = selectedProjectObj?.materialModelRates?.[material]?.[selectedModel];
-      // baseRate is the real rate; older cells also carry a profit-inflated `rate`.
-      if (modelEntry?.rate) return { rate: Number(modelEntry.baseRate || modelEntry.rate), brand: modelEntry.brand || "", source: selectedModel };
+      const r = resolveModelRate(selectedProjectObj?.materialModelRates?.[material]?.[selectedModel], material, prices);
+      if (r.rate > 0) return { rate: r.rate, brand: r.brand, source: selectedModel, priceFound: !!r.row };
     }
     const rateData = prices.find((p) => p.materialName === material);
     return { rate: rateData ? Number(rateData.rate) : 0, brand: rateData?.brand || "", source: "default", priceFound: !!rateData };

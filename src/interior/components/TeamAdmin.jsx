@@ -1,7 +1,8 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
-import { authFetch } from "@/context/AuthContext";
+import { useNavigate } from "react-router-dom";
+import { authFetch, useAuth } from "@/context/AuthContext";
 import { useAppData } from "../context/AppDataContext";
-import { PROJECT_TABS, SCREENS } from "../utils/access";
+import { PROJECT_TABS, SCREENS, groupImpersonation, personImpersonation } from "../utils/access";
 
 // Owner-only admin for the Team list and its groups, backed by /api/interior_team.php.
 // A person can optionally sign in with the username + password set here (the
@@ -14,6 +15,22 @@ async function callTeam(body) {
   try { data = await res.json(); } catch { /* handled below */ }
   if (!res.ok || !data.success) throw new Error(data.error || "Something went wrong. Please try again.");
   return data;
+}
+
+export const fetchTeam = () => callTeam();
+
+/** Starts the owner's read-only preview as a group or as one person, then opens the app. */
+export function useImpersonate(team) {
+  const { startImpersonation } = useAuth();
+  const { flushPendingSave } = useAppData();
+  const navigate = useNavigate();
+  const go = async (who) => {
+    if (!who) return;
+    try { await flushPendingSave(); } catch { /* the preview doesn't depend on it */ }
+    startImpersonation(who);
+    navigate("/interior");
+  };
+  return { group: (g) => go(groupImpersonation(g)), person: (e) => go(personImpersonation(e, team.groups)) };
 }
 
 /** Loads employees + groups once, and returns an `act` that runs an action and refreshes. */
@@ -188,6 +205,7 @@ const fmtDate = (v) => (v ? new Date(v).toLocaleString("en-IN", { dateStyle: "me
 const emptyPerson = { name: "", role: "", phone: "", email: "", canSignIn: false, username: "", password: "", groupId: "", active: true };
 
 export function TeamPanel({ team, act }) {
+  const impersonate = useImpersonate(team);
   const [form, setForm] = useState(null); // null = closed
   const [editId, setEditId] = useState(null);
   const [error, setError] = useState("");
@@ -233,7 +251,7 @@ export function TeamPanel({ team, act }) {
             <th style={{ textAlign: "left" }}>Sign-in</th>
             <th style={{ textAlign: "left" }}>Group</th>
             <th style={{ textAlign: "left" }}>Last sign-in</th>
-            <th style={{ textAlign: "left", width: 130 }}>Actions</th>
+            <th style={{ textAlign: "left", width: 230 }}>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -254,6 +272,11 @@ export function TeamPanel({ team, act }) {
               <td style={{ fontSize: 12, color: "#6b7280" }}>{e.hasLogin ? fmtDate(e.lastLoginAt) : "—"}</td>
               <td>
                 <span style={{ display: "flex", gap: 6 }}>
+                  <button
+                    onClick={() => impersonate.person(e)} disabled={!e.hasLogin || !e.groupId}
+                    title={e.hasLogin && e.groupId ? "See the app as this person sees it (read-only preview)" : "Only people with a sign-in and a group can be previewed"}
+                    style={{ background: "#7c3aed", fontSize: 11, padding: "3px 10px", opacity: e.hasLogin && e.groupId ? 1 : 0.4 }}
+                  >👁 Impersonate</button>
                   <button onClick={() => openEdit(e)} style={{ background: "#2563eb", fontSize: 11, padding: "3px 10px" }}>Edit</button>
                   <button onClick={() => remove(e)} style={{ background: "#dc2626", fontSize: 11, padding: "3px 10px" }}>Delete</button>
                 </span>
@@ -355,6 +378,7 @@ const permSummary = (perms) => {
 };
 
 export function GroupsPanel({ team, act }) {
+  const impersonate = useImpersonate(team);
   const { projects } = useAppData();
   const [form, setForm] = useState(null); // { name, perms, scopeAll, scopeIds }
   const [editId, setEditId] = useState(null);
@@ -427,7 +451,7 @@ export function GroupsPanel({ team, act }) {
             <th style={{ textAlign: "left" }}>Employees</th>
             <th style={{ textAlign: "left" }}>Projects</th>
             <th style={{ textAlign: "left" }}>Access (V = view, E = edit, D = delete)</th>
-            <th style={{ textAlign: "left", width: 130 }}>Actions</th>
+            <th style={{ textAlign: "left", width: 230 }}>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -441,6 +465,7 @@ export function GroupsPanel({ team, act }) {
               <td style={{ fontSize: 12, color: "#374151" }}>{permSummary(g.perms)}</td>
               <td>
                 <span style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => impersonate.group(g)} title="See the app as this group sees it (read-only preview)" style={{ background: "#7c3aed", fontSize: 11, padding: "3px 10px" }}>👁 Impersonate</button>
                   <button onClick={() => openEdit(g)} style={{ background: "#2563eb", fontSize: 11, padding: "3px 10px" }}>Edit</button>
                   <button onClick={() => remove(g)} style={{ background: "#dc2626", fontSize: 11, padding: "3px 10px" }}>Delete</button>
                 </span>

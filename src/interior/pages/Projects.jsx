@@ -1,4 +1,5 @@
 import { useState, useEffect, Fragment } from "react";
+import { resolveInclRate, ownRate, linkedPriceRow } from "../utils/modelRates";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
 import { formatCurrency, mmToFeet, feetToMm, roundTo2 } from "../utils/unitConversions";
@@ -711,7 +712,7 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
   const [hideSame, setHideSame] = useState(false);
   const [showUnused, setShowUnused] = useState(false);
   const [ratesOn, setRatesOn] = useState(true);
-  const [basis, setBasis] = useState("excl"); // rate/amount shown excl. or incl. GST
+  const basis = "incl"; // rates and amounts here always include GST
   const [nameQ, setNameQ] = useState("");
   const [groupQ, setGroupQ] = useState("");
   const [picker, setPicker] = useState(null); // { material, model, group }
@@ -740,11 +741,9 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
   const resolve = (material, model, qty) => {
     const cell = rates[material]?.[model] || {};
     const sameName = (prices || []).filter((p) => p.materialName === material);
-    const linked = (cell.priceId && sameName.find((p) => p.id === cell.priceId))
-      || (cell.brand && sameName.find((p) => (p.brand || "").trim().toLowerCase() === cell.brand.trim().toLowerCase()))
-      || null;
+    const linked = linkedPriceRow(cell, material, prices);
     const fallback = sameName[0] || null;
-    const own = Number(cell.baseRate || cell.rate) || 0;
+    const own = ownRate(cell);
     const source = linked || (own ? null : fallback);
     const rate = linked ? (Number(linked.rate) || 0) : own || (fallback ? Number(fallback.rate) || 0 : 0);
     const gst = linked ? Number(linked.gst ?? 18)
@@ -816,14 +815,14 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
     const base = typed === "" ? "" : String(basis === "incl" ? roundTo2(Number(typed) / (1 + gstNow / 100)) : typed);
     const n = Number(base) || 0;
     setCell(material, model, {
-      baseRate: base, rate: base, gst: String(gstNow),
+      manual: true, baseRate: base, rate: base, gst: String(gstNow),
       rateWithGst: n > 0 ? String(roundTo2(n * (1 + gstNow / 100))) : "",
     });
   };
   const onGst = (material, model, value, rateNow) => {
     const g = Number(value) || 0;
     setCell(material, model, {
-      baseRate: rateNow > 0 ? String(rateNow) : "", rate: rateNow > 0 ? String(rateNow) : "", gst: value,
+      manual: true, baseRate: rateNow > 0 ? String(rateNow) : "", rate: rateNow > 0 ? String(rateNow) : "", gst: value,
       rateWithGst: rateNow > 0 ? String(roundTo2(rateNow * (1 + g / 100))) : "",
     });
   };
@@ -888,7 +887,7 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
                     <li><b style={{ color: "#b45309" }}>Amber brand</b> — differs from the global Material Models template (hover to see it).</li>
                     <li><i style={{ color: "#9ca3af" }}>Grey italic</i> — nothing set for that model, so the first Items Pricing row is used.</li>
                     <li>A grey rate box is tied to an Items Pricing row — change it there. A white box is this project's own rate (with its GST %).</li>
-                    <li>Excl. / Incl. GST changes the rates and amounts shown. <b>Include unused materials</b> lists items the project doesn't use yet so you can set their rates ahead of time.</li>
+                    <li>Rates and amounts include GST (each item's own GST %). <b>Include unused materials</b> lists items the project doesn't use yet so you can set their rates ahead of time.</li>
                     <li>Untick <b>Show rates</b> for a quantities-only view.</li>
                   </>
                 )}
@@ -929,11 +928,6 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
         )}
         {showRates && (
           <>
-            <span style={{ display: "inline-flex", border: "1px solid #d1d5db", borderRadius: 8, overflow: "hidden" }} title="Show rates and amounts excluding or including GST">
-              {[["excl", "Excl. GST"], ["incl", "Incl. GST"]].map(([k, label]) => (
-                <button key={k} onClick={() => setBasis(k)} style={{ border: "none", borderRadius: 0, padding: "5px 10px", fontSize: 12, cursor: "pointer", background: basis === k ? "#1e3a5f" : "#f9fafb", color: basis === k ? "#fff" : "#374151" }}>{label}</button>
-              ))}
-            </span>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#374151", cursor: "pointer" }}>
               <input type="checkbox" checked={hideSame} onChange={(e) => setHideSame(e.target.checked)} />
               Hide same-priced{samePricedCount > 0 ? ` (${samePricedCount})` : ""}
@@ -989,7 +983,7 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
                   {PROJ_MODELS.map((mo) => (
                     <Fragment key={mo}>
                       <th style={{ ...sub, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>Brand</th>
-                      <th style={sub}>Rate{basis === "incl" ? " +GST" : ""}</th>
+                      <th style={sub}>Rate +GST</th>
                       <th style={sub}>Amount</th>
                     </Fragment>
                   ))}
@@ -3625,10 +3619,7 @@ function Projects() {
                       // Rate for a material under one Material Model variant — this
                       // project's own override if set, else the global Items Pricing rate.
                       const modelRateFor = (material, model) => {
-                        const modelEntry = selectedProject?.materialModelRates?.[material]?.[model];
-                        if (modelEntry?.rate) return Number(modelEntry.rate);
-                        const rateData = (prices || []).find((p) => p.materialName === material);
-                        return rateData ? Number(rateData.rate) : 0;
+                        return resolveInclRate(selectedProject?.materialModelRates?.[material]?.[model], material, prices);
                       };
                       const modelTotals = { economy: 0, standard: 0, premium: 0 };
                       summaryRows.forEach((row) => {
@@ -3695,17 +3686,7 @@ function Projects() {
   style={{ width: 50, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
 />
 <span style={{ fontSize: 12, color: "#6b7280" }}>(rounded up; 0 = type tapes per box){calcLocked ? " · same for every room — change in App Settings" : ""}</span>
-                                  <span style={{ width: 1, alignSelf: "stretch", background: "#e5e7eb", margin: "0 4px" }} />
-                                  <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>GST</span>
-                                  <input
-                                    type="number" step="1" min={0}
-                                    value={gstPercent}
-                                    disabled={calcLocked}
-                                    onChange={(e) => setGstPercent(e.target.value)}
-                                    onBlur={(e) => setGstPercent(Math.max(0, Number(e.target.value) || 0))}
-                                    style={{ width: 50, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
-                                  />
-                                  <span style={{ fontSize: 12, color: "#6b7280" }}>%</span>
+                                  
                                 </div>
                                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 900 }}>
                                   <thead>
@@ -3721,7 +3702,7 @@ function Projects() {
                                     <tr>
                                       {PROJ_MODELS.map((model) => (
                                         <Fragment key={model}>
-                                          <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.15)" }}>Rate</th>
+                                          <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.15)" }}>Rate +GST</th>
                                           <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Amount</th>
                                         </Fragment>
                                       ))}
@@ -3756,7 +3737,7 @@ function Projects() {
                                       </tr>
                                     ))}
                                     <tr style={{ background: "#1e3a5f" }}>
-                                      <td colSpan={2} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Total (Excl. GST)</td>
+                                      <td colSpan={2} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Total (Incl. GST)</td>
                                       <td style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 12 }}>
                                         {summaryRows.reduce((s, r) => s + r.requiredQty, 0)}
                                       </td>
@@ -3767,32 +3748,13 @@ function Projects() {
                                         </td>
                                       ))}
                                     </tr>
-                                    <tr style={{ background: "#334e68" }}>
-                                      <td colSpan={2} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Total (Incl. GST {gstPercent}%)</td>
-                                      <td colSpan={2} style={{ padding: "8px 14px" }} />
-                                      {PROJ_MODELS.map((model) => (
-                                        <td key={model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 12, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>
-                                          {formatCurrency(modelTotals[model] * (1 + (Number(gstPercent) || 0) / 100))}
-                                        </td>
-                                      ))}
-                                    </tr>
-                                    <tr style={{ background: "#f1f5f9" }}>
+                                    <tr style={{ background: "#e5e7eb" }}>
                                       <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 700, color: "#374151", fontSize: 12 }}>
-                                        Sft Cost (Excl. GST) <span style={{ fontWeight: 400, color: "#9ca3af" }}>(Total ÷ {roundTo2(totalAreaSft)} sqft)</span>
+                                        Sft Cost (Incl. GST) <span style={{ fontWeight: 400, color: "#9ca3af" }}>(Total ÷ {roundTo2(totalAreaSft)} sqft)</span>
                                       </td>
                                       {PROJ_MODELS.map((model) => (
                                         <td key={model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: PROJ_MODEL_COLORS[model], fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>
                                           {totalAreaSft > 0 ? `${formatCurrency(modelTotals[model] / totalAreaSft)}/sqft` : <span style={{ color: "#d1d5db" }}>—</span>}
-                                        </td>
-                                      ))}
-                                    </tr>
-                                    <tr style={{ background: "#e5e7eb" }}>
-                                      <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 700, color: "#374151", fontSize: 12 }}>
-                                        Sft Cost (Incl. GST {gstPercent}%) <span style={{ fontWeight: 400, color: "#9ca3af" }}>(Total ÷ {roundTo2(totalAreaSft)} sqft)</span>
-                                      </td>
-                                      {PROJ_MODELS.map((model) => (
-                                        <td key={model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: PROJ_MODEL_COLORS[model], fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>
-                                          {totalAreaSft > 0 ? `${formatCurrency((modelTotals[model] * (1 + (Number(gstPercent) || 0) / 100)) / totalAreaSft)}/sqft` : <span style={{ color: "#d1d5db" }}>—</span>}
                                         </td>
                                       ))}
                                     </tr>

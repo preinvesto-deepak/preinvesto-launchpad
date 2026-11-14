@@ -15,7 +15,7 @@ const emptyForm = {
   // — the actual net cost after what the supplier discounts off list price.
   // showInQuotation controls whether this item's MRP-vs-final savings shows
   // up in the Project Quotation's savings summary.
-  mrp: "", discountPercent: "", showInQuotation: true,
+  mrp: "", discountPercent: "0", showInQuotation: true,
   // Manufacturer/supplier warranty, in years (blank = none). Shown next to the
   // item in the Project Quotation when its "show in Project Quotation" box is ticked.
   warranty: "",
@@ -136,6 +136,7 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
     const f = { ...emptyForm, ...(initial || {}), images: initial?.images || [] };
     // Wood: MRP SFT Rate is just MRP ÷ sheet sqft, shown for entry/reading.
     const sq = (Number(f.woodDimW) || 0) * (Number(f.woodDimH) || 0);
+    if (f.discountPercent === "" || f.discountPercent == null) f.discountPercent = "0"; // no discount unless one is entered
     f.mrpSft = f.group === "Wood" && Number(f.mrp) > 0 && sq ? (Number(f.mrp) / sq).toFixed(2) : "";
     return f;
   });
@@ -156,7 +157,7 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
   // GST — otherwise a GST-exclusive rate would look artificially cheaper
   // against MRP than it actually is.
   const discountFromRateWithGst = (rateWithGst, mrp) =>
-    rateWithGst !== "" && Number(mrp) > 0 ? Math.max(0, (1 - Number(rateWithGst) / Number(mrp)) * 100).toFixed(2) : "";
+    rateWithGst !== "" && Number(mrp) > 0 ? Math.max(0, (1 - Number(rateWithGst) / Number(mrp)) * 100).toFixed(2) : "0";
 
   const handleRate = (e) => {
     const rate = e.target.value;
@@ -189,9 +190,10 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
   // was added back on top afterward, which double-counted GST on top of a
   // figure (MRP) that already included it.
   const recalcFromMrp = (mrp, discountPercent) => {
-    if (mrp === "" || discountPercent === "") return null;
+    // A blank discount means none: entering an MRP always fills the rates.
+    if (mrp === "") return null;
     const gst = Number(form.gst) || 0;
-    const withGst = (Number(mrp) * (1 - Number(discountPercent) / 100)).toFixed(2);
+    const withGst = (Number(mrp) * (1 - (Number(discountPercent) || 0) / 100)).toFixed(2);
     const rate = (Number(withGst) / (1 + gst / 100)).toFixed(2);
     return { rate, withGst };
   };
@@ -209,7 +211,7 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
     setForm((f) => {
       const sq = (Number(f.woodDimW) || 0) * (Number(f.woodDimH) || 0);
       return {
-        ...f, mrp,
+        ...f, mrp, discountPercent: f.discountPercent === "" ? "0" : f.discountPercent,
         mrpSft: f.group === "Wood" && mrp !== "" && sq ? (Number(mrp) / sq).toFixed(2) : "",
         ...(result ? { rate: result.rate, rateWithGst: result.withGst, sftRate: sftFromRate(f, result.rate) } : {}),
       };
@@ -233,7 +235,7 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
     const mrp = mrpSft !== "" && sq ? (Number(mrpSft) * sq).toFixed(2) : "";
     const result = recalcFromMrp(mrp, form.discountPercent);
     setForm((f) => ({
-      ...f, mrpSft, mrp,
+      ...f, mrpSft, mrp, discountPercent: f.discountPercent === "" ? "0" : f.discountPercent,
       ...(result ? { rate: result.rate, rateWithGst: result.withGst, sftRate: sftFromRate(f, result.rate) } : {}),
     }));
   };

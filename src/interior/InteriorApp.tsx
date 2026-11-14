@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Routes, Route, useLocation, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, LogOut, UserCog, TriangleAlert, Lock } from "lucide-react";
+import { ArrowLeft, LogOut, UserCog, TriangleAlert, Lock, Eye } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { AppDataProvider, useAppData } from "./context/AppDataContext";
 import { UnsavedChangesProvider, useUnsavedChanges } from "./context/UnsavedChangesContext";
 import Sidebar from "./components/Sidebar";
+import ProfileMenu from "./components/ProfileMenu";
 
 import Dashboard from "./pages/Dashboard";
 import Leads from "./pages/Leads";
@@ -61,7 +62,8 @@ function PageHeader() {
 
 /** Thin bar giving a way back to the main site and out of the session. */
 function InteriorTopBar() {
-  const { user, logout } = useAuth();
+  // The real signed-in account, even while previewing someone else's view.
+  const { realUser: user, logout } = useAuth();
   const navigate = useNavigate();
   const { guardedNavigate } = useUnsavedChanges();
   const { flushPendingSave } = useAppData();
@@ -89,40 +91,50 @@ function InteriorTopBar() {
 
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         {user?.isEmployee ? (
-          <span style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--stone-700)" }} title={user.access?.groupName ? `Group: ${user.access.groupName}` : "Employee"}>
-            <UserCog size={14} />
-            {user.name}
-            <span style={{ fontSize: 10, background: "var(--stone-100)", border: "1px solid var(--stone-300)", borderRadius: 999, padding: "1px 7px" }}>
-              {user.access?.groupName || "No group"}
+          <>
+            <span style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--stone-700)" }} title={user.access?.groupName ? `Group: ${user.access.groupName}` : "Employee"}>
+              <UserCog size={14} />
+              {user.name}
+              <span style={{ fontSize: 10, background: "var(--stone-100)", border: "1px solid var(--stone-300)", borderRadius: 999, padding: "1px 7px" }}>
+                {user.access?.groupName || "No group"}
+              </span>
             </span>
-          </span>
+            <button
+              onClick={() => guardedNavigate(async () => { await flushPendingSave(); await logout(); })}
+              style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", color: "var(--stone-700)", border: "1px solid var(--stone-300)", padding: "5px 10px", fontSize: 12 }}
+            >
+              <LogOut size={13} /> Sign out
+            </button>
+          </>
         ) : (
-          <Link
-            to="/interior/profile"
-            onClick={(e) => { e.preventDefault(); guardedNavigate(() => navigate("/interior/profile")); }}
-            style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--stone-700)", textDecoration: "none" }}
-            title="Your profile"
-          >
-            <UserCog size={14} />
-            {user ? user.name : "Profile"}
-          </Link>
+          <ProfileMenu />
         )}
-        <button
-          onClick={() => guardedNavigate(async () => { await flushPendingSave(); await logout(); })}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            background: "transparent",
-            color: "var(--stone-700)",
-            border: "1px solid var(--stone-300)",
-            padding: "5px 10px",
-            fontSize: 12,
-          }}
-        >
-          <LogOut size={13} /> Sign out
-        </button>
       </div>
+    </div>
+  );
+}
+
+/** Shown the whole time the owner is previewing a group's or a person's view. */
+function ImpersonationBanner() {
+  const { impersonation, stopImpersonation } = useAuth();
+  if (!impersonation) return null;
+  const scope = impersonation.access.scope;
+  return (
+    <div
+      className="no-print"
+      style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "8px 20px", background: "#f5f3ff", borderBottom: "1px solid #c4b5fd", color: "#4c1d95", fontSize: 12 }}
+    >
+      <Eye size={14} style={{ flexShrink: 0 }} />
+      <span>
+        Viewing as <b>{impersonation.label}</b>
+        {impersonation.kind === "person" ? ` (group: ${impersonation.groupName})` : " (group)"}
+        {" · "}{Array.isArray(scope) ? `${scope.length} project${scope.length !== 1 ? "s" : ""} only` : "all projects"}
+        {" · "}preview only — nothing you do here is saved.
+      </span>
+      <button
+        onClick={stopImpersonation}
+        style={{ marginLeft: "auto", background: "#6d28d9", color: "#fff", border: "none", borderRadius: 5, padding: "4px 12px", fontSize: 12, cursor: "pointer" }}
+      >Exit preview</button>
     </div>
   );
 }
@@ -312,6 +324,7 @@ const InteriorShell = () => {
       <UnsavedChangesProvider>
         <div className="interior-app">
           <InteriorTopBar />
+          <ImpersonationBanner />
           <WorkspaceLoadBanner />
           <PermissionBanner />
           <SaveStatus />

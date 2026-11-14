@@ -71,10 +71,9 @@ function AppSettings() {
       // Per room: every room starts from the values set here, then can be changed.
       const own = (subProjects || []).some((r) =>
         (r.fevicolMultiplier != null && Number(r.fevicolMultiplier) !== g.fevicolMultiplier)
-        || (r.tapeDivisor != null && Number(r.tapeDivisor) !== g.tapeDivisor)
-        || (r.gstPercent != null && Number(r.gstPercent) !== g.gstPercent));
+        || (r.tapeDivisor != null && Number(r.tapeDivisor) !== g.tapeDivisor));
       if (own && !window.confirm("Every room will be set to the values above, replacing the values rooms had of their own. Continue?")) return;
-      setSubProjects((prev) => prev.map((r) => ({ ...r, fevicolMultiplier: g.fevicolMultiplier, tapeDivisor: g.tapeDivisor, gstPercent: g.gstPercent })));
+      setSubProjects((prev) => prev.map((r) => ({ ...r, fevicolMultiplier: g.fevicolMultiplier, tapeDivisor: g.tapeDivisor })));
     }
     setProfile({ materialCalcUniversal: on });
   };
@@ -149,7 +148,7 @@ function AppSettings() {
         <div style={card}>
           <h3 style={{ margin: "0 0 4px", fontSize: 16 }}>Material Calculation</h3>
           <p style={{ ...hint, margin: "0 0 14px" }}>
-            Rules the Material Summary uses to work out glue, tape and the GST shown on its totals.
+            Rules the Material Summary uses to work out glue and tape. Its rates include each item's own GST.
           </p>
 
           <div style={{ display: "grid", gridTemplateColumns: "auto auto 1fr", alignItems: "center", gap: "10px 10px", marginBottom: 16 }}>
@@ -161,9 +160,6 @@ function AppSettings() {
             <Num value={g.tapeDivisor} onChange={(v) => setProfile({ tapeDivisor: v })} />
             <span style={hint}>rounded up to a whole tape; 0 = type tapes on each box</span>
 
-            <span style={label}>GST on Material Summary</span>
-            <Num value={g.gstPercent} onChange={(v) => setProfile({ gstPercent: v })} />
-            <span style={hint}>% added to the summary's Total and Sft Cost rows</span>
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -188,7 +184,7 @@ function AppSettings() {
                   <thead>
                     <tr>
                       <th style={th}>Project</th><th style={th}>Room</th>
-                      <th style={th}>Fevicol ×</th><th style={th}>Tape ÷</th><th style={th}>GST %</th>
+                      <th style={th}>Fevicol ×</th><th style={th}>Tape ÷</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -198,7 +194,6 @@ function AppSettings() {
                         <td style={td}>{r.subProject}</td>
                         <td style={td}><Num width={64} step={0.05} value={roomVal(r, "fevicolMultiplier")} onChange={(v) => setRoomCalc(r.id, "fevicolMultiplier", v)} /></td>
                         <td style={td}><Num width={64} value={roomVal(r, "tapeDivisor")} onChange={(v) => setRoomCalc(r.id, "tapeDivisor", v)} /></td>
-                        <td style={td}><Num width={64} value={roomVal(r, "gstPercent")} onChange={(v) => setRoomCalc(r.id, "gstPercent", v)} /></td>
                       </tr>
                     ))}
                   </tbody>

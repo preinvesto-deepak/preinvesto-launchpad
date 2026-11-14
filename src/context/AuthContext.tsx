@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useMemo } from "react";
 
 const TOKEN_KEY = "preinvesto_auth_token_v1";
 const API_URL = import.meta.env.VITE_API_URL || "";
@@ -25,8 +25,23 @@ export interface AuthUser {
   access?: Access;
 }
 
+/** The owner previewing the app as a group or a person: what that group may see and do. */
+export interface Impersonation {
+  kind: "group" | "person";
+  /** The group's or the person's name. */
+  label: string;
+  groupName: string;
+  access: Access;
+}
+
 interface AuthContextType {
+  /** Who the app should treat as signed in — the person being previewed while impersonating. */
   user: AuthUser | null;
+  /** The account that is really signed in (the owner, even while impersonating). */
+  realUser: AuthUser | null;
+  impersonation: Impersonation | null;
+  startImpersonation: (who: Impersonation) => void;
+  stopImpersonation: () => void;
   /** True while the stored token is being checked on first load. */
   loading: boolean;
   /** `identifier` is the owner's email or an employee's username. */
@@ -41,6 +56,13 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
+// While the owner is previewing someone else's view nothing may be written: every
+// request except a plain read is refused here, whatever part of the app sends it.
+let previewLock = false;
+export function setPreviewLock(on: boolean) {
+  previewLock = on;
+}
+
 export function getAuthToken(): string {
   return localStorage.getItem(TOKEN_KEY) || "";
 }
@@ -50,6 +72,9 @@ export function getAuthToken(): string {
  * every call so its data stays scoped to the signed-in account.
  */
 export async function authFetch(path: string, init: RequestInit = {}) {
+  if (previewLock && (init.method || "GET").toUpperCase() !== "GET") {
+    return Promise.reject(new Error("You're previewing another person's view — nothing is saved. Exit the preview first."));
+  }
   const token = getAuthToken();
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -99,6 +124,7 @@ async function postJsonAuth(path: string, body: unknown) {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [impersonation, setImpersonation] = useState<Impersonation | null>(null);
 
   // Restore the session on load: ask the server who this stored token belongs
   // to. An expired or revoked token simply clears itself.
@@ -144,6 +170,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    setPreviewLock(false);
+    setImpersonation(null);
     try {
       await authFetch("/api/auth_logout.php", { method: "POST" });
     } catch {
@@ -175,9 +203,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return data.message as string;
   }, []);
 
+  // Only the account owner can preview; the preview is read-only (see setPreviewLock).
+  const startImpersonation = useCallback((who: Impersonation) => {
+    if (!user || user.access?.owner === false) return;
+    setPreviewLock(true);
+    setImpersonation(who);
+  }, [user]);
+  const stopImpersonation = useCallback(() => {
+    setPreviewLock(false);
+    setImpersonation(null);
+  }, []);
+  const effectiveUser = useMemo<AuthUser | null>(
+    () => (user && impersonation ? { ...user, isEmployee: true, access: impersonation.access } : user),
+    [user, impersonation]
+  );
+
   return (
     <AuthContext.Provider
-      value={{ user, loading, login, signup, logout, forgotPassword, resetPassword, updateProfile, changePassword }}
+      value={{ user: effectiveUser, realUser: user, impersonation, startImpersonation, stopImpersonation, loading, login, signup, logout, forgotPassword, resetPassword, updateProfile, changePassword }}
     >
       {children}
     </AuthContext.Provider>

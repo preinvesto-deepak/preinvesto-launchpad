@@ -4,6 +4,7 @@ import { useUnsavedChanges } from "../context/UnsavedChangesContext";
 import { GROUP_OPTIONS } from "../data/priceData";
 import ServiceFilter from "../components/ServiceFilter";
 import { ALL_SERVICES, serviceForGroup } from "../utils/services";
+import { ownRate } from "../utils/modelRates";
 
 const MODELS = ["economy", "standard", "premium"];
 const MODEL_LABELS = { economy: "Economy", standard: "Standard", premium: "Premium" };
@@ -209,7 +210,12 @@ function MaterialModels() {
   const resolveCell = (cell, model, materialName) => {
     const live = (cell.priceId && prices.find((p) => p.id === cell.priceId))
       || (cell.brand && prices.find((p) => p.materialName === materialName && (p.brand || "").trim().toLowerCase() === cell.brand.trim().toLowerCase()));
-    if (!live) return cell;
+    // Nothing typed and no brand picked: follow the material's Items Pricing row.
+    const row = live || (ownRate(cell) ? null : prices.find((p) => p.materialName === materialName));
+    if (!row) return cell;
+    return fromRow(cell, row);
+  };
+  const fromRow = (cell, live) => {
     const rate = live.rate > 0 ? String(live.rate) : "";
     const gst = live.gst !== undefined && live.gst !== null ? String(live.gst) : cell.gst;
     const rateWithGst = rate !== "" ? calcWithGst(rate, gst) : "";
@@ -255,7 +261,7 @@ function MaterialModels() {
     // overwritten on the next render.
     const updated = {
       ...current,
-      [model]: { ...current[model], [field]: value, priceId: null },
+      [model]: { ...current[model], [field]: value, priceId: null, manual: true },
     };
     // auto-calc — Rate (excl GST) / Rate+GST / GST % keep each other in sync.
     if (field === "rate") {
@@ -266,10 +272,12 @@ function MaterialModels() {
       updated[model].rate = rate;
       updated[model].baseRate = rate;
     } else if (field === "gst") {
-      if (current[model].rate !== "") {
+      if (current[model].rateWithGst !== "") {
+        const rate = calcWithoutGst(current[model].rateWithGst, value);
+        updated[model].rate = rate;
+        updated[model].baseRate = rate;
+      } else if (current[model].rate !== "") {
         updated[model].rateWithGst = calcWithGst(current[model].rate, value);
-      } else if (current[model].rateWithGst !== "") {
-        updated[model].rate = calcWithoutGst(current[model].rateWithGst, value);
       }
     }
     setEdits((prev) => ({ ...prev, [name]: updated }));
@@ -467,11 +475,11 @@ function MaterialModels() {
                       </div>
                       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>Rate (excl GST)</div>
-                          <input type="number" placeholder="0.00" value={m.baseRate}
+                          <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>Rate incl. GST</div>
+                          <input type="number" placeholder="0.00" value={m.rateWithGst}
                             readOnly={m.fromItemsPricing} title={m.fromItemsPricing ? "From Items Pricing — edit it there" : undefined}
-                            onChange={(e) => setField(item.materialName, model, "rate", e.target.value)}
-                            style={smInp} />
+                            onChange={(e) => setField(item.materialName, model, "rateWithGst", e.target.value)}
+                            style={{ ...smInp, background: m.rateWithGst ? "#f0fdf4" : undefined }} />
                         </div>
                         <div style={{ width: 46 }}>
                           <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>GST %</div>
@@ -479,13 +487,6 @@ function MaterialModels() {
                             readOnly={m.fromItemsPricing} title={m.fromItemsPricing ? "From Items Pricing — edit it there" : undefined}
                             onChange={(e) => setField(item.materialName, model, "gst", e.target.value)}
                             style={{ ...smInp, width: 46 }} />
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>Rate+GST</div>
-                          <input type="number" placeholder="0.00" value={m.rateWithGst}
-                            readOnly={m.fromItemsPricing} title={m.fromItemsPricing ? "From Items Pricing — edit it there" : undefined}
-                            onChange={(e) => setField(item.materialName, model, "rateWithGst", e.target.value)}
-                            style={{ ...smInp, background: m.rateWithGst ? "#f0fdf4" : undefined }} />
                         </div>
                       </div>
                     </div>

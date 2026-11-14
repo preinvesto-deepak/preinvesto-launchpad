@@ -11,6 +11,7 @@ import { packSheets, findOversizedPieces } from "../utils/binPack";
 import { TAPE_ITEM } from "../utils/projectRows";
 import { materialCalcGlobals } from "../utils/materialCalc";
 import { globalKerfMm } from "../utils/kerf";
+import { resolveInclRate } from "../utils/modelRates";
 import { GROUP_OPTIONS } from "../data/priceData";
 import ServiceFilter from "../components/ServiceFilter";
 import { ALL_SERVICES, WARDROBE_SERVICE, SERVICES, matchesService, serviceTagOf } from "../utils/services";
@@ -2667,10 +2668,7 @@ function TemplateMaster() {
                 // template rate if set, else the Items Pricing default rate. Same
                 // resolution the Material Models page and Projects use.
                 const modelRateFor = (material, model) => {
-                  const modelEntry = materialModelRates?.[material]?.[model];
-                  if (modelEntry?.rate) return Number(modelEntry.rate);
-                  const rateData = (prices || []).find((p) => p.materialName === material);
-                  return rateData ? Number(rateData.rate) : 0;
+                  return resolveInclRate(materialModelRates?.[material]?.[model], material, prices);
                 };
                 const modelTotals = { economy: 0, standard: 0, premium: 0 };
                 summaryRows.forEach((row) => {
@@ -2734,17 +2732,7 @@ function TemplateMaster() {
   style={{ width: 50, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
 />
 <span style={{ fontSize: 12, color: "#6b7280" }}>(rounded up; 0 = type tapes per box) · set in App Settings</span>
-                            <span style={{ width: 1, alignSelf: "stretch", background: "#e5e7eb", margin: "0 4px" }} />
-                            <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>GST</span>
-                            <input
-                              type="number" step="1" min={0}
-                              value={gstPercent}
-                              disabled
-                              onChange={(e) => setGstPercent(e.target.value)}
-                              onBlur={(e) => setGstPercent(Math.max(0, Number(e.target.value) || 0))}
-                              style={{ width: 50, fontSize: 12, padding: "3px 6px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 5 }}
-                            />
-                            <span style={{ fontSize: 12, color: "#6b7280" }}>%</span>
+                            
                           </div>
                           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 900 }}>
                             <thead>
@@ -2760,7 +2748,7 @@ function TemplateMaster() {
                               <tr>
                                 {MODEL_KEYS.map((model) => (
                                   <Fragment key={model}>
-                                    <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.15)" }}>Rate</th>
+                                    <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.15)" }}>Rate +GST</th>
                                     <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Amount</th>
                                   </Fragment>
                                 ))}
@@ -2792,7 +2780,7 @@ function TemplateMaster() {
                                 </tr>
                               ))}
                               <tr style={{ background: "#1e3a5f" }}>
-                                <td colSpan={2} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Total (Excl. GST)</td>
+                                <td colSpan={2} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Total (Incl. GST)</td>
                                 <td style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 12 }}>
                                   {summaryRows.reduce((s, r) => s + r.requiredQty, 0)}
                                 </td>
@@ -2803,32 +2791,13 @@ function TemplateMaster() {
                                   </td>
                                 ))}
                               </tr>
-                              <tr style={{ background: "#334e68" }}>
-                                <td colSpan={2} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Total (Incl. GST {gstPercent}%)</td>
-                                <td colSpan={2} style={{ padding: "8px 14px" }} />
-                                {MODEL_KEYS.map((model) => (
-                                  <td key={model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 12, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>
-                                    {formatCurrency(modelTotals[model] * (1 + (Number(gstPercent) || 0) / 100))}
-                                  </td>
-                                ))}
-                              </tr>
-                              <tr style={{ background: "#f1f5f9" }}>
+                              <tr style={{ background: "#e5e7eb" }}>
                                 <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 700, color: "#374151", fontSize: 12 }}>
-                                  Sft Cost (Excl. GST) <span style={{ fontWeight: 400, color: "#9ca3af" }}>(Total ÷ {roundTo2(totalAreaSft)} sqft)</span>
+                                  Sft Cost (Incl. GST) <span style={{ fontWeight: 400, color: "#9ca3af" }}>(Total ÷ {roundTo2(totalAreaSft)} sqft)</span>
                                 </td>
                                 {MODEL_KEYS.map((model) => (
                                   <td key={model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: MODEL_COLORS[model], fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>
                                     {totalAreaSft > 0 ? `${formatCurrency(modelTotals[model] / totalAreaSft)}/sqft` : <span style={{ color: "#d1d5db" }}>—</span>}
-                                  </td>
-                                ))}
-                              </tr>
-                              <tr style={{ background: "#e5e7eb" }}>
-                                <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 700, color: "#374151", fontSize: 12 }}>
-                                  Sft Cost (Incl. GST {gstPercent}%) <span style={{ fontWeight: 400, color: "#9ca3af" }}>(Total ÷ {roundTo2(totalAreaSft)} sqft)</span>
-                                </td>
-                                {MODEL_KEYS.map((model) => (
-                                  <td key={model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: MODEL_COLORS[model], fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>
-                                    {totalAreaSft > 0 ? `${formatCurrency((modelTotals[model] * (1 + (Number(gstPercent) || 0) / 100)) / totalAreaSft)}/sqft` : <span style={{ color: "#d1d5db" }}>—</span>}
                                   </td>
                                 ))}
                               </tr>

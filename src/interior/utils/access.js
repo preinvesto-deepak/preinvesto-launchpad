@@ -86,6 +86,34 @@ export const setProjectLock = (lock) => { projectLock = lock; };
 
 export const anyEdit = (access) => isOwner(access) || SCREENS.some((s) => can(access, s.key, "edit"));
 
+// What the owner sees when previewing as a group or a person (see Impersonate).
+export const groupImpersonation = (g) => ({
+  kind: "group", label: g.name, groupName: g.name,
+  access: { owner: false, perms: g.perms || {}, scope: Array.isArray(g.scope) ? g.scope.map(String) : null, groupName: g.name },
+});
+export const personImpersonation = (e, groups) => {
+  const g = (groups || []).find((x) => x.id === e.groupId);
+  return g ? { ...groupImpersonation(g), kind: "person", label: e.name } : null;
+};
+
+// The workspace as the server would hand it to that group: screens they can't
+// view come back empty, and a project-limited group only sees its own projects.
+export function previewView(access, data, defaults) {
+  if (isOwner(access)) return data;
+  const out = { ...data };
+  Object.keys(KEY_MODULE).forEach((k) => {
+    if (k in data && !can(access, KEY_MODULE[k], "view")) out[k] = defaults[k];
+  });
+  if (Array.isArray(access.scope)) {
+    const ids = new Set(access.scope.map(String));
+    const names = new Set((Array.isArray(data.projects) ? data.projects : []).filter((p) => ids.has(String(p.id))).map((p) => p.name));
+    if (Array.isArray(out.projects)) out.projects = out.projects.filter((p) => ids.has(String(p.id)));
+    if (Array.isArray(out.subProjects)) out.subProjects = out.subProjects.filter((r) => names.has(r.project));
+    if (Array.isArray(out.dimensions)) out.dimensions = out.dimensions.filter((r) => names.has(r.projectName));
+  }
+  return out;
+}
+
 // True when the employee is limited to some projects instead of all of them.
 export const isScoped = (access) => !isOwner(access) && Array.isArray(access.scope);
 

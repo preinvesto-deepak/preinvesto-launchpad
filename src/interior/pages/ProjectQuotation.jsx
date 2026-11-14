@@ -4,6 +4,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { useAppData } from "../context/AppDataContext";
 import { roundTo2, formatCurrency, mmToFeet } from "../utils/unitConversions";
+import { ownRate } from "../utils/modelRates";
 import { buildRoomRows, buildRoomEdgeBanding, buildRoomHardware, buildRoomCarpenter, buildBoxRows, buildBoxEdgeBanding, buildBoxCarpenterRow } from "../utils/projectRows";
 import { computeSheetCounts } from "../utils/binPack";
 import { kerfFor } from "../utils/kerf";
@@ -68,7 +69,7 @@ function rateFor(material, model, projectObj, prices) {
   const { row, matchedCell, cell } = priceRowFor(material, model, projectObj, prices);
   // Hand-typed cell that matches no Items Pricing row: its own saved base rate
   // (older cells also stored a profit-inflated `rate`, which no longer applies).
-  if (!matchedCell && (cell?.baseRate || cell?.rate)) return Number(cell.baseRate || cell.rate);
+  if (!matchedCell && ownRate(cell)) return ownRate(cell);
   return row ? Number(row.rate) : 0;
 }
 
