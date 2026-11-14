@@ -315,6 +315,7 @@ function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj,
       const discountPercent = mrp > 0 ? ((mrp - rate * gstMult) / mrp) * 100 : 0;
       return {
         material, group: p.group || "Other", unit: p.unit || "", spec: (p.materialSpec || "").trim(),
+        brand: [p.brand, p.modelNumber].map((x) => (x || "").trim()).filter(Boolean).join(" · "),
         warranty: Number(p.warranty) > 0 ? Number(p.warranty) : 0,
         // `rate` is shown in the "Your Rate" column, so it's GST-inclusive
         // like MRP and the amounts (qty × rate = Your Amount).
@@ -323,7 +324,7 @@ function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj,
       };
     })
     .filter(Boolean)
-    .sort((a, b) => (a.group || "").localeCompare(b.group) || a.material.localeCompare(b.material));
+    .sort((a, b) => specGroupRank(a.group) - specGroupRank(b.group) || (a.group || "").localeCompare(b.group) || a.material.localeCompare(b.material));
   // groupSpan: rows the Group cell merges over (0 = continuation of the group above).
   return list.map((row, i) => {
     if (i > 0 && list[i - 1].group === row.group) return { ...row, groupSpan: 0 };
@@ -333,11 +334,15 @@ function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj,
   });
 }
 
+// Groups come in this order on the Specification page; any others follow, A to Z.
+const SPEC_GROUP_ORDER = ["Wood", "Laminate", "Hinges & Sliders", "Handles"];
+const specGroupRank = (g) => { const i = SPEC_GROUP_ORDER.indexOf(g); return i < 0 ? SPEC_GROUP_ORDER.length : i; };
+
 // Columns of the Specification page (Ply, Laminate and Hardware marked "Show in
 // Quotation"). Each has a tick under its heading to show/hide it in the Quotation.
 const SPEC_COLS = [
-  { k: "group", label: "Group", align: "left" }, { k: "item", label: "Item", align: "left" },
-  { k: "spec", label: "Specification", align: "left" }, { k: "qty", label: "Qty", align: "center" },
+  { k: "group", label: "Group", align: "left" }, { k: "brand", label: "Brand", align: "left" },
+  { k: "item", label: "Item", align: "left" }, { k: "spec", label: "Specification", align: "left" }, { k: "qty", label: "Qty", align: "center" },
   { k: "unit", label: "Unit", align: "center" }, { k: "warranty", label: "Warranty", align: "center" },
   { k: "mrp", label: "MRP (₹)", align: "right" }, { k: "rate", label: "Your Rate (₹)", align: "right" },
   { k: "disc", label: "Discount %", align: "center" }, { k: "mrpAmt", label: "MRP Amount", align: "right" },
@@ -351,6 +356,7 @@ function specText(row, k, { amt, price, dash }) {
   switch (k) {
     case "item": return row.material;
     case "spec": return row.spec || dash;
+    case "brand": return row.brand || dash;
     case "qty": return String(row.qty);
     case "unit": return row.unit || dash;
     case "warranty": return fmtWarranty(row.warranty, dash);
@@ -876,8 +882,8 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
         <p><strong>Scope Excluded:</strong> ${scopeExcluded}</p>
         <p>Validity: ${validityDays} days · Delivery: ${deliveryDays} days · ${termsText}</p>
         <div style="margin-top:40px;display:flex;justify-content:space-between">
-          <div style="width:45%"><p><strong>Customer Acceptance</strong></p><div style="border-top:1px solid #000;margin-top:50px"/></div>
-          <div style="width:45%;text-align:right"><p><strong>Authorized Signatory</strong></p><div style="border-top:1px solid #000;margin-top:50px"/></div>
+          <div style="width:45%"><p><strong>Customer Acceptance</strong></p><div style="border-top:1px solid #000;margin-top:50px"></div></div>
+          <div style="width:45%;text-align:right"><p><strong>Authorized Signatory</strong></p><div style="border-top:1px solid #000;margin-top:50px"></div></div>
         </div>
       </div>
       ${includeHardwareDiscount && !opts.omitHardware && v.hardwareItems.length > 0 ? `
@@ -1602,7 +1608,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
                   </tbody>
                   <tfoot>
                     <tr style={{ background: "#ecfdf5", fontWeight: 700 }}>
-                      <td colSpan={8} style={{ textAlign: "right" }}>Total</td>
+                      <td colSpan={SPEC_COLS.length - SPEC_AMOUNT_KEYS.length} style={{ textAlign: "right" }}>Total</td>
                       <td style={{ textAlign: "right" }}>{formatCurrency(hardwareMrpItems.reduce((s, r) => s + r.mrpAmount, 0))}</td>
                       <td style={{ textAlign: "right" }}>{formatCurrency(hardwareMrpItems.reduce((s, r) => s + r.netAmount, 0))}</td>
                       <td style={{ textAlign: "right", color: "#059669" }}>{formatCurrency(hardwareMrpItems.reduce((s, r) => s + r.savings, 0))}</td>
