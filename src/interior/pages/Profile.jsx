@@ -425,9 +425,17 @@ function Profile() {
           <label style={lbl}>Address</label>
           <textarea style={{ ...inputStyle, resize: "vertical" }} rows={2} value={companyProfile.address || ""} onChange={updateCompany("address")} />
         </div>
-        <div style={{ ...fieldRow, marginBottom: 0 }}>
+        <div style={fieldRow}>
           <label style={lbl}>GSTIN</label>
           <input style={inputStyle} type="text" value={companyProfile.gstin || ""} onChange={updateCompany("gstin")} placeholder="Optional" />
+        </div>
+        <div style={{ ...fieldRow, marginBottom: 0 }}>
+          <label style={lbl}>Payment details (shown on quotations)</label>
+          <textarea
+            style={{ ...inputStyle, resize: "vertical" }} rows={4}
+            value={companyProfile.paymentDetails || ""} onChange={updateCompany("paymentDetails")}
+            placeholder={"Account Name, Bank / Branch, A/C No, IFSC, UPI\nPayment schedule, e.g. 50% advance, 40% on delivery, 10% on handover"}
+          />
         </div>
 
         <p style={{ fontSize: 11, color: "#9ca3af", marginTop: 14, marginBottom: 0 }}>Saved automatically.</p>

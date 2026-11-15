@@ -1,3 +1,4 @@
+import * as XLSX from "xlsx";
 import { useState, useEffect, Fragment } from "react";
 import { resolveInclRate, ownRate, linkedPriceRow } from "../utils/modelRates";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -802,6 +803,43 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
   const grand = totals(visible);
   const pick = (t, mo) => (basis === "incl" ? t[mo].incl : t[mo].excl);
 
+  // Excel export of what the table is showing right now (same service / group /
+  // search / hide-same-priced filters), with rates and amounts incl. GST.
+  const exportExcel = () => {
+    const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    const head1 = ["Group", "Material", "Qty", "UOM"];
+    const head2 = [];
+    if (showRates) {
+      PROJ_MODELS.forEach((mo) => head1.push(PROJ_MODEL_LABELS[mo] + " — Brand", PROJ_MODEL_LABELS[mo] + " — Rate +GST", PROJ_MODEL_LABELS[mo] + " — Amount (incl. GST)"));
+      head1.push("Premium vs Economy (₹)", "Premium vs Economy (%)");
+    }
+    const body = visible.map((row) => {
+      const line = [row.group, row.boxLabel ? `${row.material} — ${row.boxLabel}` : row.material, row.requiredQty, row.unit];
+      if (showRates) {
+        PROJ_MODELS.forEach((mo) => {
+          const c = row.m[mo];
+          line.push(c.brand || "", c.rate > 0 ? r2(c.rate * (1 + c.gst / 100)) : "", r2(c.inclAmount));
+        });
+        const eco = row.m.economy.inclAmount, prem = row.m.premium.inclAmount;
+        line.push(r2(prem - eco), eco > 0 ? r2(((prem - eco) / eco) * 100) : "");
+      }
+      return line;
+    });
+    const rows = [head1, ...body];
+    if (showRates && visible.length) {
+      const tot = ["Grand Total (incl. GST)", "", "", ""];
+      PROJ_MODELS.forEach((mo) => tot.push("", "", r2(grand[mo].incl)));
+      tot.push(r2(grand.premium.incl - grand.economy.incl), grand.economy.incl > 0 ? r2(((grand.premium.incl - grand.economy.incl) / grand.economy.incl) * 100) : "");
+      rows.push(tot);
+    }
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = head1.map((h, i) => ({ wch: i === 1 ? 32 : i === 0 ? 18 : Math.max(10, Math.min(24, h.length)) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Material Analysis");
+    const safe = (project.name || "Project").replace(/[^\w-]+/g, "_");
+    XLSX.writeFile(wb, `Material_Analysis_${safe}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
   // Typing a rate keeps the cell's brand/GST; it only applies to a rate that is
   // not tied to an Items Pricing row.
   const setCell = (material, model, patch) => {
@@ -941,9 +979,12 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
           </>
         )}
         <span style={{ fontSize: 12, color: "#9ca3af" }}>{visible.length} item{visible.length !== 1 ? "s" : ""}</span>
-        {showRates && canEdit && (
-          <button onClick={() => setResetConfirm(true)} style={{ marginLeft: "auto", background: "#dc2626", padding: "6px 12px", fontSize: 12 }}>↺ Reset to Global Template</button>
-        )}
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <button onClick={exportExcel} disabled={visible.length === 0} title="Download what is shown in this table as an Excel file" style={{ background: "#059669", padding: "6px 12px", fontSize: 12, opacity: visible.length === 0 ? 0.5 : 1 }}>⬇ Export Excel</button>
+          {showRates && canEdit && (
+            <button onClick={() => setResetConfirm(true)} style={{ background: "#dc2626", padding: "6px 12px", fontSize: 12 }}>↺ Reset to Global Template</button>
+          )}
+        </div>
       </div>
       {showRates && canEdit && !globalHasRates && (
         <div style={{ fontSize: 11, color: "#854d0e", background: "#fef9c3", border: "1px solid #fde047", borderRadius: 6, padding: "4px 10px", marginBottom: 10 }}>

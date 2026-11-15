@@ -213,7 +213,7 @@ function MaterialModels() {
     // Nothing typed and no brand picked: follow the material's Items Pricing row.
     const row = live || (ownRate(cell) ? null : prices.find((p) => p.materialName === materialName));
     if (!row) return cell;
-    return fromRow(cell, row);
+    return { ...fromRow(cell, row), isDefault: !live };
   };
   const fromRow = (cell, live) => {
     const rate = live.rate > 0 ? String(live.rate) : "";
@@ -441,6 +441,9 @@ function MaterialModels() {
 
       {/* ── Items ─────────────────────────────────────────────────────────── */}
       <div style={{ padding: "0 24px 40px" }}>
+        <p style={{ margin: "10px 0 4px", fontSize: 12, color: "#6b7280" }}>
+          <i style={{ color: "#9ca3af", fontWeight: 600 }}>Grey italic</i> — no brand set for that model, so the first Items Pricing row is used. Pick one with 🔍 to set it.
+        </p>
         {displayItems.length === 0 ? (
           <p style={{ color: "#6b7280", textAlign: "center", padding: 40 }}>No items found.</p>
         ) : (
@@ -465,7 +468,8 @@ function MaterialModels() {
                         <input
                           type="text" placeholder="Brand" value={m.brand}
                           onChange={(e) => setField(item.materialName, model, "brand", e.target.value)}
-                          style={{ ...inp, color: MODEL_COLORS[model], fontWeight: 600, flex: 1 }}
+                          title={m.isDefault ? "No brand set for this model — using the first Items Pricing row" : undefined}
+                          style={{ ...inp, color: m.isDefault ? "#9ca3af" : MODEL_COLORS[model], fontStyle: m.isDefault ? "italic" : "normal", fontWeight: 600, flex: 1 }}
                         />
                         <button
                           title="Pick from Items Pricing"

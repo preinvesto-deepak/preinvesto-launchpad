@@ -427,6 +427,9 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
   const [validityDays, setValidityDays] = useState(7);
   const [advancePercent, setAdvancePercent] = useState(50);
   const [deliveryDays, setDeliveryDays] = useState(30);
+  // Bank / UPI details and the payment schedule shown on the quotation. Defaults to
+  // the account's Company Details; each project can override it. Empty = not shown.
+  const [paymentDetails, setPaymentDetails] = useState("");
   const [scopeIncluded, setScopeIncluded] = useState(
     "Material supply, fabrication, delivery, and installation for listed items."
   );
@@ -514,6 +517,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
     setValidityDays(saved.validityDays ?? 7);
     setAdvancePercent(saved.advancePercent ?? 50);
     setDeliveryDays(saved.deliveryDays ?? 30);
+    setPaymentDetails(saved.paymentDetails ?? companyProfile.paymentDetails ?? "");
     setScopeIncluded(saved.scopeIncluded ?? "Material supply, fabrication, delivery, and installation for listed items.");
     setScopeExcluded(saved.scopeExcluded ?? "Civil, electrical shifting, plumbing, painting, and site rectification unless specified.");
     setTermsText(saved.termsText ?? "Final site measurements and finish selection to be reconfirmed before production.");
@@ -878,13 +882,8 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
           ${all.length > 1 ? `<tfoot><tr style="background:#f3f4f6"><td colspan="${beforeAmountCols()}" style="text-align:right"><strong>${t.title} Sub Total (Incl. GST)</strong></td><td style="text-align:right"><strong>${fmtCurrency(tableTotal(t))}</strong></td></tr></tfoot>` : ""}
         </table>
         `).join("")}
-        <p><strong>Scope Included:</strong> ${scopeIncluded}</p>
-        <p><strong>Scope Excluded:</strong> ${scopeExcluded}</p>
-        <p>Validity: ${validityDays} days · Delivery: ${deliveryDays} days · ${termsText}</p>
-        <div style="margin-top:40px;display:flex;justify-content:space-between">
-          <div style="width:45%"><p><strong>Customer Acceptance</strong></p><div style="border-top:1px solid #000;margin-top:50px"></div></div>
-          <div style="width:45%;text-align:right"><p><strong>Authorized Signatory</strong></p><div style="border-top:1px solid #000;margin-top:50px"></div></div>
-        </div>
+        <p style="white-space:pre-line"><strong>Scope Included:</strong> ${scopeIncluded}</p>
+        <p style="white-space:pre-line"><strong>Scope Excluded:</strong> ${scopeExcluded}</p>
       </div>
       ${includeHardwareDiscount && !opts.omitHardware && v.hardwareItems.length > 0 ? `
       <div style="page-break-before:always;padding:30px;font-family:sans-serif">
@@ -957,7 +956,21 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
               .join("")}
           </tbody>
         </table>
-      </div>` : ""}`;
+      </div>` : ""}
+      <div style="page-break-before:always;padding:30px;font-family:sans-serif">
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:4px">
+          ${companyProfile.logo ? `<img src="${companyProfile.logo}" alt="" style="width:72px;height:72px;object-fit:contain;flex-shrink:0" />` : ""}
+          <h2 style="margin:0">${companyName}</h2>
+        </div>
+        <h3 style="margin:12px 0 6px">Terms &amp; Conditions</h3>
+        <p style="margin-bottom:2px">Validity: ${validityDays} days · Delivery: ${deliveryDays} days</p>
+        ${(termsText || "").trim() ? `<p style="white-space:pre-line;margin-top:2px">${String(termsText).trim().replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>` : ""}
+        ${paymentDetails.trim() ? `<h3 style="margin:16px 0 4px">Payment Details</h3><p style="white-space:pre-line;margin:0">${paymentDetails.trim().replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>` : ""}
+        <div style="margin-top:40px;display:flex;justify-content:space-between">
+          <div style="width:45%"><p><strong>Customer Acceptance</strong></p><div style="border-top:1px solid #000;margin-top:50px"></div></div>
+          <div style="width:45%;text-align:right"><p><strong>Authorized Signatory</strong></p><div style="border-top:1px solid #000;margin-top:50px"></div></div>
+        </div>
+      </div>`;
   };
 
   // Shows the print-ready HTML in the in-page preview modal (an iframe, not
@@ -1137,15 +1150,6 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
     doc.text(scopeIncLines, margin, y); y += scopeIncLines.length * 4 + 2;
     const scopeExcLines = doc.splitTextToSize(`Scope Excluded: ${scopeExcluded}`, wrapW);
     doc.text(scopeExcLines, margin, y); y += scopeExcLines.length * 4 + 2;
-    const termsLines = doc.splitTextToSize(`Validity: ${validityDays} days . Delivery: ${deliveryDays} days . ${termsText}`, wrapW);
-    doc.text(termsLines, margin, y); y += termsLines.length * 4 + 14;
-
-    if (y > 270) { doc.addPage(); y = 20; }
-    doc.setFontSize(9);
-    doc.text("Customer Acceptance", margin, y);
-    doc.line(margin, y + 14, margin + 70, y + 14);
-    doc.text("Authorized Signatory", pageW - margin - 70, y);
-    doc.line(pageW - margin - 70, y + 14, pageW - margin, y + 14);
 
     if (includeHardwareDiscount && v.hardwareItems.length > 0) {
       doc.addPage();
@@ -1186,6 +1190,27 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
         theme: "grid",
       });
     }
+
+    // Last page: Terms & Conditions, Payment Details and the signatures.
+    doc.addPage();
+    doc.setFontSize(14);
+    doc.text("Terms & Conditions", margin, 16);
+    doc.setFontSize(9);
+    let ty = 26;
+    const termsLines = doc.splitTextToSize(`Validity: ${validityDays} days . Delivery: ${deliveryDays} days${(termsText || "").trim() ? "\n" + String(termsText).trim() : ""}`, pageW - margin * 2);
+    doc.text(termsLines, margin, ty); ty += termsLines.length * 4 + 6;
+    if (paymentDetails.trim()) {
+      const payLines = doc.splitTextToSize(paymentDetails.trim(), pageW - margin * 2);
+      doc.setFont(undefined, "bold"); doc.text("Payment Details", margin, ty); doc.setFont(undefined, "normal");
+      ty += 5;
+      doc.text(payLines, margin, ty); ty += payLines.length * 4 + 6;
+    }
+    ty += 24;
+    if (ty > 270) { doc.addPage(); ty = 30; }
+    doc.text("Customer Acceptance", margin, ty);
+    doc.line(margin, ty + 14, margin + 70, ty + 14);
+    doc.text("Authorized Signatory", pageW - margin - 70, ty);
+    doc.line(pageW - margin - 70, ty + 14, pageW - margin, ty + 14);
 
     const fileSafe = (selectedProject || "Quotation").replace(/[^\w-]+/g, "_");
     doc.save(`Quotation_${fileSafe}${qtnSuffix}_${quotationDate}.pdf`);
@@ -1280,7 +1305,17 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
           <h4 style={{ margin: "0 0 10px" }}>Scope & Terms Text</h4>
           <textarea placeholder="Included Scope" value={scopeIncluded} onChange={(e) => { setScopeIncluded(e.target.value); persistField("scopeIncluded", e.target.value); }} rows="2" style={{ width: "100%", marginBottom: 8 }} />
           <textarea placeholder="Excluded Scope" value={scopeExcluded} onChange={(e) => { setScopeExcluded(e.target.value); persistField("scopeExcluded", e.target.value); }} rows="2" style={{ width: "100%", marginBottom: 8 }} />
-          <textarea placeholder="Terms Text" value={termsText} onChange={(e) => { setTermsText(e.target.value); persistField("termsText", e.target.value); }} rows="2" style={{ width: "100%" }} />
+          <textarea placeholder="Terms Text" value={termsText} onChange={(e) => { setTermsText(e.target.value); persistField("termsText", e.target.value); }} rows="2" style={{ width: "100%", marginBottom: 8 }} />
+          <h4 style={{ margin: "8px 0 6px" }}>Payment Details</h4>
+          <textarea
+            placeholder={"Shown on the quotation, e.g.\nAccount Name: ...\nBank / Branch: ...\nA/C No: ...   IFSC: ...\nUPI: ...\nPayment: 50% advance, 40% on material delivery, 10% on handover"}
+            value={paymentDetails}
+            onChange={(e) => { setPaymentDetails(e.target.value); persistField("paymentDetails", e.target.value); }}
+            rows="5" style={{ width: "100%" }}
+          />
+          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+            Printed on the quotation after the Terms. Leave empty to hide it. Default comes from your <Link to="/interior/profile" style={{ color: "#2563eb" }}>Company Details</Link>.
+          </div>
         </div>
         </div>
         )}
@@ -1674,13 +1709,21 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
 
             <div style={{ marginBottom: 16 }}>
               <h3>Scope of Work</h3>
-              <p><strong>Included:</strong> {scopeIncluded || "-"}</p>
-              <p><strong>Excluded:</strong> {scopeExcluded || "-"}</p>
+              <p style={{ whiteSpace: "pre-line" }}><strong>Included:</strong> {scopeIncluded || "-"}</p>
+              <p style={{ whiteSpace: "pre-line" }}><strong>Excluded:</strong> {scopeExcluded || "-"}</p>
 
+              <div style={{ pageBreakBefore: "always" }} />
               <h3>Terms & Conditions</h3>
               <p>Validity: {validityDays} days from quotation date</p>
               <p>Delivery: {deliveryDays} days from advance and final measurements</p>
-              {termsText && <p>{termsText}</p>}
+              {termsText && <p style={{ whiteSpace: "pre-line" }}>{termsText}</p>}
+
+              {paymentDetails.trim() && (
+                <>
+                  <h3>Payment Details</h3>
+                  <p style={{ whiteSpace: "pre-line" }}>{paymentDetails.trim()}</p>
+                </>
+              )}
             </div>
 
             <div style={{ marginTop: 40, display: "flex", justifyContent: "space-between", gap: 30 }}>
