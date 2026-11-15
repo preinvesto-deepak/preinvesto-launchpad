@@ -180,6 +180,24 @@ export function fevicolQty(room, prices, sheetCounts) {
   return Math.round(sheets * (Number(calcFor(room).fevicolMultiplier) || 0) * 100) / 100;
 }
 
+/**
+ * A "set" is an Items Pricing entry with `components` ([{ materialName, qty }]) —
+ * e.g. Hettich Bottle Pullout = pullout + channel clips + telescopic channel.
+ * The set itself carries no price: adding it to a box adds each part, priced
+ * and counted on its own. Returns the parts as [{ materialName, qty }]; an
+ * ordinary item comes back unchanged as a single entry.
+ */
+export function setComponentsOf(name, prices) {
+  const p = (prices || []).find((x) => x.materialName === name && Array.isArray(x.components) && x.components.length);
+  return p ? p.components : null;
+}
+export function expandSetItem(name, qty, prices, seen = []) {
+  const comps = seen.length < 4 && !seen.includes(name) ? setComponentsOf(name, prices) : null;
+  if (!comps) return [{ materialName: name, qty }];
+  return comps.flatMap((c) =>
+    c.materialName ? expandSetItem(c.materialName, qty * (Number(c.qty) || 0), prices, [...seen, name]) : []);
+}
+
 export function buildRoomHardware(room, prices, sheetCounts) {
   const totals = {};
   const tapeDivisor = tapeDivisorOf(room);
@@ -191,7 +209,10 @@ export function buildRoomHardware(room, prices, sheetCounts) {
       if (tapeOn && item.materialName === TAPE_ITEM) return; // counted from edge band below
       const qty = (Number(item.qty) || 0) + (Number(item.extra) || 0);
       if (!qty) return;
-      totals[item.materialName] = (totals[item.materialName] || 0) + qty;
+      expandSetItem(item.materialName, qty, prices).forEach((leaf) => {
+        if (!leaf.qty) return;
+        totals[leaf.materialName] = (totals[leaf.materialName] || 0) + leaf.qty;
+      });
     });
   });
   if (tapeOn) {

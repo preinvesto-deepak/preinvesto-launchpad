@@ -5,7 +5,7 @@ import autoTable from "jspdf-autotable";
 import { useAppData } from "../context/AppDataContext";
 import { roundTo2, formatCurrency, mmToFeet } from "../utils/unitConversions";
 import { ownRate } from "../utils/modelRates";
-import { buildRoomRows, buildRoomEdgeBanding, buildRoomHardware, buildRoomCarpenter, buildBoxRows, buildBoxEdgeBanding, buildBoxCarpenterRow } from "../utils/projectRows";
+import { buildRoomRows, buildRoomEdgeBanding, buildRoomHardware, buildRoomCarpenter, buildBoxRows, buildBoxEdgeBanding, buildBoxCarpenterRow, expandSetItem } from "../utils/projectRows";
 import { computeSheetCounts } from "../utils/binPack";
 import { kerfFor } from "../utils/kerf";
 import ShareWithCustomerModal from "../components/ShareWithCustomerModal";
@@ -190,11 +190,13 @@ function computeBoxOwnCost(box, room, model, projectObj, prices, materialStockSe
     if (!item.materialName) return;
     const qty = (Number(item.qty) || 0) + (Number(item.extra) || 0);
     if (!qty) return;
-    const amt = qty * rate(item.materialName);
-    const g = priceGroupOf(item.materialName);
-    if (g === "Transportation") transportationAmount += amt;
-    else if (g === "Carpenter") manualCarpenterAmount += amt;
-    else hardwareAmount += amt;
+    expandSetItem(item.materialName, qty, prices).forEach((leaf) => {
+      const amt = leaf.qty * rate(leaf.materialName);
+      const g = priceGroupOf(leaf.materialName);
+      if (g === "Transportation") transportationAmount += amt;
+      else if (g === "Carpenter") manualCarpenterAmount += amt;
+      else hardwareAmount += amt;
+    });
   });
 
   const carpRow = buildBoxCarpenterRow(box, Number(room.carpenterExtraSft) || 0);

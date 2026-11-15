@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { useAppData } from "../context/AppDataContext";
 import { priceList, GROUP_OPTIONS, UNIT_OPTIONS } from "../data/priceData";
 import ServiceFilter from "../components/ServiceFilter";
-import { ALL_SERVICES, serviceForGroup } from "../utils/services";
+import { ALL_SERVICES, serviceForGroup, WARDROBE_SERVICE, BASE_GROUPS, LOCKED_GROUPS } from "../utils/services";
 
 const emptyForm = {
   group: "", materialName: "", materialSpec: "", unit: "",
@@ -19,6 +19,11 @@ const emptyForm = {
   // Manufacturer/supplier warranty, in years (blank = none). Shown next to the
   // item in the Project Quotation when its "show in Project Quotation" box is ticked.
   warranty: "",
+  // Dealer / manufacturer order code (kept for ordering from the dealer).
+  partNumber: "",
+  // A "set" has no price of its own: it stands for several other items
+  // (components: [{ materialName, qty }]) that are added together.
+  isSet: false, components: [],
 };
 
 // Standard panel thicknesses (mm) used to match a Ply material to a
@@ -134,6 +139,8 @@ function ImageManager({ images, onChange }) {
 function ItemFormModal({ initial, onSave, onClose, allPrices }) {
   const [form, setForm] = useState(() => {
     const f = { ...emptyForm, ...(initial || {}), images: initial?.images || [] };
+    f.components = (initial?.components || []).map((c) => ({ ...c }));
+    f.isSet = f.components.length > 0 || !!initial?.isSet;
     // Wood: MRP SFT Rate is just MRP ÷ sheet sqft, shown for entry/reading.
     const sq = (Number(f.woodDimW) || 0) * (Number(f.woodDimH) || 0);
     if (f.discountPercent === "" || f.discountPercent == null) f.discountPercent = "0"; // no discount unless one is entered
@@ -309,11 +316,21 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
       alert("Group, Name and Unit are required.");
       return;
     }
-    if (rateExceedsMrp) {
+    const parts = form.isSet
+      ? (form.components || []).filter((c) => c.materialName && Number(c.qty) > 0).map((c) => ({ materialName: c.materialName, qty: Number(c.qty) }))
+      : [];
+    if (form.isSet && parts.length === 0) {
+      alert("Add at least one item (with a quantity) to this set, or untick \"This is a set\".");
+      return;
+    }
+    if (!form.isSet && rateExceedsMrp) {
       alert("Rate with GST can't be more than MRP.");
       return;
     }
     onSave({
+      partNumber: (form.partNumber || "").trim(),
+      components: parts,
+      isSet: form.isSet && parts.length > 0,
       group: form.group, materialName: form.materialName, materialSpec: form.materialSpec,
       unit: form.unit, brand: form.brand, modelNumber: form.modelNumber,
       rate: Number(form.rate) || 0, gst: Number(form.gst) || 0,
@@ -451,6 +468,10 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
             <input style={inp} type="text" placeholder="e.g. BWR-710" value={form.modelNumber} onChange={set("modelNumber")} />
           </div>
           <div>
+            <label style={lbl}>Part No. (for dealer orders)</label>
+            <input style={inp} type="text" placeholder="e.g. 9246 305" value={form.partNumber || ""} onChange={set("partNumber")} />
+          </div>
+          <div>
             <label style={lbl}>Warranty (Years)</label>
             <input style={inp} type="number" min={0} step="0.5" placeholder="e.g. 5" value={form.warranty} onChange={set("warranty")} />
           </div>
@@ -498,7 +519,51 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
             </div>
           )}
 
+          {/* Set (kit of several items) */}
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#374151", cursor: "pointer", fontWeight: 600 }}>
+              <input
+                type="checkbox" checked={!!form.isSet}
+                onChange={(e) => setForm((f) => ({ ...f, isSet: e.target.checked, components: e.target.checked && !(f.components || []).length ? [{ materialName: "", qty: 1 }] : f.components }))}
+                style={{ width: 15, height: 15, cursor: "pointer" }}
+              />
+              This is a set — it adds several other items together
+            </label>
+            {form.isSet && (
+              <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "12px 14px", marginTop: 8 }}>
+                <div style={{ fontSize: 11, color: "#1e40af", marginBottom: 8 }}>
+                  Choose this one item in a project and every part below is added with its own quantity, brand, rate and part number — nothing is priced on the set itself.
+                </div>
+                {(form.components || []).map((c, ci) => (
+                  <div key={ci} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+                    <select
+                      value={c.materialName}
+                      onChange={(e) => setForm((f) => ({ ...f, components: f.components.map((x, xi) => xi === ci ? { ...x, materialName: e.target.value } : x) }))}
+                      style={{ ...inp, flex: 1 }}
+                    >
+                      <option value="">Select part…</option>
+                      {Array.from(new Map((allPrices || []).filter((p) => p.materialName && p.materialName !== form.materialName).map((p) => [p.materialName, p])).values())
+                        .sort((a, b) => (a.group || "").localeCompare(b.group || "") || a.materialName.localeCompare(b.materialName))
+                        .map((p) => <option key={p.materialName} value={p.materialName}>{(p.group ? p.group + " — " : "") + p.materialName}</option>)}
+                    </select>
+                    <span style={{ fontSize: 12, color: "#6b7280" }}>Qty</span>
+                    <input
+                      type="number" min={0} step="any" value={c.qty}
+                      onChange={(e) => setForm((f) => ({ ...f, components: f.components.map((x, xi) => xi === ci ? { ...x, qty: e.target.value } : x) }))}
+                      style={{ ...inp, width: 70 }}
+                    />
+                    <button type="button" onClick={() => setForm((f) => ({ ...f, components: f.components.filter((_, xi) => xi !== ci) }))}
+                      style={{ background: "none", color: "#dc2626", border: "none", fontSize: 15, cursor: "pointer", padding: "0 4px" }} title="Remove part">✕</button>
+                  </div>
+                ))}
+                <button type="button" onClick={() => setForm((f) => ({ ...f, components: [...(f.components || []), { materialName: "", qty: 1 }] }))}
+                  style={{ background: "#fff", color: "#2563eb", border: "1px dashed #93c5fd", padding: "4px 12px", fontSize: 12 }}>+ Add part</button>
+              </div>
+            )}
+          </div>
+
           {/* Pricing */}
+          {!form.isSet && (
           <div style={{ gridColumn: "1 / -1" }}>
             <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: "12px 14px" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>
@@ -574,6 +639,7 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
               </label>
             </div>
           </div>
+          )}
 
           {/* Images */}
           <div style={{ gridColumn: "1 / -1", borderTop: "1px solid #f3f4f6", paddingTop: 14 }}>
@@ -647,6 +713,8 @@ function ItemDetailModal({ item, onClose, onEdit }) {
           {row("Unit", item.unit)}
           {row("Brand", item.brand)}
           {row("Model / Code", item.modelNumber)}
+          {row("Part No.", item.partNumber)}
+          {(item.components || []).length > 0 && row("Set contains", item.components.map((c) => c.qty + " × " + c.materialName).join(", "))}
           {Number(item.warranty) > 0 && row("Warranty", `${item.warranty} year${Number(item.warranty) === 1 ? "" : "s"}`)}
           {row("Ply Thickness", item.plyThickness ? `${item.plyThickness} mm` : "")}
           {row("Suitable Ply Thickness", (item.suitableThickness || []).length ? item.suitableThickness.map((t) => `${t}mm`).join(", ") : "")}
@@ -682,7 +750,10 @@ function Thumb({ images }) {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 function ItemsPricing() {
-  const { prices, setPrices, renamePrice } = useAppData();
+  const { prices, setPrices, renamePrice, companyProfile, setCompanyProfile } = useAppData();
+  const [editingGroup, setEditingGroup] = useState(null);
+  const [groupDraft, setGroupDraft] = useState("");
+  const cancelRename = useRef(false);
 
   const [filterGroup, setFilterGroup] = useState("All");
   const [filterService, setFilterService] = useState("All");
@@ -694,6 +765,29 @@ function ItemsPricing() {
   const [modalItem, setModalItem] = useState(null);
   const [viewItem, setViewItem] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+  // Double-click a group tab to rename it: every item in the group moves to the
+  // new name. Groups the calculations rely on by name (and a service's own
+  // group) stay as they are.
+  const startRename = (g) => {
+    if (LOCKED_GROUPS.includes(g)) { alert("\"" + g + "\" is used by the sheet, edge band, carpenter and transport calculations, so it can't be renamed."); return; }
+    if (serviceForGroup(g) !== WARDROBE_SERVICE) { alert("\"" + g + "\" belongs to a service — rename the service instead."); return; }
+    cancelRename.current = false; setEditingGroup(g); setGroupDraft(g);
+  };
+  const commitRename = () => {
+    if (cancelRename.current) { cancelRename.current = false; setEditingGroup(null); return; }
+    const old = editingGroup, neu = groupDraft.trim();
+    setEditingGroup(null);
+    if (!old || !neu || neu === old) return;
+    const taken = [...GROUP_OPTIONS, ...prices.map((p) => p.group || p.category || "")].some((x) => x && x !== old && x.toLowerCase() === neu.toLowerCase());
+    if (taken) { alert("A group called \"" + neu + "\" already exists."); return; }
+    setPrices((prev) => prev.map((p) => (p.group || p.category || "") === old ? { ...p, group: neu } : p));
+    // a shipped group stays recognisable after a reload via the profile's rename map
+    const map = { ...(companyProfile?.renamedGroups || {}) };
+    const key = Object.keys(map).find((k) => map[k] === old) || (BASE_GROUPS.includes(old) ? old : null);
+    if (key) { map[key] = neu; setCompanyProfile((c) => ({ ...c, renamedGroups: map })); }
+    if (filterGroup === old) setFilterGroup(neu);
+  };
 
   const openAdd = () => setModalItem({});
   const openEdit = (item) => setModalItem({
@@ -846,8 +940,8 @@ function ItemsPricing() {
   })();
 
   const TABLE_HEADERS = sortBy === "name"
-    ? ["", "Brand", "Spec", "Unit", "Model / Code", "Warranty", "MRP (₹)", "Rate (₹)", "GST %", "Rate+GST (₹)", "Quote", ""]
-    : ["", "Name", "Spec", "Unit", "Model / Code", "Warranty", "MRP (₹)", "Rate (₹)", "GST %", "Rate+GST (₹)", "Quote", ""];
+    ? ["", "Brand", "Spec", "Unit", "Model / Code", "Part No.", "Warranty", "MRP (₹)", "Rate (₹)", "GST %", "Rate+GST (₹)", "Quote", ""]
+    : ["", "Name", "Spec", "Unit", "Model / Code", "Part No.", "Warranty", "MRP (₹)", "Rate (₹)", "GST %", "Rate+GST (₹)", "Quote", ""];
 
   return (
     <div style={{ margin: "0 -24px -24px -24px", display: "flex", flexDirection: "column" }}>
@@ -870,8 +964,20 @@ function ItemsPricing() {
           {allGroups.map((g) => {
             const active = filterGroup === g;
             const count = g === "All" ? prices.filter((p) => inService(p.group || p.category || "")).length : prices.filter((p) => (p.group || p.category) === g).length;
+            if (editingGroup === g) return (
+              <input
+                key={g} autoFocus value={groupDraft}
+                onChange={(e) => setGroupDraft(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); else if (e.key === "Escape") { cancelRename.current = true; setEditingGroup(null); } }}
+                style={{ padding: "5px 10px", fontSize: 12, fontWeight: 700, border: "2px solid #2563eb", borderRadius: 6, marginBottom: 4, width: Math.max(90, groupDraft.length * 8 + 30) }}
+              />
+            );
             return (
-              <button key={g} onClick={() => setFilterGroup(g)} style={{
+              <button key={g} onClick={() => setFilterGroup(g)}
+                onDoubleClick={g === "All" ? undefined : () => startRename(g)}
+                title={g === "All" ? undefined : "Double-click to rename this group"}
+                style={{
                 padding: "7px 14px", fontSize: 12, fontWeight: active ? 700 : 500,
                 border: "none", borderBottom: active ? "3px solid #2563eb" : "3px solid transparent",
                 borderRadius: "6px 6px 0 0", background: "transparent",
@@ -942,7 +1048,7 @@ function ItemsPricing() {
                   <table cellPadding="0" cellSpacing="0" width="100%" style={{ borderCollapse: "collapse", tableLayout: "fixed", border: "1px solid #e5e7eb", borderTop: "none", background: "#fff" }}>
                     {/* Fixed widths so every brand block lines its columns up with the others */}
                     <colgroup>
-                      {[56, "18%", "16%", 72, "12%", 84, 92, 92, 66, 112, 64, 176].map((w, ci) => <col key={ci} style={{ width: w }} />)}
+                      {[56, "17%", "15%", 72, "11%", "10%", 84, 92, 92, 66, 112, 64, 176].map((w, ci) => <col key={ci} style={{ width: w }} />)}
                     </colgroup>
                     <thead>
                       <tr style={{ background: "#f9fafb" }}>
@@ -962,9 +1068,15 @@ function ItemsPricing() {
                             ) : (
                               <td onClick={() => setViewItem(item)} style={{ padding: "7px 10px", fontSize: 13, fontWeight: 500, color: "#2563eb", cursor: "pointer", textDecoration: "underline" }}>{item.materialName}</td>
                             )}
-                            <td style={{ padding: "7px 10px", fontSize: 12, color: "#6b7280" }}>{item.materialSpec || "—"}</td>
+                            <td style={{ padding: "7px 10px", fontSize: 12, color: "#6b7280" }}>
+                              {(item.components || []).length > 0 && (
+                                <span title={item.components.map((c) => c.qty + " × " + c.materialName).join(" + ")} style={{ fontSize: 10, fontWeight: 700, color: "#1d4ed8", background: "#dbeafe", borderRadius: 4, padding: "1px 6px", marginRight: 6 }}>SET · {item.components.length} parts</span>
+                              )}
+                              {item.materialSpec || ((item.components || []).length > 0 ? "" : "—")}
+                            </td>
                             <td style={{ padding: "7px 10px", fontSize: 13 }}>{item.unit}</td>
                             <td style={{ padding: "7px 10px", fontSize: 12, color: "#6b7280" }}>{item.modelNumber || "—"}</td>
+                            <td style={{ padding: "7px 10px", fontSize: 12, color: "#6b7280", wordBreak: "break-all" }}>{item.partNumber || <span style={{ color: "#d1d5db" }}>—</span>}</td>
                             <td style={{ padding: "7px 10px", fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>
                               {Number(item.warranty) > 0 ? `${item.warranty} yr${Number(item.warranty) === 1 ? "" : "s"}` : <span style={{ color: "#d1d5db" }}>—</span>}
                             </td>

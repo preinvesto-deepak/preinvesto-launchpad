@@ -32,13 +32,16 @@ export let WARDROBE_SERVICE = DEFAULT_WARDROBE_SERVICE;
 export let WARDROBE_HIDDEN = false;
 export const ALL_SERVICES = [WARDROBE_SERVICE];
 
-// Items Pricing groups the services added to GROUP_OPTIONS, so a resync can
-// take them back out again.
-let addedGroups = [];
+// The built-in Items Pricing groups as shipped, and the ones the logic itself
+// depends on by name (sheets, edge band, carpenter, transport) — those can't
+// be renamed. Other built-ins can: companyProfile.renamedGroups maps the
+// shipped name to the account's own.
+export const BASE_GROUPS = [...GROUP_OPTIONS];
+export const LOCKED_GROUPS = ["Wood", "Laminate", "Edge Beading", "Carpenter", "Transportation"];
 
 // Replace the services with `list` ([{ name, group, measure }]).
 // Idempotent — safe to call on every render of the data provider.
-export function syncCustomServices(list, wardrobeName, wardrobeHidden) {
+export function syncCustomServices(list, wardrobeName, wardrobeHidden, renamedGroups) {
   WARDROBE_HIDDEN = !!wardrobeHidden;
   WARDROBE_SERVICE = (wardrobeName || "").trim() || DEFAULT_WARDROBE_SERVICE;
   Object.keys(SERVICES).forEach((k) => delete SERVICES[k]);
@@ -53,11 +56,12 @@ export function syncCustomServices(list, wardrobeName, wardrobeHidden) {
   ALL_SERVICES.length = 0;
   ALL_SERVICES.push(...(WARDROBE_HIDDEN ? [] : [WARDROBE_SERVICE]), ...SERVICE_NAMES);
 
-  addedGroups.forEach((g) => { const i = GROUP_OPTIONS.indexOf(g); if (i >= 0) GROUP_OPTIONS.splice(i, 1); });
-  addedGroups = [];
+  const renamed = renamedGroups && typeof renamedGroups === "object" ? renamedGroups : {};
+  GROUP_OPTIONS.length = 0;
+  GROUP_OPTIONS.push(...BASE_GROUPS.map((g) => renamed[g] || g));
   SERVICE_NAMES.forEach((n) => {
     const g = SERVICES[n].group;
-    if (!GROUP_OPTIONS.includes(g)) { GROUP_OPTIONS.push(g); addedGroups.push(g); }
+    if (!GROUP_OPTIONS.includes(g)) GROUP_OPTIONS.push(g);
   });
 }
 

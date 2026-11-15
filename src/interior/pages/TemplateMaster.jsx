@@ -9,7 +9,7 @@ import { mmToFeet, feetToMm, roundTo2, formatCurrency } from "../utils/unitConve
 import CutSheetOptimizer from "./CutSheetOptimizer";
 import NumInput from "../components/NumInput";
 import { packSheets, findOversizedPieces } from "../utils/binPack";
-import { TAPE_ITEM } from "../utils/projectRows";
+import { TAPE_ITEM, expandSetItem } from "../utils/projectRows";
 import { materialCalcGlobals } from "../utils/materialCalc";
 import { globalKerfMm } from "../utils/kerf";
 import { resolveInclRate } from "../utils/modelRates";
@@ -905,7 +905,9 @@ function TemplateMaster() {
         if (hw.materialName === FEVICOL_NAME) return; // auto-calculated below instead of hand-entered
         if (tapeDiv > 0 && hw.materialName === TAPE_ITEM) return; // from edge band length, below
         const total = (Number(hw.qty) || 0) + (Number(hw.extra) || 0);
-        hwSummed[hw.materialName] = (hwSummed[hw.materialName] || 0) + total;
+        expandSetItem(hw.materialName, total, prices).forEach((leaf) => {
+          hwSummed[leaf.materialName] = (hwSummed[leaf.materialName] || 0) + leaf.qty;
+        });
       });
     });
     const hwRows = Object.entries(hwSummed).map(([material, requiredQty]) => {

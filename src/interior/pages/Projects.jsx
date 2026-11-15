@@ -15,7 +15,7 @@ import NumInput from "../components/NumInput";
 import RequirementsPanel from "../components/RequirementsPanel";
 import ProjectQuotation from "./ProjectQuotation";
 import { packSheets, findOversizedPieces } from "../utils/binPack";
-import { TAPE_ITEM } from "../utils/projectRows";
+import { TAPE_ITEM, expandSetItem, setComponentsOf } from "../utils/projectRows";
 import { calcFor, materialCalcGlobals, isMaterialCalcUniversal } from "../utils/materialCalc";
 import { kerfFor, isKerfUniversal } from "../utils/kerf";
 import { GROUP_OPTIONS } from "../data/priceData";
@@ -1897,7 +1897,9 @@ function Projects() {
         if (hw.materialName === FEVICOL_NAME) return; // auto-calculated below instead of hand-entered
         if (tapeDiv > 0 && hw.materialName === TAPE_ITEM) return; // from edge band length, below
         const total = (Number(hw.qty) || 0) + (Number(hw.extra) || 0);
-        hwSummed[hw.materialName] = (hwSummed[hw.materialName] || 0) + total;
+        expandSetItem(hw.materialName, total, prices).forEach((leaf) => {
+          hwSummed[leaf.materialName] = (hwSummed[leaf.materialName] || 0) + leaf.qty;
+        });
       });
     });
     const hwRows = Object.entries(hwSummed).map(([material, requiredQty]) => {
@@ -3612,6 +3614,11 @@ function Projects() {
                                                       onClick={() => setHardwarePicker({ hwId: hw.id, group, boxId: hw.boxId })}
                                                       style={{ fontSize: 12, textAlign: "left", background: "none", border: "1px solid #e2e8f0", borderRadius: 4, padding: "3px 8px", cursor: "pointer", width: 180, color: hw.materialName ? "#111827" : "#9ca3af" }}
                                                     >{hw.materialName || "— Select item —"}</button>
+                                                  )}
+                                                  {!hw.auto && hw.materialName && setComponentsOf(hw.materialName, prices) && (
+                                                    <div style={{ fontSize: 10, color: "#2563eb", marginTop: 2 }}>
+                                                      Set: {setComponentsOf(hw.materialName, prices).map((c) => c.qty + " × " + c.materialName).join(" + ")}
+                                                    </div>
                                                   )}
                                                 </td>
                                                 <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center", color: "#6b7280" }}>{hw.unit || "—"}</td>

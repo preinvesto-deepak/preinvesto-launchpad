@@ -90,7 +90,7 @@ function AppDataProvider({ children }) {
   // Services the account added (companyProfile.customServices) join the
   // built-in ones in the shared registry before any child renders. Kept inside
   // companyProfile so no new top-level key (and no backend change) is needed.
-  syncCustomServices(companyProfile?.customServices, companyProfile?.wardrobeName, companyProfile?.wardrobeHidden);
+  syncCustomServices(companyProfile?.customServices, companyProfile?.wardrobeName, companyProfile?.wardrobeHidden, companyProfile?.renamedGroups);
   // Same for the saw-blade kerf: App Settings value + whether projects share it.
   setKerfSettings(kerfWidth, companyProfile?.kerfUniversal);
   setMaterialCalcSettings(companyProfile);
@@ -347,7 +347,15 @@ function AppDataProvider({ children }) {
     const oldEntry = prices.find((p) => p.id === id);
     const oldName = oldEntry?.materialName ?? null;
 
-    setPrices((prev) => prev.map((p) => p.id === id ? { ...p, ...updatedData } : p));
+    const newName = updatedData?.materialName;
+    setPrices((prev) => prev.map((p) => {
+      if (p.id === id) return { ...p, ...updatedData };
+      // sets list their parts by name — follow a rename
+      if (oldName && newName && newName !== oldName && Array.isArray(p.components) && p.components.some((c) => c.materialName === oldName)) {
+        return { ...p, components: p.components.map((c) => c.materialName === oldName ? { ...c, materialName: newName } : c) };
+      }
+      return p;
+    }));
 
     if (!oldName) return;
 
