@@ -233,7 +233,7 @@ function resolveFormula(expr, vars) {
 const MATERIAL_FIELDS = [
   ["Door Ply",         "matDoor"],
   ["Back Ply",         "matBack"],
-  ["Carcase Ply",      "matCarcas"],
+  ["Carcass Ply",      "matCarcas"],
   ["Outside Laminate", "matOutsideLaminate"],
   ["Inside Laminate",  "matInsideLaminate"],
   ["Edge Beading",     "matEdgeBeading"],
@@ -1704,7 +1704,7 @@ function TemplateMaster() {
                         <select value={activeBox.quotationDoorType || ""} onChange={(e) => updateBox("quotationDoorType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 140 }}>
                           <option value="">— Select —</option>
                           <option value="Sliding Door">Sliding Door</option>
-                          <option value="Swing Door">Swing Door</option>
+                          <option value="Swing Door">Hinged Door</option>
                         </select>
                       </div>
                     </div>
@@ -2108,7 +2108,7 @@ function TemplateMaster() {
                                 <label style={{ fontSize: 12, fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>Door Type</label>
                                 <select value={sheet.doorType || ""} onChange={(e) => updateSheetField(subSheetId, "doorType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 140 }}>
                                   <option value="">— Select —</option>
-                                  {DOOR_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                                  {DOOR_TYPES.map((t) => <option key={t} value={t}>{t === "Swing Door" ? "Hinged Door" : t}</option>)}
                                 </select>
                               </div>
                               <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }} title="Uncheck to stop this sheet's parts from being counted in Hardware & Consumables, Material Summary, and the Cut Sheet Optimizer.">

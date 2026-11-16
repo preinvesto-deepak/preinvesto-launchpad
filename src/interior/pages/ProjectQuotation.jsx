@@ -861,22 +861,22 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
         <h3>${t.title}</h3>
         <table border="1" cellpadding="7" cellspacing="0" width="100%" style="margin-bottom:16px;font-size:13px">
           <thead style="background:#f9fafb">
-            <tr><th>#</th>${colOn("room") ? "<th>Room</th>" : ""}${colOn("box") ? "<th>Box Name</th>" : ""}${colOn("type") ? "<th>Type of Work</th>" : ""}${colOn("w") ? "<th>W (ft)</th>" : ""}${colOn("h") ? "<th>H (ft)</th>" : ""}${colOn("area") ? `<th>${t.areaHead}</th>` : ""}${colOn("rate") ? `<th>${t.rateHead}</th>` : ""}<th>Amount (Incl. GST)</th></tr>
+            <tr><th style="text-align:center;width:36px">#</th>${colOn("room") ? '<th style="text-align:left">Room</th>' : ""}${colOn("box") ? '<th style="text-align:left">Box Name</th>' : ""}${colOn("type") ? '<th style="text-align:left">Type of Work</th>' : ""}${colOn("w") ? '<th style="text-align:center">W (ft)</th>' : ""}${colOn("h") ? '<th style="text-align:center">H (ft)</th>' : ""}${colOn("area") ? `<th style="text-align:center">${t.areaHead}</th>` : ""}${colOn("rate") ? `<th style="text-align:right">${t.rateHead}</th>` : ""}<th style="text-align:right">Amount (Incl. GST)</th></tr>
           </thead>
           <tbody>
             ${withRoomRowSpans(t.rows)
               .map(
                 (item, i) => `
               <tr>
-                <td>${i + 1}</td>
-                ${colOn("room") && item.roomSpan > 0 ? `<td rowspan="${item.roomSpan}">${item.roomName}</td>` : ""}
-                ${colOn("box") ? `<td style="white-space:pre-line">${item.boxName}</td>` : ""}
-                ${colOn("type") ? `<td style="white-space:pre-line">${item.typeOfWork}</td>` : ""}
-                ${colOn("w") ? `<td style="white-space:pre-line">${item.widthFt ?? "—"}</td>` : ""}
-                ${colOn("h") ? `<td style="white-space:pre-line">${item.heightFt ?? "—"}</td>` : ""}
-                ${colOn("area") ? `<td>${qtyText(item)}</td>` : ""}
-                ${colOn("rate") ? `<td style="text-align:right">${item.areaSqFt > 0 ? `${fmtCurrency(item.sellingAmount / item.areaSqFt)}/${unitOf(item)}` : "—"}</td>` : ""}
-                <td style="text-align:right">${fmtCurrency(item.sellingAmount)}</td>
+                <td style="text-align:center;vertical-align:middle">${i + 1}</td>
+                ${colOn("room") && item.roomSpan > 0 ? `<td rowspan="${item.roomSpan}" style="text-align:left;vertical-align:middle">${item.roomName}</td>` : ""}
+                ${colOn("box") ? `<td style="white-space:pre-line;text-align:left;vertical-align:middle">${item.boxName}</td>` : ""}
+                ${colOn("type") ? `<td style="white-space:pre-line;text-align:left;vertical-align:middle">${item.typeOfWork}</td>` : ""}
+                ${colOn("w") ? `<td style="white-space:pre-line;text-align:center;vertical-align:middle">${item.widthFt ?? "—"}</td>` : ""}
+                ${colOn("h") ? `<td style="white-space:pre-line;text-align:center;vertical-align:middle">${item.heightFt ?? "—"}</td>` : ""}
+                ${colOn("area") ? `<td style="text-align:center;vertical-align:middle">${qtyText(item)}</td>` : ""}
+                ${colOn("rate") ? `<td style="text-align:right;vertical-align:middle">${item.areaSqFt > 0 ? `${fmtCurrency(item.sellingAmount / item.areaSqFt)}/${unitOf(item)}` : "—"}</td>` : ""}
+                <td style="text-align:right;vertical-align:middle">${fmtCurrency(item.sellingAmount)}</td>
               </tr>`
               )
               .join("")}
@@ -1137,7 +1137,13 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
         }),
         ...(all.length > 1 ? { foot: [[{ content: `${t.title} Sub Total (Incl. GST)`, colSpan: beforeAmountCols(), styles: { halign: "right" } }, fmtPdf(tableTotal(t))]] } : {}),
         footStyles: { fillColor: [243, 244, 246], textColor: 0, fontStyle: "bold" },
-        styles: { fontSize: 8 },
+        styles: { fontSize: 8, valign: "middle" },
+        // one alignment per column for head, body and foot: text left, sizes centred, money right
+        columnStyles: Object.fromEntries(
+          ["#", ...["room", "box", "type", "w", "h", "area", "rate"].filter(colOn), "amount"].map((k, ci) => [
+            ci, { halign: ["room", "box", "type"].includes(k) ? "left" : (k === "rate" || k === "amount") ? "right" : "center" },
+          ])
+        ),
         headStyles: { fillColor: [30, 58, 95] },
         theme: "grid",
       });
@@ -1545,29 +1551,29 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
             <table border="1" cellPadding="8" cellSpacing="0" width="100%" style={{ marginBottom: 20 }}>
               <thead>
                 <tr>
-                  <th>#</th>
-                  {colOn("room") && <th>Room</th>}
-                  {colOn("box") && <th>Box Name</th>}
-                  {colOn("type") && <th>Type of Work</th>}
-                  {colOn("w") && <th>W (ft)</th>}
-                  {colOn("h") && <th>H (ft)</th>}
-                  {colOn("area") && <th>{t.areaHead}</th>}
-                  {colOn("rate") && <th>{t.rateHead}</th>}
-                  <th>Amount (Incl. GST)</th>
+                  <th style={{ textAlign: "center", width: 40 }}>#</th>
+                  {colOn("room") && <th style={{ textAlign: "left" }}>Room</th>}
+                  {colOn("box") && <th style={{ textAlign: "left" }}>Box Name</th>}
+                  {colOn("type") && <th style={{ textAlign: "left" }}>Type of Work</th>}
+                  {colOn("w") && <th style={{ textAlign: "center" }}>W (ft)</th>}
+                  {colOn("h") && <th style={{ textAlign: "center" }}>H (ft)</th>}
+                  {colOn("area") && <th style={{ textAlign: "center" }}>{t.areaHead}</th>}
+                  {colOn("rate") && <th style={{ textAlign: "right" }}>{t.rateHead}</th>}
+                  <th style={{ textAlign: "right" }}>Amount (Incl. GST)</th>
                 </tr>
               </thead>
               <tbody>
                 {withRoomRowSpans(t.rows).map((item, i) => (
                   <tr key={item.id}>
-                    <td>{i + 1}</td>
-                    {colOn("room") && item.roomSpan > 0 && <td rowSpan={item.roomSpan}>{item.roomName}</td>}
-                    {colOn("box") && <td style={{ whiteSpace: "pre-line" }}>{item.boxName}</td>}
-                    {colOn("type") && <td style={{ whiteSpace: "pre-line" }}>{item.typeOfWork}</td>}
-                    {colOn("w") && <td style={{ whiteSpace: "pre-line" }}>{item.widthFt ?? "—"}</td>}
-                    {colOn("h") && <td style={{ whiteSpace: "pre-line" }}>{item.heightFt ?? "—"}</td>}
-                    {colOn("area") && <td>{qtyText(item)}</td>}
-                    {colOn("rate") && <td>{item.areaSqFt > 0 ? `${formatCurrency(item.sellingAmount / item.areaSqFt)}/${unitOf(item)}` : "—"}</td>}
-                    <td>{formatCurrency(item.sellingAmount)}</td>
+                    <td style={{ textAlign: "center", verticalAlign: "middle" }}>{i + 1}</td>
+                    {colOn("room") && item.roomSpan > 0 && <td rowSpan={item.roomSpan} style={{ textAlign: "left", verticalAlign: "middle" }}>{item.roomName}</td>}
+                    {colOn("box") && <td style={{ whiteSpace: "pre-line", textAlign: "left", verticalAlign: "middle" }}>{item.boxName}</td>}
+                    {colOn("type") && <td style={{ whiteSpace: "pre-line", textAlign: "left", verticalAlign: "middle" }}>{item.typeOfWork}</td>}
+                    {colOn("w") && <td style={{ whiteSpace: "pre-line", textAlign: "center", verticalAlign: "middle" }}>{item.widthFt ?? "—"}</td>}
+                    {colOn("h") && <td style={{ whiteSpace: "pre-line", textAlign: "center", verticalAlign: "middle" }}>{item.heightFt ?? "—"}</td>}
+                    {colOn("area") && <td style={{ textAlign: "center", verticalAlign: "middle" }}>{qtyText(item)}</td>}
+                    {colOn("rate") && <td style={{ textAlign: "right", verticalAlign: "middle" }}>{item.areaSqFt > 0 ? `${formatCurrency(item.sellingAmount / item.areaSqFt)}/${unitOf(item)}` : "—"}</td>}
+                    <td style={{ textAlign: "right", verticalAlign: "middle" }}>{formatCurrency(item.sellingAmount)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1575,7 +1581,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
                   <tfoot>
                     <tr style={{ background: "#f3f4f6" }}>
                       <td colSpan={beforeAmountCols()} style={{ textAlign: "right", fontWeight: 700 }}>{t.title} Sub Total (Incl. GST)</td>
-                      <td style={{ fontWeight: 700 }}>{formatCurrency(tableTotal(t))}</td>
+                      <td style={{ fontWeight: 700, textAlign: "right" }}>{formatCurrency(tableTotal(t))}</td>
                     </tr>
                   </tfoot>
                 )}

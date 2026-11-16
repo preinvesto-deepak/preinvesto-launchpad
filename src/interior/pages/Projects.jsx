@@ -44,9 +44,14 @@ const LABEL_TO_GROUP = {
   "Door Ply":         "Wood",
   "Back Ply":         "Wood",
   "Carcase Ply":      "Wood",
+  "Carcass Ply":      "Wood",
   "Outside Laminate": "Laminate",
+  "Outside Laminate 1": "Laminate",
+  "Outside Laminate 2": "Laminate",
   "Inside Laminate":  "Laminate",
   "Edge Beading":     "Edge Beading",
+  "Edge Beading 1":   "Edge Beading",
+  "Edge Beading 2":   "Edge Beading",
 };
 
 // ── Collapsible Section Header (mirrors TemplateMaster) ─────────────────────
@@ -174,9 +179,9 @@ const PART_GROUP_COLORS = {
 };
 const CUT_MAT_COLORS = ["#dbeafe","#fef3c7","#dcfce7","#fce7f3","#ede9fe","#fef9c3","#d1fae5","#fee2e2"];
 const SHEET_MAT_FIELDS = [
-  ["Door Ply", "matDoor"], ["Back Ply", "matBack"], ["Carcase Ply", "matCarcas"],
-  ["Outside Laminate", "matOutsideLaminate"], ["Inside Laminate", "matInsideLaminate"],
-  ["Edge Beading", "matEdgeBeading"],
+  ["Door Ply", "matDoor"], ["Back Ply", "matBack"], ["Carcass Ply", "matCarcas"],
+  ["Outside Laminate 1", "matOutsideLaminate"], ["Inside Laminate", "matInsideLaminate"],
+  ["Edge Beading 1", "matEdgeBeading"],
 ];
 // Everything a "Sheet Calculation and Cut List" entry (the box's own "1." or
 // a Sub Sheet Calculation "1.1", "1.2", ...) owns — copied wholesale by the
@@ -195,6 +200,112 @@ const SHEET_COPY_FIELDS = [
   "doorsH", "doorsV", "backParts", "partitions", "shelves",
   "customFields", "refs", "parts",
 ];
+// ── Box-level material selection ("Quotation Details" → Material Selection) ──
+// box.qMat holds the materials picked once for the whole box. Every sheet (the
+// box's own "1." and each sub sheet) that is "Same as Quotation Details" gets
+// them copied in, parts included. A sheet without the explicit flag counts as
+// the same when its materials already match (or are still empty), so nothing
+// changes in existing projects until someone edits the selection.
+const MASTER_FIELDS = SHEET_MAT_FIELDS.map(([, f]) => f);
+const matNameOf = (obj, f, prices) => {
+  const id = obj?.[`${f}Id`];
+  return id != null ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? obj?.[f] ?? "") : (obj?.[f] || "");
+};
+// The selection always lists Outside Laminate 2 and Edge Beading 2 after their
+// first rows; any a sheet already has under those names are picked up.
+const defaultMasterCustom = (box) => [
+  { id: 1001, label: "Outside Laminate 2", after: "matOutsideLaminate" },
+  { id: 1002, label: "Edge Beading 2", after: "matEdgeBeading" },
+].map((d) => {
+  const own = (box?.customMaterials || []).find((c) => (c.label || "").trim().toLowerCase() === d.label.toLowerCase());
+  return { ...d, value: own?.value || "", itemId: own?.itemId ?? null };
+});
+const masterMatsOf = (box) => {
+  let m;
+  if (box?.qMat) m = { ...box.qMat };
+  else {
+    m = {};
+    MASTER_FIELDS.forEach((f) => { m[f] = box?.[f] ?? ""; m[`${f}Id`] = box?.[`${f}Id`] ?? null; });
+  }
+  if (!Array.isArray(m.custom)) m.custom = defaultMasterCustom(box);
+  else {
+    // the two standing rows are always there; a same-named row added earlier becomes that row
+    const defs = defaultMasterCustom(box);
+    const have = m.custom.map((c) => {
+      const d = defs.find((x) => x.label.toLowerCase() === (c.label || "").trim().toLowerCase());
+      return d && !c.after ? { ...c, after: d.after } : c;
+    });
+    const missing = defs.filter((d) => !have.some((c) => c.after === d.after));
+    m.custom = [...missing, ...have];
+  }
+  return m;
+};
+const sheetUsesMaster = (sheet, box, prices) => {
+  if (sheet?.useBoxMat != null) return sheet.useBoxMat !== false;
+  const m = masterMatsOf(box);
+  return MASTER_FIELDS.every((f) => { const a = matNameOf(sheet, f, prices); return !a || a === matNameOf(m, f, prices); });
+};
+const renamePartMats = (parts, oldMat, newMat, oldId, newId) => (parts || []).map((p) => {
+  const mM = (oldId != null && p.materialId === oldId) || (p.material === oldMat && p.materialId == null);
+  const mA = (oldId != null && p.sideAId === oldId) || (p.sideA === oldMat && p.sideAId == null);
+  const mB = (oldId != null && p.sideBId === oldId) || (p.sideB === oldMat && p.sideBId == null);
+  return {
+    ...p,
+    ...(mM ? { material: newMat, materialId: newId ?? null } : {}),
+    ...(mA ? { sideA: newMat, sideAId: newId ?? null } : {}),
+    ...(mB ? { sideB: newMat, sideBId: newId ?? null } : {}),
+  };
+});
+const applyMasterToSheet = (sheet, master, prices) => {
+  const upd = {};
+  let parts = sheet.parts;
+  MASTER_FIELDS.forEach((f) => {
+    const newMat = matNameOf(master, f, prices);
+    if (!newMat) return; // an empty slot in the selection leaves the sheet alone
+    const newId = master[`${f}Id`] ?? null;
+    const oldMat = matNameOf(sheet, f, prices);
+    const oldId = sheet[`${f}Id`] ?? null;
+    if (oldMat === newMat && oldId === newId) return;
+    upd[f] = newMat; upd[`${f}Id`] = newId;
+    if ((oldMat && oldMat !== newMat) || (oldId != null && oldId !== newId)) parts = renamePartMats(parts, oldMat, newMat, oldId, newId);
+  });
+  // Extra materials added in the selection ("+ Add Material"): kept on the sheet
+  // as rows tagged fromMaster, so they can be updated or removed later.
+  const mc = master.custom || [];
+  const cur = sheet.customMaterials || [];
+  if (mc.length || cur.some((c) => c.fromMaster != null)) {
+    const next = cur.filter((c) => c.fromMaster == null || mc.some((m) => m.id === c.fromMaster));
+    mc.forEach((m) => {
+      const val = m.itemId != null ? ((prices || []).find((pr) => pr.id === m.itemId)?.materialName ?? m.value ?? "") : (m.value || "");
+      const itemId = m.itemId ?? null;
+      let i = next.findIndex((c) => c.fromMaster === m.id);
+      if (i < 0 && (m.label || "").trim()) {
+        // a row the sheet already has under the same name becomes the selection's row
+        i = next.findIndex((c) => c.fromMaster == null && (c.label || "").trim().toLowerCase() === m.label.trim().toLowerCase());
+        if (i >= 0) next[i] = { ...next[i], fromMaster: m.id };
+      }
+      if (i < 0) {
+        if (!val) return; // nothing chosen yet: no blank row on the sheet
+        next.push({ id: Date.now() + Math.floor(Math.random() * 100000), label: m.label || "", value: val, itemId, fromMaster: m.id });
+        return;
+      }
+      if (!val) { next[i] = { ...next[i], label: m.label || next[i].label || "" }; return; }
+      const o = next[i];
+      if (o.value && o.value !== val && val) parts = renamePartMats(parts, o.value, val, o.itemId ?? null, itemId);
+      next[i] = { ...o, label: m.label || "", value: val, itemId };
+    });
+    if (JSON.stringify(next) !== JSON.stringify(cur)) upd.customMaterials = next;
+  }
+  return Object.keys(upd).length ? { ...sheet, ...upd, parts } : sheet;
+};
+// New selection for the whole box: pushed into every sheet that follows it.
+const applyMasterToBox = (box, master, prices) => {
+  const mainSynced = sheetUsesMaster(box, box, prices);
+  const subs = (box.subSheets || []).map((sub) => sheetUsesMaster(sub, box, prices) ? { ...applyMasterToSheet(sub, master, prices), useBoxMat: true } : sub);
+  const main = mainSynced ? { ...applyMasterToSheet(box, master, prices), useBoxMat: true } : box;
+  return { ...main, qMat: master, subSheets: subs };
+};
+
 const emptyPart = (id) => ({
   id, group: "Ply", partName: "", req: true,
   widthMm: "", heightMm: "", qty: 1,
@@ -1155,6 +1266,7 @@ function Projects() {
     templates,
     templateFolders,
     designGallery,
+    isLoaded,
   } = useAppData();
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1185,7 +1297,9 @@ function Projects() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  // Sync when sidebar navigates to ?id=X
+  // Sync when sidebar navigates to ?id=X. Also re-runs once the saved workspace
+  // has loaded: until then `projects` is only the seed list, so a reload or direct
+  // link to ?id=5 could not find project 5 and fell back to the first project.
   useEffect(() => {
     const p = searchParams.get("id");
     if (p) {
@@ -1196,7 +1310,7 @@ function Projects() {
         setActiveBoxId(null);
       }
     }
-  }, [searchParams]);
+  }, [searchParams, isLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Project modal
   const [projectModal, setProjectModal] = useState(false);
@@ -1433,6 +1547,7 @@ function Projects() {
       const id = projects.length ? Math.max(...projects.map((p) => p.id)) + 1 : 1;
       setProjects([...projects, { id, ...pForm, createdAt: Date.now() }]);
       setSelectedProjectId(id);
+      setSearchParams({ id: String(id) }, { replace: true }); // keep the URL in step so the sidebar link for another project still works
     }
     setProjectModal(false);
   };
@@ -1592,6 +1707,31 @@ function Projects() {
   const updateBoxFields = (patch) => {
     if (!activeBox) return;
     updateRoomField("boxes", boxes.map((b) => b.id === activeBox.id ? { ...b, ...patch } : b));
+  };
+
+  const [qMatOpen, setQMatOpen] = useState(false);
+
+  // Material Selection (Quotation Details): set one material for the whole box.
+  const patchBoxMaster = (patch) => {
+    if (!activeBox) return;
+    updateRoomField("boxes", boxes.map((b) => b.id === activeBox.id
+      ? applyMasterToBox(b, { ...masterMatsOf(b), ...patch }, prices)
+      : b));
+  };
+  const setBoxMaster = (field, name, id) => patchBoxMaster({ [field]: name, [`${field}Id`]: id ?? null });
+  const setMasterCustom = (list) => patchBoxMaster({ custom: list });
+  // The "Same as Quotation Details" tick on a sheet.
+  const toggleUseBoxMat = (subSheetId, checked) => {
+    if (!activeBox) return;
+    updateRoomField("boxes", boxes.map((b) => {
+      if (b.id !== activeBox.id) return b;
+      const m = masterMatsOf(b);
+      if (subSheetId == null) {
+        return checked ? { ...applyMasterToSheet(b, m, prices), useBoxMat: true } : { ...b, useBoxMat: false, qMat: b.qMat || m };
+      }
+      return { ...b, subSheets: (b.subSheets || []).map((sub) => sub.id !== subSheetId ? sub
+        : checked ? { ...applyMasterToSheet(sub, m, prices), useBoxMat: true } : { ...sub, useBoxMat: false }) };
+    }));
   };
 
   const updateBox = (field, value) => {
@@ -1986,7 +2126,7 @@ function Projects() {
     if (!activeBox) return;
     const subs = activeBox.subSheets || [];
     const id = subs.length ? Math.max(...subs.map((s) => s.id)) + 1 : 1;
-    updateBox("subSheets", [...subs, newSubSheet(id)]);
+    updateBox("subSheets", [...subs, { ...applyMasterToSheet(newSubSheet(id), masterMatsOf(activeBox), prices), useBoxMat: true }]);
   };
 
   const updateSubSheet = (subSheetId, field, value) => {
@@ -2023,6 +2163,8 @@ function Projects() {
       const v = copiedSheet.fields[f];
       fields[f] = v === undefined ? v : JSON.parse(JSON.stringify(v));
     });
+    fields.useBoxMat = undefined;
+    if (fields.customMaterials) fields.customMaterials = fields.customMaterials.map(({ fromMaster, ...c }) => c);
     if (subSheetId == null) {
       updateRoomField("boxes", boxes.map((b) => b.id === activeBox.id ? { ...b, ...fields } : b));
     } else {
@@ -2037,8 +2179,10 @@ function Projects() {
     SHEET_COPY_FIELDS.forEach((f) => { const v = sheet?.[f]; fields[f] = v === undefined ? v : JSON.parse(JSON.stringify(v)); });
     return fields;
   };
-  const applySheetFields = (subSheetId, fields) => {
+  const applySheetFields = (subSheetId, rawFields) => {
     if (!activeBox) return;
+    const fields = { ...rawFields, useBoxMat: undefined };
+    if (fields.customMaterials) fields.customMaterials = fields.customMaterials.map(({ fromMaster, ...c }) => c);
     if (subSheetId == null) {
       updateRoomField("boxes", boxes.map((b) => b.id === activeBox.id ? { ...b, ...fields } : b));
     } else {
@@ -2452,7 +2596,7 @@ function Projects() {
                                     <select value={box.quotationDoorType || ""} onChange={(e) => setBoxField(room.id, box.id, "quotationDoorType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 130 }}>
                                       <option value="">— Select —</option>
                                       <option value="Sliding Door">Sliding Door</option>
-                                      <option value="Swing Door">Swing Door</option>
+                                      <option value="Swing Door">Hinged Door</option>
                                     </select>
                                   </td>
                                   <td style={{ ...td, textAlign: "center", borderTop: sep }}>
@@ -2813,7 +2957,7 @@ function Projects() {
                               <select value={activeBox.quotationDoorType || ""} onChange={(e) => updateBox("quotationDoorType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 140 }}>
                                 <option value="">— Select —</option>
                                 <option value="Sliding Door">Sliding Door</option>
-                                <option value="Swing Door">Swing Door</option>
+                                <option value="Swing Door">Hinged Door</option>
                               </select>
                             </div>
                             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
@@ -2875,7 +3019,71 @@ function Projects() {
                               />
                               <span style={{ fontSize: 11, color: "#9ca3af" }}>{boxQty(activeBox).unit === "sqft" ? "sq ft" : boxQty(activeBox).unit}</span>
                             </div>
+                            {!serviceOf(activeBox) && (
+                              <button
+                                onClick={() => setQMatOpen((o) => !o)}
+                                title="Pick the materials once — every sheet marked 'Same as Quotation Details' uses them"
+                                style={{ fontSize: 12, padding: "4px 12px", background: qMatOpen ? "#7c3aed" : "#ede9fe", color: qMatOpen ? "#fff" : "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 6, fontWeight: 600 }}
+                              >🎨 Material Selection {qMatOpen ? "▲" : "▼"}</button>
+                            )}
                           </div>
+                          {qMatOpen && !serviceOf(activeBox) && (() => {
+                            const master = masterMatsOf(activeBox);
+                            return (
+                              <div style={{ background: "#faf5ff", border: "1px solid #ede9fe", borderRadius: 8, padding: "8px 10px", marginTop: 10 }}>
+                                <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>
+                                  Selected once here, used by every Sheet Calculation below that has <b>Same as Quotation Details</b> ticked (the default). Untick a sheet to choose its own.
+                                </div>
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: "6px 16px" }}>
+                                  {(() => {
+                                    const customs = master.custom || [];
+                                    const rows = [];
+                                    SHEET_MAT_FIELDS.forEach(([label, field]) => {
+                                      rows.push({ key: field, label, field });
+                                      customs.filter((c) => c.after === field).forEach((cm) => rows.push({ key: "c" + cm.id, cm }));
+                                    });
+                                    customs.filter((c) => !SHEET_MAT_FIELDS.some(([, f]) => f === c.after)).forEach((cm) => rows.push({ key: "c" + cm.id, cm }));
+                                    return rows.map((r) => {
+                                      const cm = r.cm;
+                                      const cur = cm
+                                        ? (cm.itemId != null ? ((prices || []).find((pr) => pr.id === cm.itemId)?.materialName ?? cm.value ?? "") : (cm.value || ""))
+                                        : matNameOf(master, r.field, prices);
+                                      const setCm = (patch) => setMasterCustom((master.custom || []).map((m) => m.id === cm.id ? { ...m, ...patch } : m));
+                                      return (
+                                        <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                          {cm ? (
+                                            <input
+                                              type="text" value={cm.label || ""} placeholder="Label..."
+                                              onChange={(e) => setCm({ label: e.target.value })}
+                                              style={{ width: 130, flexShrink: 0, fontSize: 12, fontWeight: 600, color: "#374151", border: "none", borderBottom: cm.label ? "none" : "1px dashed #c4b5fd", background: "transparent", boxShadow: "none", padding: 0, outline: "none" }}
+                                            />
+                                          ) : (
+                                            <span style={{ width: 130, fontSize: 12, fontWeight: 600, color: "#374151", flexShrink: 0 }}>{r.label}</span>
+                                          )}
+                                          <input
+                                            type="text" value={cur} placeholder="Select..."
+                                            onChange={(e) => {
+                                              const nv = e.target.value; const pi = (prices || []).find((pr) => pr.materialName === nv);
+                                              if (cm) setCm({ value: nv, itemId: pi?.id ?? null }); else setBoxMaster(r.field, nv, pi?.id ?? null);
+                                            }}
+                                            style={{ flex: 1, minWidth: 0, fontSize: 12, padding: "3px 6px" }}
+                                          />
+                                          <button onClick={() => setBoxMatPicker({ field: cm ? "__cm_" + cm.id : r.field, label: cm ? (cm.label || "Material") : r.label, master: true })} title="Browse" style={{ background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", padding: "3px 7px", fontSize: 13 }}>🔍</button>
+                                          {cm && !cm.after
+                                            ? <button onClick={() => setMasterCustom((master.custom || []).filter((m) => m.id !== cm.id))} title="Remove from every sheet that follows the selection" style={{ background: "#dc2626", padding: "3px 7px", fontSize: 12 }}>✕</button>
+                                            : <span style={{ width: 26, flexShrink: 0 }} />}
+                                        </div>
+                                      );
+                                    });
+                                  })()}
+                                </div>
+                                <button
+                                  onClick={() => setMasterCustom([...(master.custom || []), { id: Date.now(), label: "", value: "", itemId: null }])}
+                                  style={{ marginTop: 8, background: "#e0f2fe", color: "#0369a1", border: "1px solid #bae6fd", fontSize: 12, padding: "3px 14px", borderRadius: 6, cursor: "pointer" }}
+                                >+ Add Material</button>
+                              </div>
+                            );
+                          })()}
                         </div>
 
                         {/* ══ SECTION 1: SHEET CALCULATION AND CUT LIST — each numbered
@@ -3144,6 +3352,7 @@ function Projects() {
                               ...existingMats,
                             ])];
                             const labelPrefix = sheet.shortName || sheet.name || (subSheetId == null ? (activeBox.boxName || activeBox.name || "") : "");
+                            const usesMaster = sheetUsesMaster(sheet, activeBox, prices);
 
                             return (
                               <div key={subSheetId ?? "main"} style={{ border: "1px solid #ede9fe", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "12px 12px 4px", background: "#fff" }}>
@@ -3176,7 +3385,7 @@ function Projects() {
                                     <select value={sheet.doorType || ""} onChange={(e) => updateSheetField(subSheetId, "doorType", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", width: 140 }}>
                                       <option value="">— Select —</option>
                                       <option value="Sliding Door">Sliding Door</option>
-                                      <option value="Swing Door">Swing Door</option>
+                                      <option value="Swing Door">Hinged Door</option>
                                     </select>
                                   </div>
                                   <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }} title="Uncheck to stop this sheet's parts from being counted in Hardware & Consumables, Material Summary, BOQ, and the Cut Sheet Optimizer.">
@@ -3239,10 +3448,18 @@ function Projects() {
                                 </div>
 
                                 {/* ── Materials (left) + Fields (right) — 2-column grid ── */}
-                                <div style={{ marginTop: 14, borderTop: "1px solid #ede9fe", paddingTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
+                                <div style={{ marginTop: 14, borderTop: "1px solid #ede9fe", paddingTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "stretch" }}>
+
+                                  <div style={{ gridColumn: "1 / -1" }}>
+                                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#374151", cursor: "pointer" }} title="Ticked: this sheet uses the materials chosen under Quotation Details → Material Selection. Untick to choose its own.">
+                                    <input type="checkbox" checked={usesMaster} onChange={(e) => toggleUseBoxMat(subSheetId, e.target.checked)} style={{ width: 14, height: 14, cursor: "pointer" }} />
+                                    Same materials as Quotation Details
+                                  </label>
+                                  </div>
 
                                   {/* Materials table */}
-                                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                                  <div style={{ display: "flex", flexDirection: "column" }}>
+                                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, flex: 1 }}>
                                     <thead>
                                       <tr>
                                         <th style={{ background: "#1e3a5f", color: "#fff", padding: "7px 10px", textAlign: "left", fontWeight: 600, fontSize: 12 }}>Material</th>
@@ -3251,45 +3468,100 @@ function Projects() {
                                       </tr>
                                     </thead>
                                     <tbody>
-                                      {[
-                                        ["Door Ply", "matDoor"],
-                                        ["Back Ply", "matBack"],
-                                        ["Carcase Ply", "matCarcas"],
-                                        ["Outside Laminate", "matOutsideLaminate"],
-                                        ["Inside Laminate", "matInsideLaminate"],
-                                        ["Edge Beading", "matEdgeBeading"],
-                                      ].map(([label, field], i) => {
-                                        const idField = `${field}Id`;
-                                        const itemId = sheet[idField];
-                                        const resolved = itemId != null
-                                          ? (prices || []).find((p) => p.id === itemId)?.materialName ?? sheet[field]
-                                          : sheet[field];
-                                        return (
-                                          <tr key={field} style={{ background: i % 2 === 0 ? "#f5f3ff" : "#fff" }}>
+                                      {(() => {
+                                        const STD = [
+                                          ["Door Ply", "matDoor"],
+                                          ["Back Ply", "matBack"],
+                                          ["Carcass Ply", "matCarcas"],
+                                          ["Outside Laminate 1", "matOutsideLaminate"],
+                                          ["Inside Laminate", "matInsideLaminate"],
+                                          ["Edge Beading 1", "matEdgeBeading"],
+                                        ];
+                                        // Outside Laminate 2 / Edge Beading 2 are standing rows after their first rows;
+                                        // anything else added with "+ Add Material" follows, highlighted.
+                                        const DEFS = [
+                                          { label: "Outside Laminate 2", after: "matOutsideLaminate" },
+                                          { label: "Edge Beading 2", after: "matEdgeBeading" },
+                                        ];
+                                        const cms = sheet.customMaterials || [];
+                                        const isDef = (c, d) => (c.label || "").trim().toLowerCase() === d.label.toLowerCase();
+                                        const rows = [];
+                                        STD.forEach(([label, field]) => {
+                                          rows.push({ kind: "std", label, field });
+                                          DEFS.filter((d) => d.after === field).forEach((d) => rows.push({ kind: "def", d, cm: cms.find((c) => isDef(c, d)) }));
+                                        });
+                                        cms.filter((c) => !DEFS.some((d) => isDef(c, d))).forEach((cm) => rows.push({ kind: "other", cm }));
+                                        return rows.map((r, i) => {
+                                          if (r.kind === "std") {
+                                            const { label, field } = r;
+                                            const idField = `${field}Id`;
+                                            const itemId = sheet[idField];
+                                            const resolved = itemId != null
+                                              ? (prices || []).find((p) => p.id === itemId)?.materialName ?? sheet[field]
+                                              : sheet[field];
+                                            return (
+                                              <tr key={field} style={{ background: i % 2 === 0 ? "#f5f3ff" : "#fff" }}>
                                             <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe", fontWeight: 600, color: "#374151", fontSize: 12 }}>{label}</td>
                                             <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
-                                              <input type="text" value={resolved || ""} onChange={(e) => { const nv = e.target.value; const pi = (prices || []).find((pr) => pr.materialName === nv); renameMaterialInParts({ [field]: nv, [idField]: pi?.id ?? null }, resolved || "", nv, itemId, pi?.id ?? null, subSheetId); }} placeholder="Select..." style={{ width: "100%", fontSize: 12, padding: "3px 6px" }} />
+                                              <input type="text" value={resolved || ""} onChange={(e) => { const nv = e.target.value; const pi = (prices || []).find((pr) => pr.materialName === nv); renameMaterialInParts({ [field]: nv, [idField]: pi?.id ?? null }, resolved || "", nv, itemId, pi?.id ?? null, subSheetId); }} placeholder="Select..." disabled={usesMaster} style={{ width: "100%", fontSize: 12, padding: "3px 6px", ...(usesMaster ? { background: "#f3f4f6", color: "#6b7280", cursor: "not-allowed" } : {}) }} />
                                             </td>
                                             <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
-                                              <button onClick={() => setBoxMatPicker({ field, label, oldValue: resolved || "", oldId: itemId, subSheetId })} title="Browse" style={{ background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", padding: "3px 7px", fontSize: 13 }}>🔍</button>
+                                              <button onClick={() => setBoxMatPicker({ field, label, oldValue: resolved || "", oldId: itemId, subSheetId })} disabled={usesMaster} title={usesMaster ? "Untick 'Same materials as Quotation Details' to change this sheet's material" : "Browse"} style={{ background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", padding: "3px 7px", fontSize: 13, opacity: usesMaster ? 0.4 : 1, cursor: usesMaster ? "not-allowed" : "pointer" }}>🔍</button>
                                             </td>
                                           </tr>
-                                        );
-                                      })}
-                                      {(sheet.customMaterials || []).map((cm) => (
-                                        <tr key={cm.id} style={{ background: "#fffbeb" }}>
+                                            );
+                                          }
+                                          if (r.kind === "def") {
+                                            const cm = r.cm;
+                                            const val = cm ? (cm.itemId != null ? ((prices || []).find((pr) => pr.id === cm.itemId)?.materialName ?? cm.value ?? "") : (cm.value || "")) : "";
+                                            const newEntry = (value, itemId) => ({ id: Date.now() + Math.floor(Math.random() * 100000), label: r.d.label, value, itemId });
+                                            return (
+                                              <tr key={"def-" + r.d.after} style={{ background: i % 2 === 0 ? "#f5f3ff" : "#fff" }}>
+                                                <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe", fontWeight: 600, color: "#374151", fontSize: 12 }}>{r.d.label}</td>
+                                                <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
+                                                  <input
+                                                    type="text" value={val} placeholder="Select..." disabled={usesMaster}
+                                                    onChange={(e) => {
+                                                      const nv = e.target.value; const pi = (prices || []).find((pr) => pr.materialName === nv);
+                                                      if (!cm) { updateSheetField(subSheetId, "customMaterials", [...cms, newEntry(nv, pi?.id ?? null)]); return; }
+                                                      const upd = cms.map((m) => m.id === cm.id ? { ...m, value: nv, itemId: pi?.id ?? null } : m);
+                                                      renameMaterialInParts({ customMaterials: upd }, cm.value || "", nv, cm.itemId ?? null, pi?.id ?? null, subSheetId);
+                                                    }}
+                                                    style={{ width: "100%", fontSize: 12, padding: "3px 6px", ...(usesMaster ? { background: "#f3f4f6", color: "#6b7280", cursor: "not-allowed" } : {}) }}
+                                                  />
+                                                </td>
+                                                <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
+                                                  <button
+                                                    onClick={() => {
+                                                      if (cm) { setBoxMatPicker({ field: "__cm_" + cm.id, label: r.d.label, oldValue: cm.value || "", oldId: cm.itemId ?? null, subSheetId }); return; }
+                                                      const entry = newEntry("", null);
+                                                      updateSheetField(subSheetId, "customMaterials", [...cms, entry]);
+                                                      setBoxMatPicker({ field: "__cm_" + entry.id, label: r.d.label, oldValue: "", subSheetId });
+                                                    }}
+                                                    disabled={usesMaster} title={usesMaster ? "Untick Same materials as Quotation Details to change this sheet's material" : "Browse"}
+                                                    style={{ background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", padding: "3px 7px", fontSize: 13, opacity: usesMaster ? 0.4 : 1, cursor: usesMaster ? "not-allowed" : "pointer" }}
+                                                  >🔍</button>
+                                                </td>
+                                              </tr>
+                                            );
+                                          }
+                                          const cm = r.cm; const cmLocked = usesMaster && cm.fromMaster != null;
+                                          return (
+                                            <tr key={cm.id} style={{ background: "#fffbeb" }}>
                                           <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
-                                            <input type="text" value={cm.label || ""} onChange={(e) => updateSheetField(subSheetId, "customMaterials", (sheet.customMaterials || []).map((m) => m.id === cm.id ? { ...m, label: e.target.value } : m))} placeholder="Label..." style={{ width: "100%", fontSize: 12, padding: "3px 6px", fontWeight: 600, color: "#374151", background: "#fff" }} />
+                                            <input type="text" disabled={cmLocked} value={cm.label || ""} onChange={(e) => updateSheetField(subSheetId, "customMaterials", (sheet.customMaterials || []).map((m) => m.id === cm.id ? { ...m, label: e.target.value } : m))} placeholder="Label..." style={{ width: "100%", fontSize: 12, padding: "3px 6px", fontWeight: 600, color: "#374151", background: "#fff" }} />
                                           </td>
                                           <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe" }}>
-                                            <input type="text" value={cm.value || ""} onChange={(e) => { const newVal = e.target.value; const oldVal = cm.value || ""; const upd = (sheet.customMaterials || []).map((m) => m.id === cm.id ? { ...m, value: newVal, itemId: null } : m); renameMaterialInParts({ customMaterials: upd }, oldVal, newVal, null, null, subSheetId); }} placeholder="Select..." style={{ width: "100%", fontSize: 12, padding: "3px 6px" }} />
+                                            <input type="text" disabled={cmLocked} value={cm.value || ""} onChange={(e) => { const newVal = e.target.value; const oldVal = cm.value || ""; const upd = (sheet.customMaterials || []).map((m) => m.id === cm.id ? { ...m, value: newVal, itemId: null } : m); renameMaterialInParts({ customMaterials: upd }, oldVal, newVal, null, null, subSheetId); }} placeholder="Select..." style={{ width: "100%", fontSize: 12, padding: "3px 6px" }} />
                                           </td>
                                           <td style={{ padding: "4px 6px", borderBottom: "1px solid #ede9fe", textAlign: "center", display: "flex", gap: 4 }}>
-                                            <button onClick={() => setBoxMatPicker({ field: `__cm_${cm.id}`, label: cm.label || "Material", oldValue: cm.value || "", subSheetId })} title="Browse" style={{ background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", padding: "3px 7px", fontSize: 13 }}>🔍</button>
-                                            <button onClick={() => updateSheetField(subSheetId, "customMaterials", (sheet.customMaterials || []).filter((m) => m.id !== cm.id))} style={{ background: "#dc2626", padding: "3px 7px", fontSize: 12 }} title="Remove">✕</button>
+                                            <button onClick={() => setBoxMatPicker({ field: `__cm_${cm.id}`, label: cm.label || "Material", oldValue: cm.value || "", subSheetId })} disabled={cmLocked} title="Browse" style={{ background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", padding: "3px 7px", fontSize: 13, opacity: cmLocked ? 0.4 : 1, cursor: cmLocked ? "not-allowed" : "pointer" }}>🔍</button>
+                                            {!cmLocked && <button onClick={() => updateSheetField(subSheetId, "customMaterials", (sheet.customMaterials || []).filter((m) => m.id !== cm.id))} style={{ background: "#dc2626", padding: "3px 7px", fontSize: 12 }} title="Remove">✕</button>}
                                           </td>
                                         </tr>
-                                      ))}
+                                          );
+                                        });
+                                      })()}
                                       <tr>
                                         <td colSpan={3} style={{ padding: "5px 8px" }}>
                                           <button
@@ -3298,11 +3570,14 @@ function Projects() {
                                           >+ Add Material</button>
                                         </td>
                                       </tr>
+                                      <tr style={{ height: "100%" }}><td colSpan={3} style={{ padding: 0 }} /></tr>
                                     </tbody>
                                   </table>
+                                  </div>
 
                                   {/* Fields table */}
-                                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                                  <div style={{ display: "flex", flexDirection: "column" }}>
+                                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, flex: 1 }}>
                                     <thead>
                                       <tr>
                                         <th style={{ background: "#1e3a5f", color: "#fff", padding: "7px 10px", textAlign: "left", fontWeight: 600, fontSize: 12 }}>Field</th>
@@ -3380,8 +3655,10 @@ function Projects() {
                                           >+ Add Field</button>
                                         </td>
                                       </tr>
+                                      <tr style={{ height: "100%" }}><td colSpan={3} style={{ padding: 0 }} /></tr>
                                     </tbody>
                                   </table>
+                                  </div>
 
                                 </div>
 
@@ -4068,6 +4345,14 @@ function Projects() {
           prices={prices}
           onSelect={(p) => {
             const f = boxMatPicker.field;
+            if (boxMatPicker.master) {
+              if (f.startsWith("__cm_")) {
+                const cid = Number(f.replace("__cm_", ""));
+                setMasterCustom((masterMatsOf(activeBox).custom || []).map((m) => m.id === cid ? { ...m, value: p.materialName, itemId: p.id ?? null } : m));
+              } else setBoxMaster(f, p.materialName, p.id ?? null);
+              setBoxMatPicker(null);
+              return;
+            }
             const subSheetId = boxMatPicker.subSheetId ?? null;
             const sheetObj = subSheetId == null ? activeBox : (activeBox.subSheets || []).find((s) => s.id === subSheetId);
             const oldMat = boxMatPicker.oldValue || "";
