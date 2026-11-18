@@ -240,7 +240,29 @@ export function findOversizedPieces(rows, getStockSize) {
  * getStockSize: (material) => { sheetW, sheetH } — defaults to 2440×1220.
  * returns     : { [material]: sheetCount }
  */
-export function computeSheetCounts(parts, getStockSize = () => ({}), kerf = 0) {
+/**
+ * Sheets per material from a packSheets() result. With `optimize` on, only
+ * the material actually used is counted: every full sheet counts whole, but
+ * the least-filled (final, partly used) sheet counts pro-rata by the area
+ * packed on it — e.g. 2 full sheets + one 40%-filled sheet = 2.4.
+ */
+export function sheetQtyByMaterial(packed, optimize = false) {
+  const counts = {};
+  const fills = {};
+  (packed || []).forEach((s) => {
+    counts[s.material] = (counts[s.material] || 0) + 1;
+    const used = (s.placements || []).reduce((a, p) => a + p.w * p.h, 0);
+    const fill = Math.min(1, used / ((s.sheetW * s.sheetH) || 1));
+    fills[s.material] = Math.min(fills[s.material] ?? 1, fill);
+  });
+  if (!optimize) return counts;
+  Object.keys(counts).forEach((m) => {
+    counts[m] = Math.round((counts[m] - 1 + fills[m]) * 100) / 100;
+  });
+  return counts;
+}
+
+export function computeSheetCounts(parts, getStockSize = () => ({}), kerf = 0, optimize = false) {
   const rows = (parts || [])
     .filter((p) => p.material && +p.lengthMm && +p.widthMm && +p.qty)
     .map((p, idx) => ({
@@ -254,7 +276,5 @@ export function computeSheetCounts(parts, getStockSize = () => ({}), kerf = 0) {
     }));
 
   const sheets = packSheets(rows, getStockSize, kerf);
-  const counts = {};
-  sheets.forEach((s) => { counts[s.material] = (counts[s.material] || 0) + 1; });
-  return counts;
+  return sheetQtyByMaterial(sheets, optimize);
 }

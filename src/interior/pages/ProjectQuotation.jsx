@@ -126,7 +126,8 @@ function computeRoomCost(room, model, projectObj, prices, materialStockSettings)
   const sheetCounts = computeSheetCounts(
     rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty, rotation: r.rotation })),
     getStockSize,
-    kerfFor(projectObj)
+    kerfFor(projectObj),
+    !!room.optimizeCost
   );
   const materials = [...new Set(rows.map((r) => r.material))];
   const areaSqMm = rows.reduce((s, r) => s + r.w * r.h * r.qty, 0);
@@ -221,7 +222,8 @@ function computeRoomMrpSavings(room, prices, materialStockSettings, projectObj) 
   const sheetCounts = computeSheetCounts(
     rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty, rotation: r.rotation })),
     getStockSize,
-    kerfFor(projectObj)
+    kerfFor(projectObj),
+    !!room.optimizeCost
   );
   const materials = [...new Set(rows.map((r) => r.material))];
   const edgeTotals = buildRoomEdgeBanding(room, prices);
@@ -279,7 +281,8 @@ function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj,
     const sheetCounts = computeSheetCounts(
       sheetRows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty, rotation: r.rotation })),
       (mat) => getStockSizeFor(materialStockSettings, mat),
-      kerfFor(projectObj)
+      kerfFor(projectObj),
+      !!room.optimizeCost
     );
     Object.entries(sheetCounts).forEach(([mat, n]) => { byMaterial[mat] = (byMaterial[mat] || 0) + n; });
     const edgeTotals = buildRoomEdgeBanding(room, prices);

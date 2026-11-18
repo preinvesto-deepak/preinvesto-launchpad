@@ -29,7 +29,8 @@ export function quotationMaterialRows(rooms, prices, materialStockSettings, kerf
     const sheets = computeSheetCounts(
       rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty, rotation: r.rotation })),
       getStock,
-      kerf
+      kerf,
+      !!room.optimizeCost
     );
     Object.entries(sheets).forEach(([mat, n]) => add(mat, n, "Sheet"));
 

@@ -52,7 +52,8 @@ function ProjectBOQ() {
       const sheetCounts = computeSheetCounts(
         rows.map((r) => ({ material: r.material, lengthMm: r.w, widthMm: r.h, qty: r.qty, rotation: r.rotation })),
         getStockSize,
-        kerfFor(selectedProjectObj)
+        kerfFor(selectedProjectObj),
+        !!room.optimizeCost
       );
       const materials = [...new Set(rows.map((r) => r.material))];
       const materialRateDetails = materials.map((mat) => {

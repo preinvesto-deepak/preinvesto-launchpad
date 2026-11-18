@@ -147,6 +147,25 @@ function ImpersonationBanner() {
  * real saved data with blank/seed state — this banner is what makes that
  * silent-but-safe failure visible instead of silent-and-confusing.
  */
+// Until the saved workspace arrives, state holds sample data — hide it behind
+// a loading screen so it never flashes (or gets edited) before the real data.
+function WorkspaceGate({ children, fallback }: { children: React.ReactNode; fallback: React.ReactNode }) {
+  const { isLoaded, loadError } = useAppData();
+  // On a failed load the banner explains; keep the app hidden rather than show sample data.
+  if (isLoaded) return <>{children}</>;
+  return <>{loadError ? null : fallback}</>;
+}
+
+function WorkspaceLoading() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: "80px 20px", color: "#6b7280", fontSize: 14 }}>
+      <div style={{ width: 28, height: 28, border: "3px solid #e5e7eb", borderTopColor: "#7c3aed", borderRadius: "50%", animation: "ws-spin 0.8s linear infinite" }} />
+      <style>{"@keyframes ws-spin{to{transform:rotate(360deg)}}"}</style>
+      Loading your workspace…
+    </div>
+  );
+}
+
 function WorkspaceLoadBanner() {
   const { loadError } = useAppData();
   if (!loadError) return null;
@@ -329,8 +348,9 @@ const InteriorShell = () => {
           <PermissionBanner />
           <SaveStatus />
           <div className="app-layout">
-            <Sidebar />
+            <WorkspaceGate fallback={<div style={{ width: 240, flexShrink: 0 }} />}><Sidebar /></WorkspaceGate>
             <div className="main-content" style={noPadTop ? { paddingTop: 0 } : {}}>
+              <WorkspaceGate fallback={<WorkspaceLoading />}>
               <PageHeader />
               <Routes>
                 <Route index element={<Dashboard />} />
@@ -350,6 +370,7 @@ const InteriorShell = () => {
                 <Route path="customer-preview" element={<OwnerOnly><CustomerPreview /></OwnerOnly>} />
                 <Route path="profile" element={<OwnerOnly><Profile /></OwnerOnly>} />
               </Routes>
+              </WorkspaceGate>
             </div>
           </div>
         </div>

@@ -9,7 +9,7 @@ import { useUnsavedChanges } from "../context/UnsavedChangesContext";
 import { mmToFeet, feetToMm, roundTo2, formatCurrency } from "../utils/unitConversions";
 import CutSheetOptimizer from "./CutSheetOptimizer";
 import NumInput from "../components/NumInput";
-import { packSheets, findOversizedPieces } from "../utils/binPack";
+import { packSheets, findOversizedPieces, sheetQtyByMaterial } from "../utils/binPack";
 import { TAPE_ITEM, expandSetItem } from "../utils/projectRows";
 import { materialCalcGlobals } from "../utils/materialCalc";
 import { globalKerfMm } from "../utils/kerf";
@@ -810,8 +810,7 @@ function TemplateMaster() {
       return { sheetW: s?.sheetW || 2440, sheetH: s?.sheetH || 1220, sheetTexture: s?.sheetTexture ?? 1 };
     };
     const packed = packSheets(rows, getStockSize, globalKerfMm());
-    const sheetCount = {};
-    packed.forEach((s) => { sheetCount[s.material] = (sheetCount[s.material] || 0) + 1; });
+    const sheetCount = sheetQtyByMaterial(packed, !!draft?.optimizeCost);
     const materials = [...new Set(rows.map((r) => r.material).filter(Boolean))];
     return materials.map((material) => {
       const priceEntry = (prices || []).find((p) => p.materialName === material);
@@ -1655,6 +1654,10 @@ function TemplateMaster() {
                 title="Pick the materials once for the whole template — every box and sheet uses them unless a sheet is unticked"
                 style={{ fontSize: 12, padding: "5px 12px", background: qMatOpen ? "#7c3aed" : "#ede9fe", color: qMatOpen ? "#fff" : "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 6, fontWeight: 600 }}
               >🎨 Material Selection {qMatOpen ? "▲" : "▼"}</button>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginLeft: 14, fontSize: 12, fontWeight: 600, color: "#374151", cursor: "pointer", verticalAlign: "middle" }} title="Off by default. When ticked, cost counts only the material actually used: full sheets in full, the last partly-filled sheet pro-rata by the area used.">
+                <input type="checkbox" checked={!!draft.optimizeCost} onChange={(e) => { const v = e.target.checked; setDraft((prev) => ({ ...prev, optimizeCost: v })); setIsDirty(true); }} />
+                Cost only material used
+              </label>
                     {qMatOpen && (() => {
                       const master = masterMatsOf(draft);
                       const customs = master.custom || [];

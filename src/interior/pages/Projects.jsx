@@ -16,7 +16,7 @@ import CutSheetOptimizer from "./CutSheetOptimizer";
 import NumInput from "../components/NumInput";
 import RequirementsPanel from "../components/RequirementsPanel";
 import ProjectQuotation from "./ProjectQuotation";
-import { packSheets, findOversizedPieces } from "../utils/binPack";
+import { packSheets, findOversizedPieces, sheetQtyByMaterial } from "../utils/binPack";
 import { TAPE_ITEM, expandSetItem, setComponentsOf } from "../utils/projectRows";
 import { calcFor, materialCalcGlobals, isMaterialCalcUniversal } from "../utils/materialCalc";
 import { kerfFor, isKerfUniversal } from "../utils/kerf";
@@ -1600,7 +1600,7 @@ function Projects() {
       fieldLabels: { ...(tb.fieldLabels || {}) },
     }));
     setSubProjects((prev) => prev.map((s) => s.id === roomId
-      ? { ...s, boxes: s.qMat ? newBoxes.map((b) => serviceOf(b) ? b : applyMasterToBoxForce(b, masterMatsOf(s), prices)) : newBoxes }
+      ? { ...s, optimizeCost: !!(template.optimizeCost || s.optimizeCost), boxes: s.qMat ? newBoxes.map((b) => serviceOf(b) ? b : applyMasterToBoxForce(b, masterMatsOf(s), prices)) : newBoxes }
       : s));
     if (roomId === activeRoom?.id) setActiveBoxId(newBoxes[0].id);
     setPendingTemplate(null);
@@ -1853,8 +1853,7 @@ function Projects() {
       return { sheetW: s?.sheetW || 2440, sheetH: s?.sheetH || 1220, sheetTexture: s?.sheetTexture ?? 1 };
     };
     const packed = packSheets(rows, getStockSize, projectKerf);
-    const sheetCount = {};
-    packed.forEach((s) => { sheetCount[s.material] = (sheetCount[s.material] || 0) + 1; });
+    const sheetCount = sheetQtyByMaterial(packed, !!activeRoom?.optimizeCost);
     const materials = [...new Set(rows.map((r) => r.material).filter(Boolean))];
     return materials.map((material) => {
       const priceEntry = (prices || []).find((p) => p.materialName === material);
@@ -2703,6 +2702,10 @@ function Projects() {
                         title="Pick the materials once for the whole room — every box and sheet uses them unless a sheet is unticked"
                         style={{ fontSize: 12, padding: "5px 12px", background: qMatOpen ? "#7c3aed" : "#ede9fe", color: qMatOpen ? "#fff" : "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 6, fontWeight: 600 }}
                       >🎨 Material Selection {qMatOpen ? "▲" : "▼"}</button>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }} title="Off by default. When ticked, cost counts only the material actually used: full sheets in full, the last partly-filled sheet pro-rata by the area used.">
+                        <input type="checkbox" checked={!!activeRoom.optimizeCost} onChange={(e) => { const v = e.target.checked; setSubProjects((prev) => prev.map((r) => r.id === activeRoom.id ? { ...r, optimizeCost: v } : r)); }} />
+                        Cost only material used
+                      </label>
                       <button onClick={() => openEditRoom(activeRoom)} style={{ background: "#6b7280", padding: "5px 12px", fontSize: 12 }}>Edit Room</button>
                       {confirmDeleteRoomId === activeRoom.id ? (
                         <>
