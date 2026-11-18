@@ -1,3 +1,4 @@
+import { hideInCustomerView } from "../utils/customerView";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import jsPDF from "jspdf";
@@ -1295,7 +1296,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
             <h4 style={{ margin: "0 0 10px" }}>Quotation & Pricing</h4>
             <div style={inputRow}><span style={labelStyle}>Quotation No</span><input type="text" value={quotationNo} onChange={(e) => { setQuotationNo(e.target.value); persistField("quotationNo", e.target.value); }} /></div>
             <div style={inputRow}><span style={labelStyle}>Date</span><input type="date" value={quotationDate} onChange={(e) => setQuotationDate(e.target.value)} /></div>
-            <div style={inputRow}><span style={labelStyle}>Markup %</span><input type="number" value={markupPercent} onChange={(e) => { setMarkupPercent(e.target.value); persistField("markupPercent", e.target.value); }} /></div>
+            {!hideInCustomerView(companyProfile, "markup") && <div style={inputRow}><span style={labelStyle}>Markup %</span><input type="number" value={markupPercent} onChange={(e) => { setMarkupPercent(e.target.value); persistField("markupPercent", e.target.value); }} /></div>}
             <div style={inputRow}><span style={labelStyle}>Discount (₹)</span><input type="number" value={discountAmount} onChange={(e) => { setDiscountAmount(e.target.value); persistField("discountAmount", e.target.value); }} /></div>
             <div style={inputRow}><span style={labelStyle}>GST %</span><input type="number" value={gstPercent} onChange={(e) => { setGstPercent(e.target.value); persistField("gstPercent", e.target.value); }} /></div>
           </div>
@@ -1447,12 +1448,6 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
                   )}
                 </Fragment>
               ))}
-              <tr style={{ background: "#1e3a5f" }}>
-                <td colSpan={6} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Sub Total</td>
-                {compareVariants.map((v) => (
-                  <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 12, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>{formatCurrency(v.st)}</td>
-                ))}
-              </tr>
               {Number(discountAmount) > 0 && (
                 <tr style={{ background: "#f1f5f9" }}>
                   <td colSpan={6} style={{ padding: "8px 14px", fontWeight: 600, color: "#374151", fontSize: 12 }}>Discount</td>
@@ -1461,12 +1456,6 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
                   ))}
                 </tr>
               )}
-              <tr style={{ background: "#f1f5f9" }}>
-                <td colSpan={6} style={{ padding: "8px 14px", fontWeight: 600, color: "#374151", fontSize: 12 }}>GST {gstPercent}%</td>
-                {compareVariants.map((v) => (
-                  <td key={v.model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", color: "#374151", fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>{formatCurrency(v.gst)}</td>
-                ))}
-              </tr>
               <tr style={{ background: "#334e68" }}>
                 <td colSpan={6} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Grand Total</td>
                 {compareVariants.map((v) => (

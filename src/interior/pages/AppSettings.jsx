@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAppData } from "../context/AppDataContext";
 import { materialCalcGlobals } from "../utils/materialCalc";
+import { CUSTOMER_HIDE_ITEMS } from "../utils/customerView";
 
 const card = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: "16px 20px", marginBottom: 16, maxWidth: 760 };
 const numIn = { width: 80, fontSize: 14, padding: "5px 8px", textAlign: "center", border: "1px solid #cbd5e1", borderRadius: 6 };
@@ -35,6 +36,7 @@ function Num({ value, onChange, step = 1, width }) {
 // Which settings sections a search matches (title, field names and keywords).
 const SECTIONS = {
   kerf: "cutsheet optimizer kerf dimension saw blade cut sheet nesting sheet count apply all projects",
+  customer: "customer view hide total sft cost markup profit quotation material summary room estimation",
   material: "material calculation material summary fevicol merino multiplier laminate glue masking tape edge band divisor gst percent apply all projects room",
 };
 
@@ -80,7 +82,8 @@ function AppSettings() {
   const setRoomCalc = (id, field, v) => setSubProjects((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: v } : r)));
   const roomVal = (r, field) => (r[field] != null ? r[field] : g[field]);
 
-  const nothing = !show("kerf") && !show("material");
+  const customerView = companyProfile?.customerView === true;
+  const nothing = !show("kerf") && !show("material") && !show("customer");
 
   return (
     <div style={{ padding: "4px 0" }}>
@@ -92,6 +95,34 @@ function AppSettings() {
           style={{ width: 240, fontSize: 13, padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 8 }}
         />
       </div>
+
+      {show("customer") && (
+        <div style={card}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Switch on={customerView} onChange={(on) => setProfile({ customerView: on })} />
+            <div>
+              <div style={label}>Customer view</div>
+              <div style={hint}>
+                {customerView ? "On — the ticked items below are hidden." : "Off — everything is shown."}
+              </div>
+            </div>
+          </div>
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #f3f4f6", opacity: customerView ? 1 : 0.55 }}>
+            <div style={{ ...hint, marginBottom: 6 }}>Hide when Customer view is on:</div>
+            {CUSTOMER_HIDE_ITEMS.map((it) => (
+              <label key={it.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#374151", padding: "3px 0", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={companyProfile?.customerHide?.[it.key] !== false}
+                  onChange={(e) => setProfile({ customerHide: { ...(companyProfile?.customerHide || {}), [it.key]: e.target.checked } })}
+                  style={{ width: 15, height: 15, cursor: "pointer" }}
+                />
+                {it.label}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       {nothing && <p style={{ ...hint, margin: "8px 0" }}>No settings match “{query}”.</p>}
 

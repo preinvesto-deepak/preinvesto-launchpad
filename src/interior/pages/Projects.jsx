@@ -1,3 +1,4 @@
+import { hideInCustomerView } from "../utils/customerView";
 import { SHEET_MAT_FIELDS, MASTER_FIELDS, matNameOf, masterMatsOf, sheetUsesMaster, renamePartMats, applyMasterToSheet, applyMasterToBox, applyMasterToBoxForce } from "../utils/boxMaterials";
 import * as XLSX from "xlsx";
 import { useState, useEffect, Fragment } from "react";
@@ -718,6 +719,9 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
   const [showUnused, setShowUnused] = useState(false);
   const [ratesOn, setRatesOn] = useState(true);
   const basis = "incl"; // rates and amounts here always include GST
+  const { companyProfile: anProfile } = useAppData();
+  const hideAnQty = hideInCustomerView(anProfile, "analysisQty");
+  const hideAnRate = hideInCustomerView(anProfile, "rates");
   const [nameQ, setNameQ] = useState("");
   const [groupQ, setGroupQ] = useState("");
   const [picker, setPicker] = useState(null); // { material, model, group }
@@ -802,6 +806,9 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
     return t;
   };
   const grand = totals(visible);
+  // Grand Total carries the project's profit: the Markup % set on its Quotation tab.
+  const markupPct = Number(project?.quotationSettings?.markupPercent) || 0;
+  const withProfit = (n) => n * (1 + markupPct / 100);
   const pick = (t, mo) => (basis === "incl" ? t[mo].incl : t[mo].excl);
 
   // Excel export of what the table is showing right now (same service / group /
@@ -828,8 +835,8 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
     });
     const rows = [head1, ...body];
     if (showRates && visible.length) {
-      const tot = ["Grand Total (incl. GST)", "", "", ""];
-      PROJ_MODELS.forEach((mo) => tot.push("", "", r2(grand[mo].incl)));
+      const tot = [markupPct > 0 ? `Grand Total (incl. GST & ${markupPct}% profit)` : "Grand Total (incl. GST)", "", "", ""];
+      PROJ_MODELS.forEach((mo) => tot.push("", "", r2(withProfit(grand[mo].incl))));
       tot.push(r2(grand.premium.incl - grand.economy.incl), grand.economy.incl > 0 ? r2(((grand.premium.incl - grand.economy.incl) / grand.economy.incl) * 100) : "");
       rows.push(tot);
     }
@@ -898,7 +905,8 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
   const inp = { fontSize: 11, padding: "3px 5px", borderRadius: 5, border: "1px solid #d1d5db", boxSizing: "border-box" };
   const search = { padding: "6px 10px", fontSize: 12, borderRadius: 8, border: "1px solid #d1d5db", width: 130, boxSizing: "border-box" };
   const money = (n) => (n > 0 ? formatCurrency(n) : <span style={{ color: "#d1d5db" }}>—</span>);
-  const leadCols = 4;
+  const leadCols = hideAnQty ? 2 : 4;
+  const mc = hideAnRate ? 2 : 3; // columns per model: brand, [rate], amount
 
   return (
     <div style={{ padding: "20px 24px" }}>
@@ -1001,25 +1009,25 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
         // The table scrolls inside its own box, so its heading (Group / Material / Qty /
         // the three models) stays put while you scroll through the materials.
         <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "auto", maxHeight: "calc(100vh - 230px)" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: showRates ? 1180 : 480 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: showRates ? (hideAnRate ? 900 : 1180) : 480 }}>
             <thead style={{ position: "sticky", top: 0, zIndex: 3 }}>
               {showRates && (
                 <tr>
                   <th colSpan={leadCols} style={{ background: "#f1f5f9", color: "#374151", padding: "8px 12px", textAlign: "left", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid #e5e7eb" }}>
-                    Grand Total <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>· incl. GST{activeService !== "All" || activeGroup !== "All" || hideSame || groupQ || nameQ ? " · filtered rows" : ""}</span>
+                    Grand Total <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>· incl. GST{markupPct > 0 ? ` & ${markupPct}% profit` : ""}{activeService !== "All" || activeGroup !== "All" || hideSame || groupQ || nameQ ? " · filtered rows" : ""}</span>
                   </th>
                   {PROJ_MODELS.map((mo) => (
-                    <th key={mo} colSpan={3} style={{ background: "#fff", color: PROJ_MODEL_COLORS[mo], padding: "8px 12px", textAlign: "center", fontSize: 17, fontWeight: 800, borderTop: `3px solid ${PROJ_MODEL_COLORS[mo]}`, borderLeft: "2px solid #e5e7eb", borderBottom: "1px solid #e5e7eb", whiteSpace: "nowrap" }}>
-                      {formatCurrency(grand[mo].incl)}
+                    <th key={mo} colSpan={mc} style={{ background: "#fff", color: PROJ_MODEL_COLORS[mo], padding: "8px 12px", textAlign: "center", fontSize: 17, fontWeight: 800, borderTop: `3px solid ${PROJ_MODEL_COLORS[mo]}`, borderLeft: "2px solid #e5e7eb", borderBottom: "1px solid #e5e7eb", whiteSpace: "nowrap" }}>
+                      {formatCurrency(withProfit(grand[mo].incl))}
                     </th>
                   ))}
                   <th style={{ background: "#f1f5f9", borderLeft: "2px solid #e5e7eb", borderBottom: "1px solid #e5e7eb" }} />
                 </tr>
               )}
               <tr>
-                {["Group", "Material", "Qty", "UOM"].map((h, i) => <th key={h} rowSpan={showRates ? 2 : 1} style={{ ...th, textAlign: i < 2 ? "left" : "center" }}>{h}</th>)}
+                {["Group", "Material", "Qty", "UOM"].filter((h) => !hideAnQty || h === "Group" || h === "Material").map((h, i) => <th key={h} rowSpan={showRates ? 2 : 1} style={{ ...th, textAlign: i < 2 ? "left" : "center" }}>{h}</th>)}
                 {showRates && PROJ_MODELS.map((mo) => (
-                  <th key={mo} colSpan={3} style={{ ...th, background: PROJ_MODEL_COLORS[mo], textAlign: "center", borderLeft: "2px solid rgba(255,255,255,0.3)" }}>{PROJ_MODEL_LABELS[mo]}</th>
+                  <th key={mo} colSpan={mc} style={{ ...th, background: PROJ_MODEL_COLORS[mo], textAlign: "center", borderLeft: "2px solid rgba(255,255,255,0.3)" }}>{PROJ_MODEL_LABELS[mo]}</th>
                 ))}
                 {showRates && <th rowSpan={2} style={{ ...th, textAlign: "center", borderLeft: "2px solid rgba(255,255,255,0.3)" }}>Premium vs Economy</th>}
               </tr>
@@ -1028,7 +1036,7 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
                   {PROJ_MODELS.map((mo) => (
                     <Fragment key={mo}>
                       <th style={{ ...sub, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>Brand</th>
-                      <th style={sub}>Rate +GST</th>
+                      {!hideAnRate && <th style={sub}>Rate +GST</th>}
                       <th style={sub}>Amount</th>
                     </Fragment>
                   ))}
@@ -1048,8 +1056,8 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
                         {row.boxLabel && <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#6b7280" }}>— {row.boxLabel}</span>}
                         {row.unused && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: "#9ca3af" }}>not used</span>}
                       </td>
-                      <td style={{ ...td, textAlign: "center", fontWeight: 700, color: "#374151" }}>{row.requiredQty}</td>
-                      <td style={{ ...td, textAlign: "center", color: "#6b7280" }}>{row.unit}</td>
+                      {!hideAnQty && <td style={{ ...td, textAlign: "center", fontWeight: 700, color: "#374151" }}>{row.requiredQty}</td>}
+                      {!hideAnQty && <td style={{ ...td, textAlign: "center", color: "#6b7280" }}>{row.unit}</td>}
                       {showRates && PROJ_MODELS.map((mo) => {
                         const c = row.m[mo];
                         // Same warning Material Models gives: this project's brand
@@ -1073,7 +1081,7 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
                                 )}
                               </div>
                             </td>
-                            <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
+                            {!hideAnRate && <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
                               <input type="number" placeholder="0.00" value={shownRate}
                                 readOnly={c.linked || !canEdit}
                                 title={c.linked ? "From Items Pricing — edit it there" : c.isDefault ? "Default from Items Pricing; type a rate to override for this model" : `Rate (${basis === "incl" ? "incl" : "excl"} GST)`}
@@ -1084,7 +1092,7 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
                                   onChange={(e) => onGst(row.material, mo, e.target.value, c.rate)}
                                   style={{ ...inp, width: 34, marginLeft: 3, textAlign: "center", color: "#6b7280" }} />
                               )}
-                            </td>
+                            </td>}
                             <td style={{ ...td, textAlign: "center", fontWeight: 600, color: "#111827" }}>{money(basis === "incl" ? c.inclAmount : c.amount)}</td>
                           </Fragment>
                         );
@@ -1101,7 +1109,7 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
                         <tr style={{ background: "#eef2ff" }}>
                           <td colSpan={leadCols} style={{ ...td, fontWeight: 700, color: "#374151" }}>{row.group} Total</td>
                           {PROJ_MODELS.map((mo) => (
-                            <td key={mo} colSpan={3} style={{ ...td, textAlign: "right", fontWeight: 700, color: PROJ_MODEL_COLORS[mo], borderLeft: "1px solid #e0e7ff" }}>{formatCurrency(pick(t, mo))}</td>
+                            <td key={mo} colSpan={mc} style={{ ...td, textAlign: "right", fontWeight: 700, color: PROJ_MODEL_COLORS[mo], borderLeft: "1px solid #e0e7ff" }}>{formatCurrency(pick(t, mo))}</td>
                           ))}
                           <td style={{ ...td, borderLeft: "1px solid #e0e7ff" }} />
                         </tr>
@@ -1157,7 +1165,11 @@ function Projects() {
     templateFolders,
     designGallery,
     isLoaded,
+    companyProfile,
   } = useAppData();
+  const hideSumTotals = hideInCustomerView(companyProfile, "totals");
+  const hideSumQty = hideInCustomerView(companyProfile, "summaryQty");
+  const hideSumRate = hideInCustomerView(companyProfile, "rates");
 
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -3955,16 +3967,16 @@ function Projects() {
                                     <tr>
                                       <th rowSpan={2} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Group</th>
                                       <th rowSpan={2} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Material</th>
-                                      <th rowSpan={2} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Required Qty</th>
-                                      <th rowSpan={2} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>UOM</th>
+                                      {!hideSumQty && <th rowSpan={2} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Required Qty</th>}
+                                      {!hideSumQty && <th rowSpan={2} style={{ background: "#1e3a5f", color: "#fff", padding: "9px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>UOM</th>}
                                       {PROJ_MODELS.map((model) => (
-                                        <th key={model} colSpan={2} style={{ background: PROJ_MODEL_COLORS[model], color: "#fff", padding: "6px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.3)" }}>{PROJ_MODEL_LABELS[model]}</th>
+                                        <th key={model} colSpan={hideSumRate ? 1 : 2} style={{ background: PROJ_MODEL_COLORS[model], color: "#fff", padding: "6px 14px", fontWeight: 700, fontSize: 11, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.3)" }}>{PROJ_MODEL_LABELS[model]}</th>
                                       ))}
                                     </tr>
                                     <tr>
                                       {PROJ_MODELS.map((model) => (
                                         <Fragment key={model}>
-                                          <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.15)" }}>Rate +GST</th>
+                                          {!hideSumRate && <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderLeft: "2px solid rgba(255,255,255,0.15)" }}>Rate +GST</th>}
                                           <th style={{ background: "#1e3a5f", color: "#cbd5e1", padding: "6px 10px", fontWeight: 600, fontSize: 10, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Amount</th>
                                         </Fragment>
                                       ))}
@@ -3980,16 +3992,16 @@ function Projects() {
                                           {row.material}
                                           {row.boxLabel && <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#6b7280" }}>— {row.boxLabel}</span>}
                                         </td>
-                                        <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#374151", fontWeight: 700 }}>{row.requiredQty}</td>
-                                        <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280" }}>{row.unit}</td>
+                                        {!hideSumQty && <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#374151", fontWeight: 700 }}>{row.requiredQty}</td>}
+                                        {!hideSumQty && <td style={{ padding: "8px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280" }}>{row.unit}</td>}
                                         {PROJ_MODELS.map((model) => {
                                           const rate = modelRateFor(row.material, model);
                                           const amount = row.requiredQty * rate;
                                           return (
                                             <Fragment key={model}>
-                                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", borderLeft: "1px solid #e5e7eb", textAlign: "center", color: PROJ_MODEL_COLORS[model] }}>
+                                              {!hideSumRate && <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", borderLeft: "1px solid #e5e7eb", textAlign: "center", color: PROJ_MODEL_COLORS[model] }}>
                                                 {rate > 0 ? formatCurrency(rate) : <span style={{ color: "#d1d5db" }}>—</span>}
-                                              </td>
+                                              </td>}
                                               <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: "center", fontWeight: 600, color: "#111827" }}>
                                                 {amount > 0 ? formatCurrency(amount) : <span style={{ color: "#d1d5db" }}>—</span>}
                                               </td>
@@ -3998,28 +4010,30 @@ function Projects() {
                                         })}
                                       </tr>
                                     ))}
+                                    {!hideSumTotals && (<>
                                     <tr style={{ background: "#1e3a5f" }}>
                                       <td colSpan={2} style={{ padding: "8px 14px", fontWeight: 700, color: "#fff", fontSize: 12 }}>Total (Incl. GST)</td>
-                                      <td style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 12 }}>
+                                      {!hideSumQty && <td style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 12 }}>
                                         {summaryRows.reduce((s, r) => s + r.requiredQty, 0)}
-                                      </td>
-                                      <td style={{ padding: "8px 14px", textAlign: "center", color: "#cbd5e1", fontSize: 12 }}>Sheets</td>
+                                      </td>}
+                                      {!hideSumQty && <td style={{ padding: "8px 14px", textAlign: "center", color: "#cbd5e1", fontSize: 12 }}>Sheets</td>}
                                       {PROJ_MODELS.map((model) => (
-                                        <td key={model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 12, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>
+                                        <td key={model} colSpan={hideSumRate ? 1 : 2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: "#fff", fontSize: 12, borderLeft: "2px solid rgba(255,255,255,0.15)" }}>
                                           {formatCurrency(modelTotals[model])}
                                         </td>
                                       ))}
                                     </tr>
                                     <tr style={{ background: "#e5e7eb" }}>
-                                      <td colSpan={4} style={{ padding: "8px 14px", fontWeight: 700, color: "#374151", fontSize: 12 }}>
+                                      <td colSpan={hideSumQty ? 2 : 4} style={{ padding: "8px 14px", fontWeight: 700, color: "#374151", fontSize: 12 }}>
                                         Sft Cost (Incl. GST) <span style={{ fontWeight: 400, color: "#9ca3af" }}>(Total ÷ {roundTo2(totalAreaSft)} sqft)</span>
                                       </td>
                                       {PROJ_MODELS.map((model) => (
-                                        <td key={model} colSpan={2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: PROJ_MODEL_COLORS[model], fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>
+                                        <td key={model} colSpan={hideSumRate ? 1 : 2} style={{ padding: "8px 14px", textAlign: "center", fontWeight: 700, color: PROJ_MODEL_COLORS[model], fontSize: 12, borderLeft: "1px solid #e5e7eb" }}>
                                           {totalAreaSft > 0 ? `${formatCurrency(modelTotals[model] / totalAreaSft)}/sqft` : <span style={{ color: "#d1d5db" }}>—</span>}
                                         </td>
                                       ))}
                                     </tr>
+                                    </>)}
                                   </tbody>
                                 </table>
                               </div>
