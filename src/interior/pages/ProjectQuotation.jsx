@@ -560,22 +560,24 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
   //
   // Wood/laminate is the one exception, handled separately below: every
   // room's real cost (computeRoomCost) always rounds up to whole sheets —
-  // that rounding "wastage" isn't proportional to any one box's size, so
-  // splitting it by area/own-need like the other categories unfairly
-  // penalizes small boxes. Instead, each box is charged its own raw area at
-  // that material's per-mm rate (no rounding), and every box using that
-  // material ANYWHERE IN THE PROJECT — not just this room — splits the
-  // material's total wastage equally between them. The project-wide totals
-  // still land exactly on the real (nested) cost; only which box carries how
-  // much of the wastage changes.
+  // that rounding "wastage" isn't a per-box cost. Each box is charged its own
+  // raw area at that material's per-mm rate (no rounding), and the material's
+  // total project-wide wastage is shared between every box using it in
+  // proportion to its raw area of that material (a small box carries a small
+  // share). The project-wide totals still land exactly on the real (nested)
+  // cost; only which box carries how much of the wastage changes.
   const buildLineItems = (rooms, model) => {
     const rate = (mat) => rateFor(mat, model, selectedProjectObj, prices);
     const roomCosts = rooms.map((room) =>
       computeRoomCost(room, model, selectedProjectObj, prices, materialStockSettings)
     );
 
-    const projectWoodByMaterial = {}; // real cost, summed across every room's own nesting
-    roomCosts.forEach((c) => {
+    // Rooms with "Cost only material used" ticked pay exactly their own
+    // (pro-rata) material cost — they neither pool nor receive any project-wide
+    // wastage; their cost is just split across the room's boxes by raw area.
+    const projectWoodByMaterial = {}; // real cost, summed across every other room's own nesting
+    roomCosts.forEach((c, i) => {
+      if (rooms[i].optimizeCost) return;
       Object.entries(c.woodByMaterial).forEach(([mat, amt]) => {
         projectWoodByMaterial[mat] = (projectWoodByMaterial[mat] || 0) + amt;
       });
@@ -594,31 +596,42 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
     });
 
     const projectRawAreaByMaterial = {};
-    const boxesUsingMaterial = {};
-    boxWoodAreaByMaterial.forEach((byMat) => {
-      Object.entries(byMat).forEach(([mat, areaMm]) => {
-        if (!areaMm) return;
-        projectRawAreaByMaterial[mat] = (projectRawAreaByMaterial[mat] || 0) + areaMm;
-        boxesUsingMaterial[mat] = (boxesUsingMaterial[mat] || 0) + 1;
+    const optBoxRoom = new Map(); // box -> room index, for "cost only material used" rooms
+    const optRoomRawArea = rooms.map(() => ({})); // room index -> { material: areaMm }
+    rooms.forEach((room, ri) => {
+      (room.boxes || []).forEach((box) => {
+        const byMat = boxWoodAreaByMaterial.get(box) || {};
+        Object.entries(byMat).forEach(([mat, areaMm]) => {
+          if (!areaMm) return;
+          if (room.optimizeCost) optRoomRawArea[ri][mat] = (optRoomRawArea[ri][mat] || 0) + areaMm;
+          else projectRawAreaByMaterial[mat] = (projectRawAreaByMaterial[mat] || 0) + areaMm;
+        });
+        if (room.optimizeCost) optBoxRoom.set(box, ri);
       });
     });
 
+    // The material's wastage is shared in proportion to each box's own raw area
+    // of that material, so a small box carries a small share.
     const ratePerMm = {};
-    const wastePerBox = {};
+    const wastePerMm = {};
     Object.keys(projectWoodByMaterial).forEach((mat) => {
       const { sheetW, sheetH } = getStockSizeFor(materialStockSettings, mat);
       ratePerMm[mat] = rate(mat) / (sheetW * sheetH);
-      const baseCost = (projectRawAreaByMaterial[mat] || 0) * ratePerMm[mat];
-      const wasteCost = Math.max(0, projectWoodByMaterial[mat] - baseCost);
-      const n = boxesUsingMaterial[mat] || 0;
-      wastePerBox[mat] = n > 0 ? wasteCost / n : 0;
+      const rawArea = projectRawAreaByMaterial[mat] || 0;
+      const wasteCost = Math.max(0, projectWoodByMaterial[mat] - rawArea * ratePerMm[mat]);
+      wastePerMm[mat] = rawArea > 0 ? wasteCost / rawArea : 0;
     });
 
     const boxWoodAmount = (box) => {
       const byMat = boxWoodAreaByMaterial.get(box) || {};
+      const ri = optBoxRoom.get(box);
       return Object.entries(byMat).reduce((total, [mat, areaMm]) => {
         if (!areaMm) return total;
-        return total + areaMm * (ratePerMm[mat] || 0) + (wastePerBox[mat] || 0);
+        if (ri != null) {
+          const raw = optRoomRawArea[ri][mat] || 0;
+          return total + (raw > 0 ? (roomCosts[ri].woodByMaterial[mat] || 0) * (areaMm / raw) : 0);
+        }
+        return total + areaMm * ((ratePerMm[mat] || 0) + (wastePerMm[mat] || 0));
       }, 0);
     };
 
