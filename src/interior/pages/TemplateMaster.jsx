@@ -1,5 +1,5 @@
 import MaterialModelPicker from "../components/MaterialModelPicker";
-import { masterMatsOf, sheetUsesMaster, applyMasterToSheet, applyMasterToBoxForce } from "../utils/boxMaterials";
+import { masterMatsOf, sheetUsesMaster, applyMasterToSheet, applyMasterToBoxForce, explicitEdgeBand } from "../utils/boxMaterials";
 import { useSheetClipboard } from "../utils/sheetClipboard";
 import SheetTemplates, { isSheetTemplate } from "../components/SheetTemplates";
 import { useState, useEffect, Fragment } from "react";
@@ -9,6 +9,7 @@ import { useUnsavedChanges } from "../context/UnsavedChangesContext";
 import { mmToFeet, feetToMm, roundTo2, formatCurrency } from "../utils/unitConversions";
 import CutSheetOptimizer from "./CutSheetOptimizer";
 import NumInput from "../components/NumInput";
+import StepInput from "../components/StepInput";
 import { packSheets, findOversizedPieces, sheetQtyByMaterial } from "../utils/binPack";
 import { TAPE_ITEM, expandSetItem } from "../utils/projectRows";
 import { materialCalcGlobals } from "../utils/materialCalc";
@@ -761,7 +762,7 @@ function TemplateMaster() {
           ? (prices || []).find((p) => p.group === "Edge Beading" && (p.suitableThickness || []).includes(Number(plyThickness)))
           : null;
         // Each sheet (box or sub-sheet) has its own Edge Beading selection now.
-        const edgeBandName = matched?.materialName || rmat(sheet.matEdgeBeading, sheet.matEdgeBeadingId) || "Edge Band";
+        const edgeBandName = explicitEdgeBand(part, sheet, prices) || matched?.materialName || rmat(sheet.matEdgeBeading, sheet.matEdgeBeadingId) || "Edge Band";
 
         totals[edgeBandName] = (totals[edgeBandName] || 0) + lengthMm;
       });
@@ -2034,6 +2035,18 @@ function TemplateMaster() {
                                           style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#059669" }}
                                           title={p.edgeReq !== false ? "Edge beading applied" : "No edge beading"}
                                         />
+                                        {p.edgeReq !== false && (
+                                          <select
+                                            value={p.edgeBand || ""}
+                                            onChange={(e) => updatePart(p.id, "edgeBand", e.target.value, subSheetId)}
+                                            title="Edge band for this row: Auto (matched by ply thickness, else Edge Beading 1), Edge Beading 1, or Edge Beading 2"
+                                            style={{ fontSize: 10, padding: "1px 2px", marginTop: 3, width: 56 }}
+                                          >
+                                            <option value="">Auto</option>
+                                            <option value="1">EB 1</option>
+                                            <option value="2">EB 2</option>
+                                          </select>
+                                        )}
                                       </td>
                                       <td style={txtCell}>
                                         <select
@@ -2447,14 +2460,23 @@ function TemplateMaster() {
                                         />
                                       </td>
                                       <td style={{ padding: "4px 10px", borderBottom: "1px solid #ede9fe" }}>
-                                        <NumInput
-                                          type={type}
-                                          value={sheet[field] ?? ""}
-                                          onChange={(v) => updateSheetField(subSheetId, field, v)}
-                                          style={{ width: "100%", fontSize: 13, padding: "3px 8px" }}
-                                          placeholder={type === "text" ? "e.g. MBR" : "0"}
-                                          min={type === "number" ? 0 : undefined}
-                                        />
+                                        {type === "number" ? (
+                                          <StepInput
+                                            value={sheet[field] ?? ""}
+                                            onChange={(v) => updateSheetField(subSheetId, field, v)}
+                                            style={{ width: "100%", fontSize: 13, padding: "3px 8px" }}
+                                            placeholder="0"
+                                            min={0}
+                                          />
+                                        ) : (
+                                          <NumInput
+                                            type={type}
+                                            value={sheet[field] ?? ""}
+                                            onChange={(v) => updateSheetField(subSheetId, field, v)}
+                                            style={{ width: "100%", fontSize: 13, padding: "3px 8px" }}
+                                            placeholder="e.g. MBR"
+                                          />
+                                        )}
                                       </td>
                                       <td style={{ padding: "4px 8px", borderBottom: "1px solid #ede9fe", whiteSpace: "nowrap" }}>
                                         {refName != null && (
@@ -2769,27 +2791,20 @@ function TemplateMaster() {
                                             {hw.auto ? (
                                               <span style={{ fontSize: 12, color: "#374151" }}>{hw.base}</span>
                                             ) : (
-                                              <NumInput min={0} value={hw.base}
+                                              <StepInput width={100} min={0} value={hw.base}
                                                 onChange={(v) => updateHardwareItem(hw.boxId, hw.id, "qty", Math.max(0, v))}
-                                                style={{ width: 56, fontSize: 12, padding: "2px 4px", textAlign: "center" }} />
+                                                style={{ fontSize: 12, padding: "2px 4px" }} />
                                             )}
                                           </td>
                                           <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
-                                            <input type="number" min={0} step={hw.auto ? 0.5 : 1} value={hw.extra || ""} placeholder="0"
-                                              onChange={(e) => {
-                                                if (hw.autoType === "edge") setEdgeExtraMtr(e.target.value);
-                                                else if (hw.autoType === "carpenter") setCarpenterExtraSft(e.target.value);
-                                                else if (hw.autoType === "sheet") setMaterialStockSettings((prev) => ({ ...prev, [hw.materialName]: { ...(prev?.[hw.materialName] || {}), extraQty: e.target.value } }));
-                                                else updateHardwareItem(hw.boxId, hw.id, "extra", e.target.value);
-                                              }}
-                                              onBlur={(e) => {
-                                                const v = Math.max(0, Number(e.target.value) || 0);
-                                                if (hw.autoType === "edge") setEdgeExtraMtr(v);
-                                                else if (hw.autoType === "carpenter") setCarpenterExtraSft(v);
-                                                else if (hw.autoType === "sheet") setMaterialStockSettings((prev) => ({ ...prev, [hw.materialName]: { ...(prev?.[hw.materialName] || {}), extraQty: v } }));
-                                                else updateHardwareItem(hw.boxId, hw.id, "extra", v);
-                                              }}
-                                              style={{ width: 48, fontSize: 12, padding: "2px 4px", textAlign: "center" }} />
+                                            <StepInput width={100} min={0} step={hw.auto ? 0.5 : 1} value={hw.extra || 0}
+                                                    onChange={(v) => {
+                                                      if (hw.autoType === "edge") setEdgeExtraMtr(v);
+                                                      else if (hw.autoType === "carpenter") setCarpenterExtraSft(v);
+                                                      else if (hw.autoType === "sheet") setMaterialStockSettings((prev) => ({ ...prev, [hw.materialName]: { ...(prev?.[hw.materialName] || {}), extraQty: v } }));
+                                                      else updateHardwareItem(hw.boxId, hw.id, "extra", v);
+                                                    }}
+                                                    style={{ fontSize: 12, padding: "2px 4px" }} />
                                           </td>
                                           <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
                                             <span style={{ fontSize: 12, fontWeight: 700, color: "#059669" }}>{total}</span>
@@ -2819,15 +2834,14 @@ function TemplateMaster() {
                                     </td>
                                     <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center", color: "#6b7280" }}>{hw.unit || "—"}</td>
                                     <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
-                                      <NumInput min={0} value={hw.base}
+                                      <StepInput width={100} min={0} value={hw.base}
                                         onChange={(v) => updateHardwareItem(hw.boxId, hw.id, "qty", Math.max(0, v))}
-                                        style={{ width: 56, fontSize: 12, padding: "2px 4px", textAlign: "center" }} />
+                                        style={{ fontSize: 12, padding: "2px 4px" }} />
                                     </td>
                                     <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
-                                      <input type="number" min={0} value={hw.extra || ""} placeholder="0"
-                                        onChange={(e) => updateHardwareItem(hw.boxId, hw.id, "extra", e.target.value)}
-                                        onBlur={(e) => updateHardwareItem(hw.boxId, hw.id, "extra", Math.max(0, Number(e.target.value) || 0))}
-                                        style={{ width: 48, fontSize: 12, padding: "2px 4px", textAlign: "center" }} />
+                                      <StepInput width={100} min={0} value={hw.extra || 0}
+                                        onChange={(v) => updateHardwareItem(hw.boxId, hw.id, "extra", v)}
+                                        style={{ fontSize: 12, padding: "2px 4px" }} />
                                     </td>
                                     <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
                                       <span style={{ fontSize: 12, fontWeight: 700, color: "#059669" }}>{total}</span>

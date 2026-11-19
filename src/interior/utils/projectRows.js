@@ -10,6 +10,7 @@
 
 import { mmToFeet } from "./unitConversions";
 import { calcFor } from "./materialCalc";
+import { explicitEdgeBand } from "./boxMaterials";
 
 const DEFAULT_REFS = {
   heightMm: "H", widthMm: "W", depthMm: "D",
@@ -55,12 +56,13 @@ export function resolveFormula(expr, vars) {
 function boxPartGroups(box) {
   const baseLabel = box.shortName || box.boxName || box.name || "";
   const partsOf = (sheet) => sheet.includeInMaterialCalc === false ? [] : (sheet.parts || []);
-  const groups = [{ label: baseLabel, vars: boxVars(box), parts: partsOf(box) }];
+  const groups = [{ label: baseLabel, vars: boxVars(box), parts: partsOf(box), sheet: box }];
   (box.subSheets || []).forEach((sub) => {
     groups.push({
       label: `${baseLabel} ${sub.name || ""}`.trim(),
       vars: boxVars(sub),
       parts: partsOf(sub),
+      sheet: sub,
     });
   });
   return groups;
@@ -121,6 +123,29 @@ const rmat = (name, id, prices) => id != null
  * Mirrors the per-part edge flags already tracked in Sheets Calculation.
  * returns: { material, lengthMm }
  */
+export function buildBoxEdgeBandingMap(box, prices) {
+  const totals = {};
+  const defMat = rmat(box.matEdgeBeading, box.matEdgeBeadingId, prices);
+  boxPartGroups(box).forEach(({ vars, parts, sheet }) => {
+    (parts || []).forEach((part) => {
+      if (part.req === false) return;
+      const w = resolveFormula(part.widthMm, vars);
+      const h = resolveFormula(part.heightMm, vars);
+      const qty = resolveFormula(part.qty, vars);
+      if (!w || !h || w === "?" || h === "?" || !qty || qty === "?") return;
+      let perPiece = 0;
+      if (part.edgeTopReq    !== false) perPiece += w;
+      if (part.edgeBottomReq !== false) perPiece += w;
+      if (part.edgeLeftReq   !== false) perPiece += h;
+      if (part.edgeRightReq  !== false) perPiece += h;
+      const mat = explicitEdgeBand(part, sheet, prices) || defMat;
+      if (!mat || !perPiece) return;
+      totals[mat] = (totals[mat] || 0) + perPiece * qty;
+    });
+  });
+  return totals;
+}
+
 export function buildBoxEdgeBanding(box, prices) {
   let lengthMm = 0;
   boxPartGroups(box).forEach(({ vars, parts }) => {
@@ -156,9 +181,10 @@ export function buildRoomEdgeBanding(room, prices) {
   // metres (plus the room's extra metres) before the boxes are added together.
   const extraMtr = Math.max(0, Number(room.edgeExtraMtr) || 0);
   (room.boxes || []).forEach((box) => {
-    const { material, lengthMm } = buildBoxEdgeBanding(box, prices);
-    if (!material || !lengthMm) return;
-    totals[material] = (totals[material] || 0) + (Math.ceil(lengthMm / 1000) + extraMtr) * 1000;
+    Object.entries(buildBoxEdgeBandingMap(box, prices)).forEach(([material, lengthMm]) => {
+      if (!material || !lengthMm) return;
+      totals[material] = (totals[material] || 0) + (Math.ceil(lengthMm / 1000) + extraMtr) * 1000;
+    });
   });
   return totals;
 }

@@ -6,7 +6,7 @@ import autoTable from "jspdf-autotable";
 import { useAppData } from "../context/AppDataContext";
 import { roundTo2, formatCurrency, mmToFeet } from "../utils/unitConversions";
 import { ownRate } from "../utils/modelRates";
-import { buildRoomRows, buildRoomEdgeBanding, buildRoomHardware, buildRoomCarpenter, buildBoxRows, buildBoxEdgeBanding, buildBoxCarpenterRow, expandSetItem } from "../utils/projectRows";
+import { buildRoomRows, buildRoomEdgeBanding, buildRoomHardware, buildRoomCarpenter, buildBoxRows, buildBoxEdgeBandingMap, buildBoxCarpenterRow, expandSetItem } from "../utils/projectRows";
 import { computeSheetCounts } from "../utils/binPack";
 import { kerfFor } from "../utils/kerf";
 import ShareWithCustomerModal from "../components/ShareWithCustomerModal";
@@ -183,8 +183,8 @@ function computeRoomCost(room, model, projectObj, prices, materialStockSettings)
 function computeBoxOwnCost(box, room, model, projectObj, prices, materialStockSettings) {
   const rate = (mat) => rateFor(mat, model, projectObj, prices);
 
-  const { material: edgeMat, lengthMm } = buildBoxEdgeBanding(box, prices);
-  const edgeAmount = edgeMat && lengthMm ? (Math.round((lengthMm / 1000) * 100) / 100) * rate(edgeMat) : 0;
+  const edgeAmount = Object.entries(buildBoxEdgeBandingMap(box, prices)).reduce((sum, [edgeMat, lengthMm]) =>
+    sum + (edgeMat && lengthMm ? (Math.round((lengthMm / 1000) * 100) / 100) * rate(edgeMat) : 0), 0);
 
   const priceGroupOf = (mat) => prices.find((p) => p.materialName === mat)?.group;
   let hardwareAmount = 0, transportationAmount = 0, manualCarpenterAmount = 0;

@@ -44,6 +44,21 @@ export const masterMatsOf = (box) => {
   }
   return m;
 };
+// Edge band a part was told to use (Sheets Calculation "EB" drop-down):
+// "1" = the sheet's Edge Beading 1, "2" = its Edge Beading 2 row. "" (Auto) or an
+// empty selection returns "" so callers fall back to their own default.
+export const explicitEdgeBand = (part, sheet, prices) => {
+  const c = part?.edgeBand;
+  if (!c) return "";
+  const nm = (name, id) => id != null
+    ? ((prices || []).find((pr) => pr.id === id)?.materialName ?? name ?? "")
+    : ((prices || []).some((pr) => pr.materialName === name) ? name : "");
+  if (c === "2") {
+    const cm = (sheet?.customMaterials || []).find((m) => (m.label || "").trim().toLowerCase() === "edge beading 2");
+    return cm ? nm(cm.value, cm.itemId ?? null) : "";
+  }
+  return nm(sheet?.matEdgeBeading, sheet?.matEdgeBeadingId ?? null);
+};
 export const sheetUsesMaster = (sheet, box, prices) => {
   if (sheet?.useBoxMat != null) return sheet.useBoxMat !== false;
   const m = masterMatsOf(box);
