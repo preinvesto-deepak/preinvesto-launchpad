@@ -1599,9 +1599,30 @@ function Projects() {
       materialLabels: { ...(tb.materialLabels || {}) },
       fieldLabels: { ...(tb.fieldLabels || {}) },
     }));
-    setSubProjects((prev) => prev.map((s) => s.id === roomId
-      ? { ...s, optimizeCost: !!(template.optimizeCost || s.optimizeCost), boxes: s.qMat ? newBoxes.map((b) => serviceOf(b) ? b : applyMasterToBoxForce(b, masterMatsOf(s), prices)) : newBoxes }
-      : s));
+    setSubProjects((prev) => prev.map((s) => {
+      if (s.id !== roomId) return s;
+      // The room's own selection wins; a room with none inherits the template's.
+      const inherit = !s.qMat && !!template.qMat;
+      const master = s.qMat ? masterMatsOf(s) : inherit ? masterMatsOf({ qMat: template.qMat }) : null;
+      // Extra rows the template added in its own Material Selection are tagged
+      // fromMaster; unless the room's selection has that row, untag them so they
+      // stay as ordinary sheet rows instead of being swept away as stale.
+      const ids = new Set(((master || masterMatsOf({})).custom || []).map((c) => c.id));
+      const untag = (sh) => ({
+        ...sh,
+        customMaterials: (sh.customMaterials || []).map((c) => {
+          if (c.fromMaster == null || ids.has(c.fromMaster)) return c;
+          const rest = { ...c }; delete rest.fromMaster; return rest;
+        }),
+      });
+      const clean = newBoxes.map((b) => ({ ...untag(b), subSheets: (b.subSheets || []).map(untag) }));
+      return {
+        ...s,
+        optimizeCost: !!(template.optimizeCost || s.optimizeCost),
+        ...(inherit ? { qMat: master, qMatModelId: null } : {}),
+        boxes: master ? clean.map((b) => serviceOf(b) ? b : applyMasterToBoxForce(b, master, prices)) : clean,
+      };
+    }));
     if (roomId === activeRoom?.id) setActiveBoxId(newBoxes[0].id);
     setPendingTemplate(null);
   };
@@ -1617,16 +1638,103 @@ function Projects() {
   const [qMatOpen, setQMatOpen] = useState(false);
 
   // Material Selection (Quotation Details): set one material for the whole box.
-  const patchBoxMaster = (patch) => {
+  const patchBoxMaster = (patch, modelId = null) => {
     if (!activeRoom) return;
     const m = { ...masterMatsOf(activeRoom), ...patch };
     setSubProjects((prev) => prev.map((r) => r.id !== activeRoom.id ? r : {
-      ...r, qMat: m,
+      ...r, qMat: m, qMatModelId: modelId,
       boxes: (r.boxes || []).map((b) => serviceOf(b) ? b : applyMasterToBoxForce(b, m, prices)),
     }));
   };
   const setBoxMaster = (field, name, id) => patchBoxMaster({ [field]: name, [`${field}Id`]: id ?? null });
   const setMasterCustom = (list) => patchBoxMaster({ custom: list });
+
+  // Saved Material Selection Models (Measurement tab): named sets of materials a
+  // room can pick from a drop-down. Rooms using one follow it when it changes.
+  const [openModelId, setOpenModelId] = useState(null);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const selModels = selectedProject?.selectionModels || [];
+  const setSelModels = (fn) => setProjects((prev) => prev.map((p) => p.id === selectedProject?.id ? { ...p, selectionModels: fn(p.selectionModels || []) } : p));
+  const addSelModel = () => {
+    const id = Date.now();
+    setSelModels((l) => [...l, { id, name: `Model ${l.length + 1}`, qMat: masterMatsOf({}) }]);
+    setOpenModelId(id);
+  };
+  const patchSelModel = (id, patch) => {
+    const model = selModels.find((m) => m.id === id);
+    if (!model) return;
+    const next = { ...model, ...patch };
+    setSelModels((l) => l.map((m) => m.id === id ? next : m));
+    if (patch.qMat) {
+      setSubProjects((prev) => prev.map((r) => r.qMatModelId !== id ? r : {
+        ...r, qMat: next.qMat,
+        boxes: (r.boxes || []).map((b) => serviceOf(b) ? b : applyMasterToBoxForce(b, next.qMat, prices)),
+      }));
+    }
+  };
+  const deleteSelModel = (id) => {
+    if (!window.confirm("Delete this model? Rooms using it keep their current materials.")) return;
+    setSelModels((l) => l.filter((m) => m.id !== id));
+    setSubProjects((prev) => prev.map((r) => r.qMatModelId === id ? { ...r, qMatModelId: null } : r));
+  };
+  const selectRoomModel = (id) => {
+    if (!activeRoom) return;
+    const model = selModels.find((m) => m.id === id);
+    if (!model) { setSubProjects((prev) => prev.map((r) => r.id === activeRoom.id ? { ...r, qMatModelId: null } : r)); return; }
+    const mm = masterMatsOf({ qMat: model.qMat });
+    patchBoxMaster({ ...mm, custom: JSON.parse(JSON.stringify(mm.custom || [])) }, id);
+  };
+  const renderMasterEditor = (master, onField, onCustom, onBrowse) => (
+    <>
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: "6px 16px" }}>
+                                  {(() => {
+                                    const customs = master.custom || [];
+                                    const rows = [];
+                                    SHEET_MAT_FIELDS.forEach(([label, field]) => {
+                                      rows.push({ key: field, label, field });
+                                      customs.filter((c) => c.after === field).forEach((cm) => rows.push({ key: "c" + cm.id, cm }));
+                                    });
+                                    customs.filter((c) => !SHEET_MAT_FIELDS.some(([, f]) => f === c.after)).forEach((cm) => rows.push({ key: "c" + cm.id, cm }));
+                                    return rows.map((r) => {
+                                      const cm = r.cm;
+                                      const cur = cm
+                                        ? (cm.itemId != null ? ((prices || []).find((pr) => pr.id === cm.itemId)?.materialName ?? cm.value ?? "") : (cm.value || ""))
+                                        : matNameOf(master, r.field, prices);
+                                      const setCm = (patch) => onCustom((master.custom || []).map((m) => m.id === cm.id ? { ...m, ...patch } : m));
+                                      return (
+                                        <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                          {cm ? (
+                                            <input
+                                              type="text" value={cm.label || ""} placeholder="Label..."
+                                              onChange={(e) => setCm({ label: e.target.value })}
+                                              style={{ width: 130, flexShrink: 0, fontSize: 12, fontWeight: 600, color: "#374151", border: "none", borderBottom: cm.label ? "none" : "1px dashed #c4b5fd", background: "transparent", boxShadow: "none", padding: 0, outline: "none" }}
+                                            />
+                                          ) : (
+                                            <span style={{ width: 130, fontSize: 12, fontWeight: 600, color: "#374151", flexShrink: 0 }}>{r.label}</span>
+                                          )}
+                                          <input
+                                            type="text" value={cur} placeholder="Select..."
+                                            onChange={(e) => {
+                                              const nv = e.target.value; const pi = (prices || []).find((pr) => pr.materialName === nv);
+                                              if (cm) setCm({ value: nv, itemId: pi?.id ?? null }); else onField(r.field, nv, pi?.id ?? null);
+                                            }}
+                                            style={{ flex: 1, minWidth: 0, fontSize: 12, padding: "3px 6px" }}
+                                          />
+                                          <button onClick={() => onBrowse({ field: cm ? "__cm_" + cm.id : r.field, label: cm ? (cm.label || "Material") : r.label })} title="Browse" style={{ background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", padding: "3px 7px", fontSize: 13 }}>🔍</button>
+                                          {cm && !cm.after
+                                            ? <button onClick={() => onCustom((master.custom || []).filter((m) => m.id !== cm.id))} title="Remove from every sheet that follows the selection" style={{ background: "#dc2626", padding: "3px 7px", fontSize: 12 }}>✕</button>
+                                            : <span style={{ width: 26, flexShrink: 0 }} />}
+                                        </div>
+                                      );
+                                    });
+                                  })()}
+                                </div>
+                                <button
+                                  onClick={() => onCustom([...(master.custom || []), { id: Date.now(), label: "", value: "", itemId: null }])}
+                                  style={{ marginTop: 8, background: "#e0f2fe", color: "#0369a1", border: "1px solid #bae6fd", fontSize: 12, padding: "3px 14px", borderRadius: 6, cursor: "pointer" }}
+                                >+ Add Material</button>
+    </>
+  );
   // The "Same as Quotation Details" tick on a sheet.
   const toggleUseBoxMat = (subSheetId, checked) => {
     if (!activeBox) return;
@@ -2413,6 +2521,38 @@ function Projects() {
 
               return (
                 <div style={{ padding: "20px 24px" }}>
+                  <div style={{ background: "#faf5ff", border: "1px solid #ede9fe", borderRadius: 8, padding: "10px 12px", marginBottom: 14 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#4c1d95" }}>🎨 Material Selection Models</span>
+                      <span style={{ fontSize: 11, color: "#6b7280" }}>Add several sets of materials here; each room picks one from its Material Selection drop-down.</span>
+                      <button onClick={addSelModel} style={{ fontSize: 12, padding: "3px 12px", marginLeft: "auto" }}>+ Add model</button>
+                    </div>
+                    {selModels.map((model) => {
+                      const open = openModelId === model.id;
+                      const used = rooms.filter((r) => r.qMatModelId === model.id).length;
+                      const mm = masterMatsOf({ qMat: model.qMat });
+                      return (
+                        <div key={model.id} style={{ marginTop: 8, background: "#fff", border: "1px solid #ede9fe", borderRadius: 8, padding: "6px 10px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <input type="text" value={model.name} onChange={(e) => patchSelModel(model.id, { name: e.target.value })} style={{ width: 200, fontSize: 13, fontWeight: 600, padding: "3px 6px" }} />
+                            <span style={{ fontSize: 11, color: "#6b7280" }}>{used ? `used in ${used} room${used > 1 ? "s" : ""}` : "not used yet"}</span>
+                            <button onClick={() => setOpenModelId(open ? null : model.id)} style={{ fontSize: 12, padding: "3px 12px", background: open ? "#7c3aed" : "#ede9fe", color: open ? "#fff" : "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 6 }}>Materials {open ? "▲" : "▼"}</button>
+                            <button onClick={() => deleteSelModel(model.id)} title="Delete model" style={{ background: "#dc2626", padding: "3px 8px", fontSize: 12 }}>✕</button>
+                          </div>
+                          {open && (
+                            <div style={{ marginTop: 8 }}>
+                              {renderMasterEditor(
+                                mm,
+                                (f, name, id) => patchSelModel(model.id, { qMat: { ...mm, [f]: name, [`${f}Id`]: id ?? null } }),
+                                (list) => patchSelModel(model.id, { qMat: { ...mm, custom: list } }),
+                                (b) => setBoxMatPicker({ ...b, model: model.id }),
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
                     <div style={{ fontSize: 13, color: "#6b7280" }}>
                       Wardrobe / Modular work room by room, then a table for each extra service (False Ceiling, Tiles, Lighting, ...).
@@ -2697,11 +2837,33 @@ function Projects() {
                           </>
                         )}
                       </label>
-                      <button
-                        onClick={() => setQMatOpen((o) => !o)}
-                        title="Pick the materials once for the whole room — every box and sheet uses them unless a sheet is unticked"
-                        style={{ fontSize: 12, padding: "5px 12px", background: qMatOpen ? "#7c3aed" : "#ede9fe", color: qMatOpen ? "#fff" : "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 6, fontWeight: 600 }}
-                      >🎨 Material Selection {qMatOpen ? "▲" : "▼"}</button>
+                      <div style={{ position: "relative" }}>
+                        <button
+                          onClick={() => (selModels.length ? setModelMenuOpen((o) => !o) : setQMatOpen((o) => !o))}
+                          title="Pick the materials once for the whole room — every box and sheet uses them unless a sheet is unticked"
+                          style={{ fontSize: 12, padding: "5px 12px", background: qMatOpen ? "#7c3aed" : "#ede9fe", color: qMatOpen ? "#fff" : "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 6, fontWeight: 600, whiteSpace: "nowrap" }}
+                        >🎨 Material Selection{selModels.length > 0 ? `: ${selModels.find((m) => m.id === activeRoom.qMatModelId)?.name || "Custom"}` : ""} {qMatOpen || modelMenuOpen ? "▲" : "▼"}</button>
+                        {modelMenuOpen && (
+                          <>
+                            <div onClick={() => setModelMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                            <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 41, minWidth: 200, background: "#fff", border: "1px solid #ddd6fe", borderRadius: 8, boxShadow: "0 6px 18px rgba(0,0,0,0.12)", padding: 4 }}>
+                              {[{ id: null, name: "Custom" }, ...selModels].map((m) => {
+                                const cur = (activeRoom.qMatModelId ?? null) === m.id;
+                                return (
+                                  <div key={m.id ?? "custom"} onClick={() => { selectRoomModel(m.id); setModelMenuOpen(false); }}
+                                    style={{ padding: "6px 10px", fontSize: 12, cursor: "pointer", borderRadius: 6, background: cur ? "#ede9fe" : "transparent", color: "#374151", fontWeight: cur ? 700 : 500 }}>
+                                    {cur ? "✓ " : "   "}{m.name}
+                                  </div>
+                                );
+                              })}
+                              <div style={{ borderTop: "1px solid #ede9fe", margin: "4px 0" }} />
+                              <div onClick={() => { setQMatOpen((o) => !o); setModelMenuOpen(false); }} style={{ padding: "6px 10px", fontSize: 12, cursor: "pointer", color: "#7c3aed", fontWeight: 600 }}>
+                                {qMatOpen ? "▲ Hide materials" : "✎ Edit materials"}
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
                       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }} title="Off by default. When ticked, cost counts only the material actually used: full sheets in full, the last partly-filled sheet pro-rata by the area used.">
                         <input type="checkbox" checked={!!activeRoom.optimizeCost} onChange={(e) => { const v = e.target.checked; setSubProjects((prev) => prev.map((r) => r.id === activeRoom.id ? { ...r, optimizeCost: v } : r)); }} />
                         Cost only material used
@@ -2727,53 +2889,7 @@ function Projects() {
                                 <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>
                                   Selected once for the whole room — every box and every Sheet Calculation that has <b>Same materials as Quotation Details</b> ticked (the default) uses it. Untick a sheet to choose its own.
                                 </div>
-                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: "6px 16px" }}>
-                                  {(() => {
-                                    const customs = master.custom || [];
-                                    const rows = [];
-                                    SHEET_MAT_FIELDS.forEach(([label, field]) => {
-                                      rows.push({ key: field, label, field });
-                                      customs.filter((c) => c.after === field).forEach((cm) => rows.push({ key: "c" + cm.id, cm }));
-                                    });
-                                    customs.filter((c) => !SHEET_MAT_FIELDS.some(([, f]) => f === c.after)).forEach((cm) => rows.push({ key: "c" + cm.id, cm }));
-                                    return rows.map((r) => {
-                                      const cm = r.cm;
-                                      const cur = cm
-                                        ? (cm.itemId != null ? ((prices || []).find((pr) => pr.id === cm.itemId)?.materialName ?? cm.value ?? "") : (cm.value || ""))
-                                        : matNameOf(master, r.field, prices);
-                                      const setCm = (patch) => setMasterCustom((master.custom || []).map((m) => m.id === cm.id ? { ...m, ...patch } : m));
-                                      return (
-                                        <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                          {cm ? (
-                                            <input
-                                              type="text" value={cm.label || ""} placeholder="Label..."
-                                              onChange={(e) => setCm({ label: e.target.value })}
-                                              style={{ width: 130, flexShrink: 0, fontSize: 12, fontWeight: 600, color: "#374151", border: "none", borderBottom: cm.label ? "none" : "1px dashed #c4b5fd", background: "transparent", boxShadow: "none", padding: 0, outline: "none" }}
-                                            />
-                                          ) : (
-                                            <span style={{ width: 130, fontSize: 12, fontWeight: 600, color: "#374151", flexShrink: 0 }}>{r.label}</span>
-                                          )}
-                                          <input
-                                            type="text" value={cur} placeholder="Select..."
-                                            onChange={(e) => {
-                                              const nv = e.target.value; const pi = (prices || []).find((pr) => pr.materialName === nv);
-                                              if (cm) setCm({ value: nv, itemId: pi?.id ?? null }); else setBoxMaster(r.field, nv, pi?.id ?? null);
-                                            }}
-                                            style={{ flex: 1, minWidth: 0, fontSize: 12, padding: "3px 6px" }}
-                                          />
-                                          <button onClick={() => setBoxMatPicker({ field: cm ? "__cm_" + cm.id : r.field, label: cm ? (cm.label || "Material") : r.label, master: true })} title="Browse" style={{ background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", padding: "3px 7px", fontSize: 13 }}>🔍</button>
-                                          {cm && !cm.after
-                                            ? <button onClick={() => setMasterCustom((master.custom || []).filter((m) => m.id !== cm.id))} title="Remove from every sheet that follows the selection" style={{ background: "#dc2626", padding: "3px 7px", fontSize: 12 }}>✕</button>
-                                            : <span style={{ width: 26, flexShrink: 0 }} />}
-                                        </div>
-                                      );
-                                    });
-                                  })()}
-                                </div>
-                                <button
-                                  onClick={() => setMasterCustom([...(master.custom || []), { id: Date.now(), label: "", value: "", itemId: null }])}
-                                  style={{ marginTop: 8, background: "#e0f2fe", color: "#0369a1", border: "1px solid #bae6fd", fontSize: 12, padding: "3px 14px", borderRadius: 6, cursor: "pointer" }}
-                                >+ Add Material</button>
+                                {renderMasterEditor(master, setBoxMaster, setMasterCustom, (b) => setBoxMatPicker({ ...b, master: true }))}
                               </div>
                             );
                           })()}
@@ -4256,6 +4372,19 @@ function Projects() {
           prices={prices}
           onSelect={(p) => {
             const f = boxMatPicker.field;
+            if (boxMatPicker.model != null) {
+              const model = selModels.find((m) => m.id === boxMatPicker.model);
+              if (model) {
+                const mm = masterMatsOf({ qMat: model.qMat });
+                const f2 = boxMatPicker.field;
+                if (f2.startsWith("__cm_")) {
+                  const cid = Number(f2.replace("__cm_", ""));
+                  patchSelModel(model.id, { qMat: { ...mm, custom: (mm.custom || []).map((c) => c.id === cid ? { ...c, value: p.materialName, itemId: p.id ?? null } : c) } });
+                } else patchSelModel(model.id, { qMat: { ...mm, [f2]: p.materialName, [`${f2}Id`]: p.id ?? null } });
+              }
+              setBoxMatPicker(null);
+              return;
+            }
             if (boxMatPicker.master) {
               if (f.startsWith("__cm_")) {
                 const cid = Number(f.replace("__cm_", ""));
