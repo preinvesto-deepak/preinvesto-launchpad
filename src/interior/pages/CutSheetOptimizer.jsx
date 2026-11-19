@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import ModalGuard from "../components/ModalGuard";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -767,9 +768,9 @@ export default function CutSheetOptimizer({ rows, title, subtitle, onClose, kerf
 
   return (
     <div
-      onClick={onClose}
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 3000, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "24px 16px", overflowY: "auto" }}
     >
+      <ModalGuard onClose={onClose} />
       <div
         onClick={(e) => e.stopPropagation()}
         style={{ background: "#fff", borderRadius: 14, width: "100%", maxWidth: 1060, boxShadow: "0 24px 64px rgba(0,0,0,0.28)", display: "flex", flexDirection: "column" }}

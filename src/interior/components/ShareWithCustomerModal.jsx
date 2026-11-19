@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ModalGuard from "./ModalGuard";
 import { authFetch } from "@/context/AuthContext";
 
 // Owner-side control panel for one project's customer link: what the customer
@@ -91,7 +92,8 @@ function ShareWithCustomerModal({ projectId, projectName, designInfo, galleryFol
   const link = share ? linkFor(share.code) : "";
 
   return (
-    <div className="no-print" onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 4500, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+    <div className="no-print" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 4500, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <ModalGuard onClose={onClose} />
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, width: "100%", maxWidth: 640, maxHeight: "92vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
         <div style={{ background: "#1e3a5f", color: "#fff", padding: "12px 18px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ fontWeight: 700, fontSize: 14 }}>🔗 Share with customer — {projectName}</span>

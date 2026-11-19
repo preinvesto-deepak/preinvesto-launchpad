@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useAppData } from "../context/AppDataContext";
+import ModalGuard from "../components/ModalGuard";
 
 const MIN_PASSWORD = 8;
 
@@ -85,6 +86,7 @@ function LogoCropModal({ src, onConfirm, onCancel }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <ModalGuard onClose={onCancel} onSave={handleConfirm} value={{ zoom }} label="the logo position" />
       <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: CROP_FRAME + 48 }}>
         <h3 style={{ margin: "0 0 4px", fontSize: 16 }}>Position logo</h3>
         <p style={{ margin: "0 0 14px", fontSize: 12, color: "#6b7280" }}>

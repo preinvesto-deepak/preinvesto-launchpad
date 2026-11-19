@@ -125,10 +125,16 @@ const rmat = (name, id, prices) => id != null
  */
 export function buildBoxEdgeBandingMap(box, prices) {
   const totals = {};
-  const defMat = rmat(box.matEdgeBeading, box.matEdgeBeadingId, prices);
+  // Same rules as the Material Summary (Projects.jsx computeBoxEdgeBandingMm), so
+  // the Quotation / BOQ never count a different edge band length or product:
+  // only Ply parts with their edge-band box ticked, banded with the part's own
+  // EB choice, else the band suited to the ply thickness, else the sheet's
+  // Edge Beading selection.
   boxPartGroups(box).forEach(({ vars, parts, sheet }) => {
     (parts || []).forEach((part) => {
       if (part.req === false) return;
+      if (part.group !== "Ply") return;
+      if (part.edgeReq === false) return;
       const w = resolveFormula(part.widthMm, vars);
       const h = resolveFormula(part.heightMm, vars);
       const qty = resolveFormula(part.qty, vars);
@@ -138,8 +144,13 @@ export function buildBoxEdgeBandingMap(box, prices) {
       if (part.edgeBottomReq !== false) perPiece += w;
       if (part.edgeLeftReq   !== false) perPiece += h;
       if (part.edgeRightReq  !== false) perPiece += h;
-      const mat = explicitEdgeBand(part, sheet, prices) || defMat;
-      if (!mat || !perPiece) return;
+      if (!perPiece) return;
+      const plyName = rmat(part.material, part.materialId, prices);
+      const plyThickness = (prices || []).find((p) => p.materialName === plyName)?.plyThickness;
+      const matched = plyThickness
+        ? (prices || []).find((p) => p.group === "Edge Beading" && (p.suitableThickness || []).includes(Number(plyThickness)))
+        : null;
+      const mat = explicitEdgeBand(part, sheet, prices) || matched?.materialName || rmat(sheet.matEdgeBeading, sheet.matEdgeBeadingId, prices) || "Edge Band";
       totals[mat] = (totals[mat] || 0) + perPiece * qty;
     });
   });

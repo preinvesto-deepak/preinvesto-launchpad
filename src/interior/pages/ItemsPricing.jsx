@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { useAppData } from "../context/AppDataContext";
 import { priceList, GROUP_OPTIONS, UNIT_OPTIONS } from "../data/priceData";
 import ServiceFilter from "../components/ServiceFilter";
+import ModalGuard from "../components/ModalGuard";
 import { ALL_SERVICES, serviceForGroup, WARDROBE_SERVICE, BASE_GROUPS, LOCKED_GROUPS } from "../utils/services";
 
 const emptyForm = {
@@ -359,6 +360,8 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      {/* images are compared by count only, so big pictures don't slow typing */}
+      <ModalGuard onClose={onClose} onSave={save} value={{ ...form, images: (form.images || []).length }} label="this item" />
       <div style={{ background: "#fff", borderRadius: 14, padding: 28, width: 660, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
           <h3 style={{ margin: 0, fontSize: 16 }}>{initial?.id ? "Edit Item" : "Add New Item"}</h3>
@@ -674,7 +677,8 @@ function ItemDetailModal({ item, onClose, onEdit }) {
   ) : null;
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+      <ModalGuard onClose={onClose} />
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.25)" }}>
 
         {/* Header */}

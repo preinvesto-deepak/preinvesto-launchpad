@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import ModalGuard from "@/interior/components/ModalGuard";
 import { useParams, Link } from "react-router-dom";
 import Layout from "@/components/layout/Layout";
 import SEO, { breadcrumbSchema } from "@/components/SEO";
@@ -252,6 +253,7 @@ const PortfolioProject = () => {
           className="fixed inset-0 z-[100] bg-hero-overlay/90 flex items-center justify-center p-4"
           onClick={closeLightbox}
         >
+          <ModalGuard onClose={closeLightbox} />
           <button
             onClick={closeLightbox}
             className="absolute top-6 right-6 text-primary-foreground/80 hover:text-primary-foreground z-10"

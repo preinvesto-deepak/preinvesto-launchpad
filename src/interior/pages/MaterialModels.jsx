@@ -3,6 +3,7 @@ import { useAppData } from "../context/AppDataContext";
 import { useUnsavedChanges } from "../context/UnsavedChangesContext";
 import { GROUP_OPTIONS } from "../data/priceData";
 import ServiceFilter from "../components/ServiceFilter";
+import ModalGuard from "../components/ModalGuard";
 import { ALL_SERVICES, serviceForGroup } from "../utils/services";
 import { ownRate } from "../utils/modelRates";
 
@@ -60,7 +61,8 @@ function ItemPickerModal({ materialName, prices, onSelect, onClose, initialGroup
     .sort((x, y) => (Number(x.rate) > 0 ? Number(x.rate) : Infinity) - (Number(y.rate) > 0 ? Number(y.rate) : Infinity) || 0);
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000, padding: 16 }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000, padding: 16 }}>
+      <ModalGuard onClose={onClose} />
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, width: "100%", maxWidth: 640, maxHeight: "84vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.25)" }}>
 
         {/* Header */}
@@ -173,6 +175,10 @@ function MaterialModels() {
   // differ. An item with any tier still empty is never "same priced" (it's
   // incomplete, not undifferentiated) so it stays visible either way.
   const [hideSamePriced, setHideSamePriced] = useState(false);
+  // Shows only materials where at least one tier was never set by hand (no brand
+  // picked or typed, so the system just follows the first Items Pricing row),
+  // and highlights those tiers.
+  const [onlyAuto, setOnlyAuto] = useState(false);
 
   // Local edits buffer — keyed by materialName
   const [edits, setEdits] = useState({});
@@ -249,9 +255,12 @@ function MaterialModels() {
     return vals.every((v) => v === vals[0]);
   };
 
-  const displayItems = hideSamePriced
-    ? uniqueItems.filter((p) => !isSamePriced(getRates(p.materialName)))
-    : uniqueItems;
+  const hasAutoTier = (rates) => MODELS.some((m) => rates[m].isDefault);
+  const autoCount = uniqueItems.filter((p) => hasAutoTier(getRates(p.materialName))).length;
+
+  const displayItems = uniqueItems
+    .filter((p) => !hideSamePriced || !isSamePriced(getRates(p.materialName)))
+    .filter((p) => !onlyAuto || hasAutoTier(getRates(p.materialName)));
   const samePricedCount = uniqueItems.length - uniqueItems.filter((p) => !isSamePriced(getRates(p.materialName))).length;
 
   const setField = (name, model, field, value) => {
@@ -418,6 +427,11 @@ function MaterialModels() {
             <input type="checkbox" checked={hideSamePriced} onChange={(e) => setHideSamePriced(e.target.checked)} />
             Hide same-priced items{samePricedCount > 0 ? ` (${samePricedCount})` : ""}
           </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}
+            title="Highlight and list only the materials where a model was never set by hand — the system just follows the first Items Pricing row">
+            <input type="checkbox" checked={onlyAuto} onChange={(e) => setOnlyAuto(e.target.checked)} />
+            Auto-updated only{autoCount > 0 ? ` (${autoCount})` : ""}
+          </label>
           <span style={{ fontSize: 12, color: "#9ca3af" }}>{displayItems.length} items</span>
           {hasEdits && (
             <button onClick={() => setEdits({})} style={{ marginLeft: "auto", background: "#6b7280", padding: "7px 14px", fontSize: 13 }}>Discard</button>
@@ -463,7 +477,7 @@ function MaterialModels() {
                 {MODELS.map((model) => {
                   const m = rates[model];
                   return (
-                    <div key={model} style={{ borderLeft: "2px solid #e5e7eb", paddingLeft: 10, paddingRight: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div key={model} style={{ borderLeft: "2px solid #e5e7eb", paddingLeft: 10, paddingRight: 8, display: "flex", flexDirection: "column", gap: 4, ...(onlyAuto && m.isDefault ? { background: "#fef3c7", boxShadow: "inset 3px 0 0 #f59e0b" } : {}) }}>
                       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                         <input
                           type="text" placeholder="Brand" value={m.brand}

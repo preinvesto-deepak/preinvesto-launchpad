@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import ModalGuard from "../components/ModalGuard";
 
 const UnsavedChangesContext = createContext(null);
 
@@ -72,6 +73,8 @@ function UnsavedChangesProvider({ children }) {
       {children}
       {confirm && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 3000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {/* Esc / outside click = Cancel (stay on the page), never Discard. */}
+          <ModalGuard onClose={() => setConfirm(null)} />
           <div style={{ background: "#fff", borderRadius: 12, padding: 24, width: 400 }}>
             <h3 style={{ margin: "0 0 10px", fontSize: 16 }}>Unsaved changes</h3>
             <p style={{ margin: "0 0 20px", fontSize: 13, color: "#6b7280" }}>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ModalGuard from "./ModalGuard";
 import { useNavigate } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
 import RoomRequirements from "./RoomRequirements";
@@ -128,7 +129,8 @@ export default function RequirementsPanel({ project, rooms }) {
       })}
 
       {dialog && (
-        <div onClick={() => setDialog(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <ModalGuard onClose={() => setDialog(null)} onSave={() => { if (dialogReady) addToForm(); }} value={dialog} label="this room" />
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 28, width: 420, maxWidth: "94vw", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
             <h3 style={{ margin: "0 0 14px" }}>Add a room to the form</h3>
             <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Room</label>

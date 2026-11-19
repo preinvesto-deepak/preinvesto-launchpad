@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import ModalGuard from "../components/ModalGuard";
 import { useParams } from "react-router-dom";
 
 // Public, read-only page a customer opens from the owner's share link
@@ -308,7 +309,8 @@ function CustomerView() {
       </main>
 
       {lightbox && (
-        <div className="cv-noprint" onClick={() => setLightbox("")} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, cursor: "zoom-out" }}>
+        <div className="cv-noprint" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, cursor: "zoom-out" }}>
+          <ModalGuard onClose={() => setLightbox("")} />
           <img src={lightbox} alt="" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
         </div>
       )}

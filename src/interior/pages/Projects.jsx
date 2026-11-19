@@ -15,6 +15,7 @@ import AddServiceModal from "../components/AddServiceModal";
 import CutSheetOptimizer from "./CutSheetOptimizer";
 import NumInput from "../components/NumInput";
 import StepInput from "../components/StepInput";
+import ModalGuard from "../components/ModalGuard";
 import RequirementsPanel from "../components/RequirementsPanel";
 import ProjectQuotation from "./ProjectQuotation";
 import { packSheets, findOversizedPieces, sheetQtyByMaterial } from "../utils/binPack";
@@ -308,6 +309,7 @@ function MaterialModal({ prices, onSelect, onClose }) {
   );
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <ModalGuard onClose={onClose} />
       <div style={{ background: "#fff", borderRadius: 14, padding: 28, width: 480, maxWidth: "95vw", maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h3 style={{ margin: 0, fontSize: 16 }}>Select from Material Library</h3>
@@ -383,7 +385,8 @@ function TemplatePickerModal({ templates = [], folders = [], onSelect, onClose }
   const svcCounts = Object.fromEntries(ALL_SERVICES.map((s) => [s, templates.filter((t) => serviceTagOf(t) === s).length]));
   const visibleFolders = searching ? [] : subfoldersOf(activeFolderId);
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <ModalGuard onClose={onClose} />
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 28, width: 680, maxWidth: "95vw", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h3 style={{ margin: 0, fontSize: 16 }}>Apply a Template to this Room</h3>
@@ -547,9 +550,10 @@ function MatField({ label, value, onChange, onSearch }) {
 // Red outline applied to a field the user needs to fix.
 const INVALID_FIELD = { borderColor: "#dc2626", background: "#fef2f2" };
 
-function FormModal({ title, fields, onSave, onClose, saveLabel = "Save", error }) {
+function FormModal({ title, fields, onSave, onClose, saveLabel = "Save", error, formValue }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1500, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <ModalGuard onClose={onClose} onSave={onSave} value={formValue} label="this project" />
       <div style={{ background: "#fff", borderRadius: 14, padding: 28, width: 580, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
         <h3 style={{ margin: "0 0 20px", fontSize: 17 }}>{title}</h3>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px", marginBottom: 20 }}>
@@ -603,7 +607,8 @@ function ProjItemPickerModal({ materialName, prices, onSelect, onClose, initialG
     .sort((x, y) => (Number(x.rate) > 0 ? Number(x.rate) : Infinity) - (Number(y.rate) > 0 ? Number(y.rate) : Infinity) || 0);
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 3000, padding: 16 }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 3000, padding: 16 }}>
+      <ModalGuard onClose={onClose} />
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, width: "100%", maxWidth: 640, maxHeight: "84vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.25)" }}>
         <div style={{ background: "#1e3a5f", color: "#fff", padding: "14px 20px", borderRadius: "14px 14px 0 0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
           <div>
@@ -1135,6 +1140,7 @@ function ProjectAnalysis({ rows, project, prices, globalRates, setProjects, canS
 
       {resetConfirm && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <ModalGuard onClose={() => setResetConfirm(false)} />
           <div style={{ background: "#fff", borderRadius: 14, padding: 28, width: 420, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
             <h3 style={{ margin: "0 0 12px", fontSize: 17 }}>Reset to the global template?</h3>
             <p style={{ margin: "0 0 20px", fontSize: 14, color: "#374151" }}>
@@ -4191,6 +4197,7 @@ function Projects() {
           title={editProjectId ? "Edit Project" : "New Project"}
           saveLabel={editProjectId ? "Update Project" : "Create Project"}
           onSave={saveProject}
+          formValue={pForm}
           onClose={() => setProjectModal(false)}
           error={projectError}
           fields={
@@ -4298,6 +4305,7 @@ function Projects() {
       {/* ── Room Modal ─────────────────────────────────────────────────────── */}
       {roomModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1500, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <ModalGuard onClose={() => setRoomModal(false)} onSave={saveRoom} value={rForm} label="this room" />
           <div style={{ background: "#fff", borderRadius: 14, padding: 28, width: 420, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
             <h3 style={{ margin: "0 0 20px", fontSize: 17 }}>{editRoomId ? "Edit Room" : "Add Room"}</h3>
             <div style={{ display: "grid", gap: 14, marginBottom: 20 }}>

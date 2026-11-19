@@ -6,6 +6,7 @@ import autoTable from "jspdf-autotable";
 import { useAppData } from "../context/AppDataContext";
 import { roundTo2, formatCurrency, mmToFeet } from "../utils/unitConversions";
 import { ownRate } from "../utils/modelRates";
+import ModalGuard from "../components/ModalGuard";
 import { buildRoomRows, buildRoomEdgeBanding, buildRoomHardware, buildRoomCarpenter, buildBoxRows, buildBoxEdgeBandingMap, buildBoxCarpenterRow, expandSetItem } from "../utils/projectRows";
 import { computeSheetCounts } from "../utils/binPack";
 import { kerfFor } from "../utils/kerf";
@@ -57,6 +58,8 @@ const QUOT_MODEL_COLORS = { economy: "#059669", standard: "#2563eb", premium: "#
 // editing Items Pricing is reflected here without re-picking or resetting
 // the project. The cell's saved rate is a last resort for hand-typed cells
 // that don't match any Items Pricing row.
+import { resolveInclRate } from "../utils/modelRates";
+
 function priceRowFor(material, model, projectObj, prices) {
   const sameName = prices.filter((p) => p.materialName === material);
   const cell = model ? projectObj?.materialModelRates?.[material]?.[model] : null;
@@ -137,9 +140,15 @@ function computeRoomCost(room, model, projectObj, prices, materialStockSettings)
   materials.forEach((mat) => { woodByMaterial[mat] = (sheetCounts[mat] || 0) * rate(mat); });
   const woodAmount = Object.values(woodByMaterial).reduce((s, v) => s + v, 0);
 
+  // Every priced line (material, qty, rate), in the order it is costed - shown in
+  // the "Cost breakdown" panel so a room's total can be checked line by line.
+  const lines = [];
+  materials.forEach((mat) => lines.push({ cat: "Sheets", material: mat, qty: sheetCounts[mat] || 0, rate: rate(mat) }));
+
   const edgeTotals = buildRoomEdgeBanding(room, prices);
   const edgeAmount = Object.entries(edgeTotals).reduce((total, [mat, lengthMm]) => {
     const meters = Math.round((lengthMm / 1000) * 100) / 100;
+    lines.push({ cat: "Edge band", material: mat, qty: meters, rate: rate(mat) });
     return total + meters * rate(mat);
   }, 0);
 
@@ -148,6 +157,10 @@ function computeRoomCost(room, model, projectObj, prices, materialStockSettings)
   // auto-row below.
   const hwTotals = buildRoomHardware(room, prices, sheetCounts);
   const priceGroupOf = (mat) => prices.find((p) => p.materialName === mat)?.group;
+  Object.entries(hwTotals).forEach(([mat, qty]) => {
+    const g = priceGroupOf(mat);
+    lines.push({ cat: g === "Transportation" ? "Transportation" : g === "Carpenter" ? "Carpenter" : "Hardware", material: mat, qty, rate: rate(mat) });
+  });
   const hardwareAmount = Object.entries(hwTotals).reduce((total, [mat, qty]) => {
     const g = priceGroupOf(mat);
     if (g === "Transportation" || g === "Carpenter") return total;
@@ -164,9 +177,10 @@ function computeRoomCost(room, model, projectObj, prices, materialStockSettings)
   const carpenterAmount = Object.entries(carpTotals).reduce((total, [mat, qty]) =>
     total + qty * rate(mat), 0) + manualCarpenterAmount;
   const laborAmount = carpenterAmount;
+  Object.entries(carpTotals).forEach(([mat, qty]) => lines.push({ cat: "Carpenter", material: mat, qty, rate: rate(mat) }));
 
   const totalAmount = woodAmount + edgeAmount + hardwareAmount + transportationAmount + laborAmount;
-  return { woodAmount, woodByMaterial, edgeAmount, hardwareAmount, transportationAmount, laborAmount, totalAmount, areaSqMm };
+  return { lines, woodAmount, woodByMaterial, edgeAmount, hardwareAmount, transportationAmount, laborAmount, totalAmount, areaSqMm };
 }
 
 // A box's own material need, computed as if it were the only box in the
@@ -413,6 +427,8 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
   // savings/Cut List is shown below the comparison, and which one Print
   // Preview/Download PDF act on.
   const [selectedModel, setSelectedModel] = useState("standard");
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
+  const [breakdownRoomId, setBreakdownRoomId] = useState("");
   // Which of the Rooms-table columns appear in the Quotation (preview, print,
   // PDF, share link). Unchecked columns are left out; amounts are unaffected.
   const [quotCols, setQuotCols] = useState({});
@@ -1500,6 +1516,90 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
       </div>
       )}
 
+      {/* --- Cost breakdown: every priced line of one room, for the selected
+          model, so its quotation figure can be checked against the Material
+          Summary line by line. --- */}
+      {!customerView && (() => {
+        const room = quotationRooms.find((r) => String(r.id) === String(breakdownRoomId)) || quotationRooms[0];
+        const th = { padding: "6px 10px", textAlign: "right", fontSize: 11, background: "#1e3a5f", color: "#fff", fontWeight: 600 };
+        const td = { padding: "5px 10px", textAlign: "right", fontSize: 12, borderBottom: "1px solid #e5e7eb" };
+        let body = null;
+        if (breakdownOpen && room) {
+          const cost = computeRoomCost(room, selectedModel, selectedProjectObj, prices, materialStockSettings);
+          const gst = Number(gstPercent || 0);
+          const rows = cost.lines.filter((l) => l.qty).map((l) => {
+            const exAmt = l.qty * l.rate;
+            const quotIncl = exAmt * (1 + gst / 100);
+            const sumIncl = l.qty * resolveInclRate(selectedProjectObj?.materialModelRates?.[l.material]?.[selectedModel], l.material, prices);
+            return { ...l, exAmt, quotIncl, sumIncl };
+          });
+          const tot = rows.reduce((a, r) => ({ ex: a.ex + r.exAmt, q: a.q + r.quotIncl, s: a.s + r.sumIncl }), { ex: 0, q: 0, s: 0 });
+          body = (
+            <div style={{ overflowX: "auto", marginTop: 8 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...th, textAlign: "left" }}>Type</th>
+                    <th style={{ ...th, textAlign: "left" }}>Item</th>
+                    <th style={th}>Qty</th>
+                    <th style={th}>Rate (excl. GST)</th>
+                    <th style={th}>Amount (excl. GST)</th>
+                    <th style={th}>Quotation (+{gst}% GST)</th>
+                    <th style={th}>Material Summary (item GST)</th>
+                    <th style={th}>Difference</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => {
+                    const diff = r.quotIncl - r.sumIncl;
+                    return (
+                      <tr key={i} style={{ background: Math.abs(diff) > 0.5 ? "#fef3c7" : i % 2 ? "#f8fafc" : "#fff" }}>
+                        <td style={{ ...td, textAlign: "left", color: "#6b7280" }}>{r.cat}</td>
+                        <td style={{ ...td, textAlign: "left", fontWeight: 600 }}>{r.material}</td>
+                        <td style={td}>{Math.round(r.qty * 100) / 100}</td>
+                        <td style={td}>{formatCurrency(r.rate)}</td>
+                        <td style={td}>{formatCurrency(r.exAmt)}</td>
+                        <td style={td}>{formatCurrency(r.quotIncl)}</td>
+                        <td style={td}>{formatCurrency(r.sumIncl)}</td>
+                        <td style={{ ...td, fontWeight: 700, color: Math.abs(diff) > 0.5 ? "#b45309" : "#9ca3af" }}>{Math.abs(diff) > 0.5 ? formatCurrency(diff) : "-"}</td>
+                      </tr>
+                    );
+                  })}
+                  <tr style={{ background: "#1e3a5f" }}>
+                    <td colSpan={4} style={{ ...td, textAlign: "left", color: "#fff", fontWeight: 700, borderBottom: "none" }}>Total (before markup)</td>
+                    <td style={{ ...td, color: "#fff", fontWeight: 700, borderBottom: "none" }}>{formatCurrency(tot.ex)}</td>
+                    <td style={{ ...td, color: "#fff", fontWeight: 700, borderBottom: "none" }}>{formatCurrency(tot.q)}</td>
+                    <td style={{ ...td, color: "#fff", fontWeight: 700, borderBottom: "none" }}>{formatCurrency(tot.s)}</td>
+                    <td style={{ ...td, color: "#fff", fontWeight: 700, borderBottom: "none" }}>{formatCurrency(tot.q - tot.s)}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>
+                Quotation = Qty x base rate x (1 + the quotation GST %). Material Summary = Qty x rate x (1 + each item's own GST %). Highlighted rows differ. A room with several boxes shows the whole room's lines.
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div className="no-print" style={{ marginBottom: 24 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <button onClick={() => setBreakdownOpen((o) => !o)} style={{ background: "#ede9fe", color: "#7c3aed", border: "1px solid #ddd6fe", padding: "5px 14px", fontSize: 13 }}>
+                Cost breakdown {breakdownOpen ? "▲" : "▼"}
+              </button>
+              {breakdownOpen && (
+                <>
+                  <select value={room ? String(room.id) : ""} onChange={(e) => setBreakdownRoomId(e.target.value)} style={{ fontSize: 12, padding: "4px 8px" }}>
+                    {quotationRooms.map((r) => <option key={r.id} value={String(r.id)}>{r.subProject || r.name}</option>)}
+                  </select>
+                  <span style={{ fontSize: 12, color: "#6b7280" }}>for the selected model: <b>{QUOT_MODEL_LABELS[selectedModel]}</b></span>
+                </>
+              )}
+            </div>
+            {body}
+          </div>
+        );
+      })()}
+
       {customerView && (
         <div className="no-print" style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <button onClick={() => showPreview(variantPageHTML(buildVariant(selectedModel), false), "Project Quotation — Print Preview", false)} style={{ background: "#2563eb", padding: "7px 14px", fontSize: 13 }}>👁 Print Preview</button>
@@ -1757,9 +1857,9 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
       {previewDoc && (
         <div
           className="no-print"
-          onClick={() => setPreviewDoc(null)}
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 4000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
         >
+          <ModalGuard onClose={() => setPreviewDoc(null)} />
           <div
             onClick={(e) => e.stopPropagation()}
             style={{ background: "#fff", borderRadius: 12, width: "100%", maxWidth: 900, height: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", overflow: "hidden" }}

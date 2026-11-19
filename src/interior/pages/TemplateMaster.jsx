@@ -10,6 +10,7 @@ import { mmToFeet, feetToMm, roundTo2, formatCurrency } from "../utils/unitConve
 import CutSheetOptimizer from "./CutSheetOptimizer";
 import NumInput from "../components/NumInput";
 import StepInput from "../components/StepInput";
+import ModalGuard from "../components/ModalGuard";
 import { packSheets, findOversizedPieces, sheetQtyByMaterial } from "../utils/binPack";
 import { TAPE_ITEM, expandSetItem } from "../utils/projectRows";
 import { materialCalcGlobals } from "../utils/materialCalc";
@@ -422,6 +423,7 @@ function TemplateImageCropModal({ src, onConfirm, onCancel }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <ModalGuard onClose={onCancel} onSave={handleConfirm} value={{ zoom }} label="the photo position" />
       <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: CROP_FRAME_W + 48 }}>
         <h3 style={{ margin: "0 0 4px", fontSize: 16 }}>Position photo</h3>
         <p style={{ margin: "0 0 14px", fontSize: 12, color: "#6b7280" }}>
@@ -3057,7 +3059,8 @@ function TemplateMaster() {
 
       {/* ── New / Rename Folder Modal ── */}
       {folderModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setFolderModal(null)}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <ModalGuard onClose={() => setFolderModal(null)} onSave={saveFolderModal} value={folderNameDraft} label="this folder" />
           <div style={{ background: "#fff", borderRadius: 14, padding: 28, width: 420, maxWidth: "96vw", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ margin: "0 0 6px" }}>{folderModal.mode === "rename" ? "Rename Folder" : "New Folder"}</h3>
             {folderModal.mode === "new" && (
@@ -3070,7 +3073,7 @@ function TemplateMaster() {
               <input
                 autoFocus type="text" value={folderNameDraft}
                 onChange={(e) => setFolderNameDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") saveFolderModal(); if (e.key === "Escape") setFolderModal(null); }}
+                onKeyDown={(e) => { if (e.key === "Enter") saveFolderModal(); }}
                 placeholder="e.g. Wardrobes"
                 style={{ width: "100%", boxSizing: "border-box" }}
               />
@@ -3097,7 +3100,8 @@ function TemplateMaster() {
           </button>
         );
         return (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setMoveTemplateId(null)}>
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <ModalGuard onClose={() => setMoveTemplateId(null)} />
             <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: 380, maxWidth: "96vw", maxHeight: "80vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }} onClick={(e) => e.stopPropagation()}>
               <h3 style={{ margin: "0 0 4px" }}>Move "{t.templateName}"</h3>
               <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>Choose the folder to file it in.</div>
@@ -3116,6 +3120,7 @@ function TemplateMaster() {
       {/* ── New Template Modal ── */}
       {showNewModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <ModalGuard onClose={() => setShowNewModal(false)} onSave={createTemplate} value={newName} label="this template" />
           <div style={{ background: "#fff", borderRadius: 14, padding: 28, width: 420, maxWidth: "96vw", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
             <h3 style={{ margin: "0 0 20px" }}>New Template</h3>
             <div style={{ marginBottom: 20 }}>
@@ -3125,10 +3130,7 @@ function TemplateMaster() {
                 type="text"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") createTemplate();
-                  if (e.key === "Escape") setShowNewModal(false);
-                }}
+                onKeyDown={(e) => { if (e.key === "Enter") createTemplate(); }}
                 placeholder="e.g. Master Bed Room"
                 style={{ width: "100%", boxSizing: "border-box" }}
               />

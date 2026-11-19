@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ModalGuard from "./ModalGuard";
 import { useNavigate } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
 import { useUnsavedChanges } from "../context/UnsavedChangesContext";
@@ -59,7 +60,8 @@ export default function SheetTemplates({ sheetName, getFields, fieldNames, onApp
   const edit = (t) => { onClose(); guardedNavigate(() => navigate(`/interior/template-master?id=${t.id}`)); };
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <ModalGuard onClose={onClose} onSave={() => { save(); onClose(); }} value={name} label="the template name you typed" />
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 24, width: 540, maxWidth: "94vw", maxHeight: "86vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)", color: "#111827", textAlign: "left" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
           <h3 style={{ margin: 0 }}>Sheet templates</h3>

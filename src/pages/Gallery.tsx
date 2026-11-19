@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ModalGuard from "@/interior/components/ModalGuard";
 import Layout from "@/components/layout/Layout";
 import SEO, { breadcrumbSchema } from "@/components/SEO";
 import { motion } from "framer-motion";
@@ -60,6 +61,7 @@ const Gallery = () => {
       {/* Lightbox */}
       {lightbox && (
         <div className="fixed inset-0 z-[100] bg-hero-overlay/90 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
+          <ModalGuard onClose={() => setLightbox(null)} />
           <button onClick={() => setLightbox(null)} className="absolute top-6 right-6 text-primary-foreground/80 hover:text-primary-foreground" aria-label="Close lightbox">
             <X className="w-8 h-8" />
           </button>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ModalGuard from "./ModalGuard";
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`);
 
@@ -72,7 +73,8 @@ function ImagePickerModal({ designGallery, onPick, onClose }) {
   const currentImages = currentNode ? (currentNode.images || []) : [];
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <ModalGuard onClose={onClose} />
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, width: 1200, maxWidth: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "16px 20px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontWeight: 700, fontSize: 16, color: "#1e3a5f" }}>Add image from gallery</div>

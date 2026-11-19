@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ModalGuard from "./ModalGuard";
 
 /**
  * Drag-to-reposition + zoom cropper — lets the user pick exactly which part
@@ -106,6 +107,7 @@ function ImageCropModal({ src, frameW = 420, frameH = 315, outputScale = 2, onCo
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <ModalGuard onClose={onCancel} onSave={handleConfirm} value={{ zoom }} label="the photo position" />
       <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: frameW + 48 }}>
         <h3 style={{ margin: "0 0 4px", fontSize: 16 }}>Position photo</h3>
         <p style={{ margin: "0 0 14px", fontSize: 12, color: "#6b7280" }}>

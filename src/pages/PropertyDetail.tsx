@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import ModalGuard from "@/interior/components/ModalGuard";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, MapPin, BedDouble, Bath, Maximize, Phone, ChevronLeft, ChevronRight, Building2, Calendar, Car, Compass, Home, Layers, Pencil, Trash2, Tag } from "lucide-react";
 import Header from "@/components/layout/Header";
@@ -187,6 +188,7 @@ const PropertyDetail = () => {
           {/* Delete confirmation modal */}
           {isAdmin && showDeleteConfirm && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+              <ModalGuard onClose={() => setShowDeleteConfirm(false)} />
               <div className="bg-card border border-border rounded-xl p-6 max-w-sm w-full shadow-xl">
                 <h3 className="font-bold text-foreground text-lg mb-2">Delete Property?</h3>
                 <p className="text-sm text-muted-foreground mb-5">

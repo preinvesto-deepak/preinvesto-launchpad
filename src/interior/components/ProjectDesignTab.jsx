@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import ModalGuard from "./ModalGuard";
 import { uploadDesignFile } from "../utils/api";
 import { stripExt, normEntry as norm, slimMoodItems } from "../utils/designFiles";
 import MoodBoardCanvas from "./MoodBoardCanvas";
@@ -71,7 +72,8 @@ function useUploader(accept, onDone, multiple = true) {
 function Lightbox({ url, onClose }) {
   if (!url) return null;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 5000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, cursor: "zoom-out" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 5000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, cursor: "zoom-out" }}>
+      <ModalGuard onClose={onClose} />
       <img src={url} alt="" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
     </div>
   );
@@ -246,6 +248,13 @@ function MoodSection({ room, designGallery, updateRoom }) {
   const locked = !!room.moodBoardLocked;
   const [viewId, setViewId] = useState("");
   const viewed = viewId ? versions.find((v) => v.id === viewId) : null;
+  const boardRef = useRef(null);
+  // The version list sits below the board, so bring the board into view when a
+  // version is opened — otherwise the click seems to do nothing.
+  const viewVersion = (id) => {
+    setViewId(id);
+    setTimeout(() => boardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
 
   const finalize = () =>
     updateRoom((r) => ({
@@ -271,6 +280,7 @@ function MoodSection({ room, designGallery, updateRoom }) {
         {locked && <button style={smallBtn} onClick={() => updateRoom((r) => ({ ...r, moodBoardLocked: false }))}>✎ Revise</button>}
       </div>
 
+      <div ref={boardRef} style={{ scrollMarginTop: 12 }} />
       {viewed ? (
         <>
           <div style={{ marginBottom: 8, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -298,7 +308,7 @@ function MoodSection({ room, designGallery, updateRoom }) {
               <span style={{ color: "#6b7280", minWidth: 150 }}>{fmtDate(v.savedAt)}</span>
               <span style={{ color: "#9ca3af" }}>{v.items.length} image{v.items.length === 1 ? "" : "s"}</span>
               <input type="text" placeholder="Note" value={v.note || ""} onChange={(ev) => setNote(v.id, ev.target.value)} style={{ flex: 1, minWidth: 140, width: "auto", fontSize: 12, padding: "3px 6px" }} />
-              <button style={smallBtn} onClick={() => setViewId(v.id)}>View</button>
+              <button style={smallBtn} onClick={() => viewVersion(v.id)}>{viewId === v.id ? "Viewing ↑" : "View"}</button>
             </div>
           ))}
         </div>

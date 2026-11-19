@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ModalGuard from "../components/ModalGuard";
 import { useSearchParams } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
 import RequirementSetEditor from "../components/RequirementSetsEditor";
@@ -101,7 +102,8 @@ function Requirements() {
       </div>
 
       {dialog && (
-        <div onClick={() => setDialog(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <ModalGuard onClose={() => setDialog(null)} onSave={() => { if (dialog.name.trim()) create(); }} value={dialog.name} label="this item" />
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 28, width: 400, maxWidth: "94vw", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
             <h3 style={{ margin: "0 0 6px" }}>{dialog.kind === "folder" ? "New folder" : "New requirement"}</h3>
             <p style={{ margin: "0 0 14px", fontSize: 12, color: "#6b7280" }}>
@@ -112,7 +114,7 @@ function Requirements() {
               autoFocus type="text" value={dialog.name}
               placeholder={dialog.kind === "folder" ? "Folder name" : "Requirement name (e.g. Kitchen)"}
               onChange={(e) => setDialog((d) => ({ ...d, name: e.target.value }))}
-              onKeyDown={(e) => { if (e.key === "Enter") create(); if (e.key === "Escape") setDialog(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter") create(); }}
               style={{ width: "100%", fontSize: 14, padding: "8px 10px", marginBottom: 16 }}
             />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>

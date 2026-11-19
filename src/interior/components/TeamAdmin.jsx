@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
+import ModalGuard from "./ModalGuard";
 import { useNavigate } from "react-router-dom";
 import { authFetch, useAuth } from "@/context/AuthContext";
 import { useAppData } from "../context/AppDataContext";
@@ -62,9 +63,10 @@ export function useTeamAdmin() {
 
 const label = { fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 };
 
-function Modal({ title, onClose, children, width = 440 }) {
+function Modal({ title, onClose, children, width = 440, value, onSave }) {
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1500, display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1500, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <ModalGuard onClose={onClose} value={value} onSave={onSave} label="this form" />
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, width, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h3 style={{ margin: 0 }}>{title}</h3>
@@ -157,7 +159,7 @@ export function CustomersPanel({ team, act }) {
       </table>
 
       {form && (
-        <Modal title={editId ? "Edit Customer" : "Add Customer"} onClose={() => setForm(null)}>
+        <Modal title={editId ? "Edit Customer" : "Add Customer"} onClose={() => setForm(null)} value={form} onSave={save}>
           {error && <div style={{ color: "#dc2626", fontSize: 12, marginTop: 10 }}>{error}</div>}
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
             <div>
@@ -287,7 +289,7 @@ export function TeamPanel({ team, act }) {
       </table>
 
       {form && (
-        <Modal title={editId ? "Edit Person" : "Add Person"} onClose={() => setForm(null)}>
+        <Modal title={editId ? "Edit Person" : "Add Person"} onClose={() => setForm(null)} value={form} onSave={save}>
           {error && <div style={{ color: "#dc2626", fontSize: 12, marginTop: 10 }}>{error}</div>}
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
             <div>
@@ -476,7 +478,7 @@ export function GroupsPanel({ team, act }) {
       </table>
 
       {form && (
-        <Modal title={editId ? "Edit Group" : "Add Group"} onClose={() => setForm(null)} width={560}>
+        <Modal title={editId ? "Edit Group" : "Add Group"} onClose={() => setForm(null)} width={560} value={form} onSave={save}>
           {error && <div style={{ color: "#dc2626", fontSize: 12, marginTop: 10 }}>{error}</div>}
           <div style={{ marginTop: 12 }}>
             <label style={label}>Group name *</label>

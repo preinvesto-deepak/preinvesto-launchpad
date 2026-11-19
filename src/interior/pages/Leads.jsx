@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
+import ModalGuard from "../components/ModalGuard";
 import { DEFAULT_LEAD_STATUSES, DEFAULT_LEAD_STATUS, STATUS_COLOR_PRESETS, statusInfo } from "../data/leadStatus";
 import { LEAD_SOURCES, leadSourceLabel } from "../data/leadSource";
 import { PRIORITY_LEVELS, priorityInfo, tagColor, TAG_COLORS } from "../data/leadPriority";
@@ -429,15 +430,9 @@ function Leads() {
 
   const closeLeadModal = () => setModalOpen(false);
 
-  // Esc closes the Lead Detail modal, same as clicking Cancel — discards
-  // any unsaved form edits without a confirm step (matching Cancel's own
-  // behavior; edits here aren't persisted until Save anyway).
-  useEffect(() => {
-    if (!modalOpen) return;
-    const onKeyDown = (e) => { if (e.key === "Escape") closeLeadModal(); };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [modalOpen]);
+  // Esc / clicking outside is handled by <ModalGuard> inside each popup below:
+  // the New Lead form asks Save / Discard / Keep editing when something was typed;
+  // the Lead Detail screen auto-saves, so it just closes.
 
   // Only ever creates a new lead now — editing an existing one auto-saves
   // straight into `leads` from the Lead Detail screen instead.
@@ -1203,6 +1198,7 @@ function Leads() {
           Detail screen below instead, which auto-saves every field. ── */}
       {modalOpen && !editId && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1500, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <ModalGuard onClose={closeLeadModal} onSave={saveLead} value={form} label="this lead" />
           <div style={{ background: "#fff", borderRadius: 12, padding: 24, width: 420, maxWidth: "94vw", maxHeight: "88vh", overflowY: "auto" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
               <h3 style={{ margin: 0 }}>New Lead</h3>
@@ -1287,7 +1283,8 @@ function Leads() {
         const converted = openLead.status === "converted";
         const blurLog = onBlurLog(editId);
         return (
-          <div onClick={closeLeadModal} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1500, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1500, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <ModalGuard onClose={closeLeadModal} />
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, width: "min(1200px, 96vw)", height: "90vh", boxShadow: "0 20px 60px rgba(0,0,0,0.35)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 24px", borderBottom: "1px solid #e5e7eb", flexShrink: 0 }}>
               <input
@@ -1578,7 +1575,8 @@ function Leads() {
           reorder them with ↑/↓. Lives on the active view (`view.columns`),
           same as its filters, so different views can show different columns. ── */}
       {columnsModalOpen && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1600, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setColumnsModalOpen(false)}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1600, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <ModalGuard onClose={() => setColumnsModalOpen(false)} />
           <div style={{ background: "#fff", borderRadius: 12, padding: 24, width: 380, maxWidth: "92vw", maxHeight: "86vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
               <div>
@@ -1627,6 +1625,12 @@ function Leads() {
           statusDraft until Save. ── */}
       {statusModalOpen && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1600, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <ModalGuard
+            onClose={() => (confirmCloseStatusModal ? setConfirmCloseStatusModal(false) : discardStatusModal())}
+            onSave={saveStatusSettings}
+            dirty={statusDirty && !confirmCloseStatusModal}
+            label="the lead statuses"
+          />
           <div style={{ background: "#fff", borderRadius: 12, padding: 24, width: 460, maxWidth: "92vw", maxHeight: "86vh", overflowY: "auto" }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
               <div>

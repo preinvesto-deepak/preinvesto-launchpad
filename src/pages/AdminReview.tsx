@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ModalGuard from "@/interior/components/ModalGuard";
 import { Link, useNavigate } from "react-router-dom";
 import { CheckCircle, XCircle, Flag, Pencil, Trash2, ArrowLeft, Eye } from "lucide-react";
 import Header from "@/components/layout/Header";
@@ -220,6 +221,7 @@ const AdminReview = () => {
       {/* Delete confirmation modal */}
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <ModalGuard onClose={() => setConfirmDelete(null)} />
           <div className="bg-card border border-border rounded-xl p-6 max-w-sm w-full shadow-xl">
             <h3 className="font-bold text-foreground text-lg mb-2">Delete Property?</h3>
             <p className="text-sm text-muted-foreground mb-5">This will permanently delete this property. This cannot be undone.</p>

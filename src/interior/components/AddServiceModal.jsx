@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ModalGuard from "./ModalGuard";
 import { useAppData } from "../context/AppDataContext";
 import { GROUP_OPTIONS } from "../data/priceData";
 import { ALL_SERVICES, SERVICES, MEASURE_LABELS, WARDROBE_SERVICE, serviceForGroup } from "../utils/services";
@@ -91,7 +92,8 @@ export default function AddServiceModal({ onClose, onAdded, onDeleted, editing }
   const existingItems = (prices || []).filter((p) => (p.group || p.category) === g).length;
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2200, display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2200, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <ModalGuard onClose={onClose} onSave={save} value={{ name, group, measure }} label="this service" />
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, width: 400, maxWidth: "95vw" }}>
         <h3 style={{ margin: "0 0 14px", fontSize: 16 }}>{editing ? "Rename service" : "Add a service"}</h3>
 
@@ -99,7 +101,7 @@ export default function AddServiceModal({ onClose, onAdded, onDeleted, editing }
         <input
           autoFocus type="text" value={name} placeholder="e.g. Painting, Plumbing, Wall Paneling"
           onChange={(e) => { setName(e.target.value); setError(""); }}
-          onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") onClose(); }}
+          onKeyDown={(e) => { if (e.key === "Enter") save(); }}
           style={{ width: "100%", padding: "8px 10px", fontSize: 14, borderRadius: 6, border: "1px solid #d1d5db", margin: "4px 0 12px", boxSizing: "border-box" }}
         />
 

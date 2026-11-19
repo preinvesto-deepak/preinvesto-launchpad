@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAppData } from "../context/AppDataContext";
 import { uploadGalleryImage } from "../utils/api";
 import ImageCropModal from "../components/ImageCropModal";
+import ModalGuard from "../components/ModalGuard";
 import ServiceFilter from "../components/ServiceFilter";
 import { ALL_SERVICES, WARDROBE_SERVICE, SERVICE_NAMES, matchesService, serviceTagOf } from "../utils/services";
 
@@ -385,6 +386,7 @@ function DesignGallery() {
 
       {addGroupModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2100, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <ModalGuard onClose={() => setAddGroupModal(null)} onSave={() => { if (addGroupModal.draft.trim()) confirmAddGroup(); }} value={addGroupModal.draft} label="this group" />
           <div style={{ background: "#fff", borderRadius: 12, padding: 24, width: 360 }}>
             <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>{addGroupModal.parentId ? "New sub-group" : "New group"}</h3>
             <input
@@ -392,7 +394,7 @@ function DesignGallery() {
               autoFocus
               value={addGroupModal.draft}
               onChange={(e) => setAddGroupModal((m) => ({ ...m, draft: e.target.value }))}
-              onKeyDown={(e) => { if (e.key === "Enter") confirmAddGroup(); if (e.key === "Escape") setAddGroupModal(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter") confirmAddGroup(); }}
               placeholder={addGroupModal.parentId ? "e.g. With Louvers" : "e.g. TV Unit"}
               style={{ width: "100%", padding: "8px 10px", fontSize: 14, borderRadius: 6, border: "1px solid #d1d5db" }}
             />
@@ -423,6 +425,7 @@ function DesignGallery() {
 
       {confirmDeleteId && deleteTargetNode && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2100, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <ModalGuard onClose={() => setConfirmDeleteId(null)} />
           <div style={{ background: "#fff", borderRadius: 12, padding: 24, width: 380 }}>
             <h3 style={{ margin: "0 0 10px", fontSize: 16 }}>Delete "{deleteTargetNode.name}"?</h3>
             <p style={{ margin: "0 0 18px", fontSize: 13, color: "#6b7280" }}>
