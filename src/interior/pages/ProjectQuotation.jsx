@@ -891,7 +891,7 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
         </div>
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin:12px 0">
           <p style="margin:0"><strong>Project:</strong> ${selectedProject}</p>
-          <p style="margin:0;font-size:16px;white-space:nowrap"><strong>Grand Total:</strong> <strong style="color:${modelColor}">${fmtCurrency(v.gt)}</strong></p>
+          <p style="margin:0;font-size:16px;white-space:nowrap"><strong>Grand Total:</strong> <strong style="color:${modelColor}">${"₹" + Math.round(Number(v.gt) || 0).toLocaleString("en-IN")}</strong></p>
         </div>
         ${quotationTables(v.items).map((t, ti, all) => `
         <h3>${t.title}</h3>
@@ -1149,7 +1149,19 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
     doc.setFontSize(10);
     doc.text(`Project: ${selectedProject}`, margin, y);
     doc.setFontSize(12);
-    doc.text(`Grand Total: ${fmtPdf(v.gt)}`, pageW - margin, y, { align: "right" });
+    // Grand Total: whole rupees (no paise), amount bold and in the variant's
+    // colour (same as on screen) so it stands out; the label stays dark.
+    const gtAmount = `Rs. ${Math.round(Number(v.gt) || 0).toLocaleString("en-IN")}`;
+    const hex = (v.model ? QUOT_MODEL_COLORS[v.model] : "#2563eb").replace("#", "");
+    const gtRgb = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) || 0);
+    doc.setFontSize(13);
+    doc.setFont(undefined, "bold");
+    doc.setTextColor(gtRgb[0], gtRgb[1], gtRgb[2]);
+    doc.text(gtAmount, pageW - margin, y, { align: "right" });
+    const gtAmountW = doc.getTextWidth(gtAmount);
+    doc.setTextColor(0);
+    doc.text("Grand Total: ", pageW - margin - gtAmountW, y, { align: "right" });
+    doc.setFont(undefined, "normal");
     doc.setFontSize(10);
     y += 6;
 
@@ -1336,15 +1348,21 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
               <div style={inputRow}>
                 <span style={labelStyle}>Profit (₹)</span>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
                   disabled={costTotal <= 0}
                   title={costTotal > 0 ? `Markup on the ${QUOT_MODEL_LABELS[selectedModel]} cost — change it and the Markup % follows` : "No cost yet to calculate a profit on"}
-                  value={profitDraft ?? (Math.round(markupAmount * 100) / 100)}
-                  onFocus={() => setProfitDraft(String(Math.round(markupAmount * 100) / 100))}
+                  style={{ background: "#fffbeb", borderColor: "#fcd34d", fontWeight: 700, color: "#92400e" }}
+                  // ₹ and Indian digit grouping (1,13,591); only the digits typed count.
+                  value={"₹ " + (profitDraft !== null
+                    ? (profitDraft === "" ? "" : Number(profitDraft).toLocaleString("en-IN"))
+                    : Math.round(markupAmount).toLocaleString("en-IN"))}
+                  onFocus={() => setProfitDraft(String(Math.round(markupAmount)))}
                   onBlur={() => setProfitDraft(null)}
                   onChange={(e) => {
-                    setProfitDraft(e.target.value);
-                    const p = Number(e.target.value) || 0;
+                    const digits = e.target.value.replace(/[^0-9]/g, "");
+                    setProfitDraft(digits);
+                    const p = Number(digits) || 0;
                     const pct = costTotal > 0 ? Math.round((p / costTotal) * 100 * 10000) / 10000 : 0;
                     setMarkupPercent(pct);
                     persistField("markupPercent", pct);
