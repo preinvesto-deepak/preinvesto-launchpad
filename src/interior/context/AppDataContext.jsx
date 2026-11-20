@@ -4,6 +4,9 @@ import { projectList } from "../data/projectData";
 import { subProjectList } from "../data/subProjectData";
 import { dimensionEntries } from "../data/dimensionData";
 import { priceList } from "../data/priceData";
+
+// Priced items the app quantifies by itself; offered once to existing accounts (see the load below).
+const AUTO_PRICE_ITEMS = ["Loading and unloading", "Shifting (service lift)", "Shifting (no service lift)"];
 import { templateList } from "../data/templateData";
 import { fetchState, saveState } from "../utils/api";
 import { syncCustomServices } from "../utils/services";
@@ -195,14 +198,30 @@ function AppDataProvider({ children }) {
         setProjectsRaw(data.projects || []);
         setSubProjectsRaw(data.subProjects || []);
         setDimensionsRaw(data.dimensions || []);
-        setPricesRaw(data.prices || []);
+        // Items the app now works out automatically (Loading and unloading, Shifting)
+        // are offered to an existing account ONCE: added to its Items Pricing with their
+        // starting rates if missing, then remembered in companyProfile.offeredItems so
+        // deleting or renaming one later is respected and it is never added again.
+        const offered = Array.isArray(data.companyProfile?.offeredItems) ? data.companyProfile.offeredItems : [];
+        const toOffer = AUTO_PRICE_ITEMS.filter((n) => !offered.includes(n));
+        let loadedPrices = data.prices || [];
+        let loadedProfile = data.companyProfile || {};
+        if (toOffer.length) {
+          let nextId = loadedPrices.reduce((m, p) => Math.max(m, Number(p.id) || 0), 0) + 1;
+          const missing = priceList.filter((p) => toOffer.includes(p.materialName) && !loadedPrices.some((x) => x.materialName === p.materialName));
+          if (missing.length) loadedPrices = [...loadedPrices, ...missing.map((p) => ({ ...p, id: nextId++ }))];
+          loadedProfile = { ...loadedProfile, offeredItems: [...offered, ...toOffer] };
+          // The first run after a load is not saved (nothing changed), so ask for this one.
+          setTimeout(() => { dirtyRef.current = true; runSave(); }, 600);
+        }
+        setPricesRaw(loadedPrices);
         setMaterialModelRatesRaw(data.materialModelRates || {});
         setMaterialModelProfitPercentRaw(data.materialModelProfitPercent || defaultData.materialModelProfitPercent);
         setTemplatesRaw(data.templates || []);
         setSelectedTemplateIdRaw(data.selectedTemplateId || "");
         setMaterialStockSettingsRaw(data.materialStockSettings || {});
         setKerfWidthRaw(data.kerfWidth ?? 0);
-        setCompanyProfileRaw(data.companyProfile || {});
+        setCompanyProfileRaw(loadedProfile);
         setDesignGalleryRaw(data.designGallery || []);
         setLeadsRaw(data.leads || []);
         setLeadViewsRaw(data.leadViews || null);

@@ -19,7 +19,7 @@ import ModalGuard from "../components/ModalGuard";
 import RequirementsPanel from "../components/RequirementsPanel";
 import ProjectQuotation from "./ProjectQuotation";
 import { packSheets, findOversizedPieces, sheetQtyByMaterial } from "../utils/binPack";
-import { TAPE_ITEM, expandSetItem, setComponentsOf } from "../utils/projectRows";
+import { TAPE_ITEM, LOADING_ITEM, SHIFT_LIFT_ITEM, SHIFT_NOLIFT_ITEM, isShiftItem, shiftingFor, expandSetItem, setComponentsOf } from "../utils/projectRows";
 import { calcFor, materialCalcGlobals, isMaterialCalcUniversal } from "../utils/materialCalc";
 import { kerfFor, isKerfUniversal } from "../utils/kerf";
 import { GROUP_OPTIONS } from "../data/priceData";
@@ -1232,7 +1232,7 @@ function Projects() {
   // "Convert to Project" time on the Leads page, from the lead's own record.
   // They can still be corrected via Edit Info, but a fresh project created
   // straight from "+ New Project" simply won't have them.
-  const emptyP = { name: "", client: "", contact: "", email: "", location: "", address: "", leadSource: "", referredBy: "" };
+  const emptyP = { name: "", client: "", contact: "", email: "", location: "", address: "", leadSource: "", referredBy: "", floorNo: "", serviceLift: "" };
   const [pForm, setPForm] = useState(emptyP);
 
   // Room modal
@@ -1417,6 +1417,7 @@ function Projects() {
       contact: p.contact || "", email: p.email || "",
       location: p.location || "", address: p.address || "",
       leadSource: p.leadSource || "", referredBy: p.referredBy || "",
+      floorNo: p.floorNo ?? "", serviceLift: p.serviceLift || "",
     });
     setProjectError("");
     setSubmitAttempted(false);
@@ -2056,6 +2057,7 @@ function Projects() {
       (box.hardwareItems || []).forEach((hw) => {
         if (!hw.materialName) return;
         if (hw.materialName === FEVICOL_NAME) return; // auto-calculated below instead of hand-entered
+        if (hw.materialName === LOADING_ITEM || isShiftItem(hw.materialName)) return; // one per Ply sheet (x floors), below
         if (tapeDiv > 0 && hw.materialName === TAPE_ITEM) return; // from edge band length, below
         const total = (Number(hw.qty) || 0) + (Number(hw.extra) || 0);
         expandSetItem(hw.materialName, total, prices).forEach((leaf) => {
@@ -2085,7 +2087,20 @@ function Projects() {
       ? [{ material: TAPE_ITEM, group: tapePriceEntry?.group || "Tape", requiredQty: tapeQty, unit: tapePriceEntry?.unit || "Nos" }]
       : [];
 
-    return [...sheetRows, ...areaRows, ...edgeRows, ...carpRows, ...hwRows, ...fevicolRows, ...tapeRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
+    // Loading & unloading = one per Ply (Wood-group) sheet used, a part sheet counting as a whole one.
+    const plySheets = sheetRows.filter((r) => r.group === "Wood").reduce((s, r) => s + Math.ceil((Number(r.requiredQty) || 0) - 1e-9), 0);
+    const loadingEntry = (prices || []).find((p) => p.materialName === LOADING_ITEM);
+    const loadingRows = plySheets > 0
+      ? [{ material: LOADING_ITEM, group: loadingEntry?.group || "Transportation", requiredQty: plySheets, unit: loadingEntry?.unit || "Nos" }]
+      : [];
+    // Shifting up the floors: Ply sheets x floors x the lift / no-lift rate.
+    const shift = shiftingFor(selectedProject, plySheets);
+    const shiftEntry = shift ? (prices || []).find((p) => p.materialName === shift.material) : null;
+    const shiftRows = shift
+      ? [{ material: shift.material, group: shiftEntry?.group || "Transportation", requiredQty: shift.qty, unit: shiftEntry?.unit || "Nos" }]
+      : [];
+
+    return [...sheetRows, ...areaRows, ...edgeRows, ...carpRows, ...hwRows, ...fevicolRows, ...tapeRows, ...loadingRows, ...shiftRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
   };
 
   // ── Part CRUD for Sheets Calculation in Room ─────────────────────────────────
@@ -2730,7 +2745,8 @@ function Projects() {
                     rooms.map((room) => ({ ...room, boxes: (room.boxes || []).filter((b) => b.includeInQuotation !== false && !serviceOf(b)) })),
                     prices,
                     materialStockSettings,
-                    projectKerf
+                    projectKerf,
+                    selectedProject
                   ).map((r) => ({ ...r, service: WARDROBE_SERVICE })),
                   ...serviceAnalysisRows(rooms),
                 ]}
@@ -3798,7 +3814,7 @@ function Projects() {
 
                     {/* ══ SECTION 3: HARDWARE & CONSUMABLES — ALL BOXES ══ */}
                     {boxes.length > 0 && (() => {
-                      const groupOf = (mat) => (prices || []).find((p) => p.materialName === mat)?.group || "Other";
+                      const groupOf = (mat) => (prices || []).find((p) => p.materialName === mat)?.group || (mat === LOADING_ITEM || isShiftItem(mat) ? "Transportation" : "Other");
                       // Every group present in Items Pricing shows up here automatically —
                       // including custom groups not in the fixed GROUP_OPTIONS list. Wood/
                       // Laminate get a single room-wide AUTO row per material below (real
@@ -3829,6 +3845,25 @@ function Projects() {
                           boxId: "all", boxName: "All Boxes",
                         });
                       });
+                      // Loading & unloading: one per Ply sheet used - auto, room-wide, no Extra.
+                      {
+                        const plyN = computeSheetRows().filter((r) => r.group === "Wood").reduce((s, r) => s + Math.ceil((Number(r.requiredQty) || 0) - 1e-9), 0);
+                        if (plyN > 0) {
+                          allRows.push({
+                            id: "loading_auto", materialName: LOADING_ITEM, base: plyN, extra: 0,
+                            unit: (prices || []).find((p) => p.materialName === LOADING_ITEM)?.unit || "Nos", auto: true, autoType: "loading",
+                            boxId: "all", boxName: "All Boxes",
+                          });
+                          const sh = shiftingFor(selectedProject, plyN);
+                          if (sh) {
+                            allRows.push({
+                              id: "shifting_auto", materialName: sh.material, base: sh.qty, extra: 0,
+                              unit: (prices || []).find((p) => p.materialName === sh.material)?.unit || "Nos", auto: true, autoType: "loading",
+                              boxId: "all", boxName: "All Boxes",
+                            });
+                          }
+                        }
+                      }
                       boxes.forEach((box) => {
                         computeBoxEdgeBandingRows(box).forEach((r) => {
                           allRows.push({
@@ -3846,7 +3881,7 @@ function Projects() {
                           });
                         });
                         (box.hardwareItems || []).forEach((hw) => {
-                          if (hw.materialName === "Fevicol Merino" || (Number(tapeDivisor) > 0 && hw.materialName === TAPE_ITEM)) return; // now auto-calculated in Material Summary instead
+                          if (hw.materialName === "Fevicol Merino" || hw.materialName === LOADING_ITEM || isShiftItem(hw.materialName) || (Number(tapeDivisor) > 0 && hw.materialName === TAPE_ITEM)) return; // now auto-calculated in Material Summary instead
                           allRows.push({
                             ...hw,
                             boxId: box.id,
@@ -3953,14 +3988,14 @@ function Projects() {
                                                   )}
                                                 </td>
                                                 <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
-                                                  <StepInput width={100} min={0} step={hw.auto ? 0.5 : 1} value={hw.extra || 0}
+                                                  {hw.autoType === "loading" ? <span style={{ color: "#9ca3af" }}>—</span> : <StepInput width={100} min={0} step={hw.auto ? 0.5 : 1} value={hw.extra || 0}
                                                     onChange={(v) => {
                                                       if (hw.autoType === "edge") setEdgeExtraMtr(v);
                                                       else if (hw.autoType === "carpenter") setCarpenterExtraSft(v);
                                                       else if (hw.autoType === "sheet") setMaterialStockSettings((prev) => ({ ...prev, [hw.materialName]: { ...(prev?.[hw.materialName] || {}), extraQty: v } }));
                                                       else updateHardwareItem(hw.boxId, hw.id, "extra", v);
                                                     }}
-                                                    style={{ fontSize: 12, padding: "2px 4px" }} />
+                                                    style={{ fontSize: 12, padding: "2px 4px" }} />}
                                                 </td>
                                                 <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
                                                   <span style={{ fontSize: 12, fontWeight: 700, color: "#059669" }}>{total}</span>
@@ -4297,6 +4332,25 @@ function Projects() {
                   </div>
                 )}
               </div>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Floor of the flat</label>
+                <input
+                  type="number" min="0" value={pForm.floorNo}
+                  onChange={(e) => updatePForm({ floorNo: e.target.value })}
+                  placeholder="e.g. 3 (ground floor = 0)"
+                />
+              </div>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Service lift available?</label>
+                <select value={pForm.serviceLift} onChange={(e) => updatePForm({ serviceLift: e.target.value })}>
+                  <option value="">— Not noted —</option>
+                  <option value="yes">Yes — service lift available</option>
+                  <option value="no">No service lift</option>
+                </select>
+              </div>
+              <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280", marginTop: -4 }}>
+                Shifting is charged per ply sheet per floor (rates in Items Pricing: "Shifting (service lift)" / "Shifting (no service lift)"), only when both the floor and the lift answer are filled in.
+              </div>
             </>
           }
         />
@@ -4431,6 +4485,7 @@ function Projects() {
         <MaterialModelPicker
           label="Material Details"
           prices={prices}
+          hidden={[LOADING_ITEM, SHIFT_LIFT_ITEM, SHIFT_NOLIFT_ITEM]}
           initialGroup={hardwarePicker.group}
           onSelect={(p) => {
             const boxId = hardwarePicker.boxId;

@@ -13,6 +13,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = process.env.API_PORT || 3001;
 
+// Express 4 does not catch a rejected async handler, so one failed database call
+// (e.g. the remote MySQL dropping a connection: ECONNRESET) used to crash the
+// whole server. Wrap every route handler so such errors go to the error handler
+// at the bottom instead of killing the process.
+const wrapAsync = (fn) => (req, res, next) => {
+  try {
+    const out = fn(req, res, next);
+    if (out && typeof out.catch === 'function') out.catch(next);
+  } catch (err) {
+    next(err);
+  }
+};
+for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
+  const original = app[method].bind(app);
+  app[method] = (...args) => original(...args.map((a) => (typeof a === 'function' && a.length < 4 ? wrapAsync(a) : a)));
+}
+
+// Last line of defence: log and keep serving rather than exit.
+process.on('unhandledRejection', (err) => console.error('Unhandled rejection:', err?.code || '', err?.message || err));
+process.on('uncaughtException', (err) => console.error('Uncaught exception:', err?.code || '', err?.message || err));
+
 app.use(cors());
 // Default is 100kb, which the Interior tool's whole-workspace save
 // (projects + rooms + pricing + templates, all POSTed together as one JSON
@@ -74,7 +95,27 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   dateStrings: true,
+  // Keep idle connections alive so the remote server / network doesn't reset them.
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
 });
+
+// A dropped connection is a one-off: retry a plain read once on a fresh
+// connection. Writes are never retried (they might already have been applied).
+const TRANSIENT = new Set(['ECONNRESET', 'PROTOCOL_CONNECTION_LOST', 'ETIMEDOUT', 'EPIPE', 'ECONNREFUSED']);
+const rawQuery = pool.query.bind(pool);
+pool.query = async (...args) => {
+  try {
+    return await rawQuery(...args);
+  } catch (err) {
+    const sql = typeof args[0] === 'string' ? args[0] : args[0]?.sql || '';
+    if (TRANSIENT.has(err?.code) && /^\s*(select|show)\b/i.test(sql)) {
+      console.warn('Database connection dropped (' + err.code + ') — retrying the read once');
+      return rawQuery(...args);
+    }
+    throw err;
+  }
+};
 
 // ---------------------------------------------------------------------------
 // GET /api/properties — list all properties (newest first)
@@ -429,6 +470,18 @@ app.post(['/api/update_property', '/api/update_property.php'], async (req, res) 
 
 // Auth (signup/login/forgot-password) + the Interior tool's per-user workspace.
 registerAuthRoutes(app, pool);
+
+// Any error a route threw lands here: tell the browser, keep the server running.
+// eslint-disable-next-line no-unused-vars
+app.use((err, _req, res, _next) => {
+  console.error('Request failed:', err?.code || '', err?.message || err);
+  if (res.headersSent) return;
+  const dbDown = TRANSIENT.has(err?.code) || /connect|ECONN|PROTOCOL_CONNECTION/i.test(String(err?.message));
+  res.status(dbDown ? 503 : 500).json({
+    success: false,
+    error: dbDown ? 'The database connection was interrupted. Please try again.' : 'Something went wrong on the server.',
+  });
+});
 
 app.listen(port, () => {
   console.log(`API server running on http://localhost:${port}`);

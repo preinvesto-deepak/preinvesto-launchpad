@@ -12,7 +12,7 @@ import NumInput from "../components/NumInput";
 import StepInput from "../components/StepInput";
 import ModalGuard from "../components/ModalGuard";
 import { packSheets, findOversizedPieces, sheetQtyByMaterial } from "../utils/binPack";
-import { TAPE_ITEM, expandSetItem } from "../utils/projectRows";
+import { TAPE_ITEM, LOADING_ITEM, SHIFT_LIFT_ITEM, SHIFT_NOLIFT_ITEM, expandSetItem } from "../utils/projectRows";
 import { materialCalcGlobals } from "../utils/materialCalc";
 import { globalKerfMm } from "../utils/kerf";
 import { resolveInclRate } from "../utils/modelRates";
@@ -907,6 +907,7 @@ function TemplateMaster() {
       (box.hardwareItems || []).forEach((hw) => {
         if (!hw.materialName) return;
         if (hw.materialName === FEVICOL_NAME) return; // auto-calculated below instead of hand-entered
+        if (hw.materialName === LOADING_ITEM) return; // one per Ply sheet, below
         if (tapeDiv > 0 && hw.materialName === TAPE_ITEM) return; // from edge band length, below
         const total = (Number(hw.qty) || 0) + (Number(hw.extra) || 0);
         expandSetItem(hw.materialName, total, prices).forEach((leaf) => {
@@ -937,7 +938,14 @@ function TemplateMaster() {
       ? [{ material: TAPE_ITEM, group: tapePriceEntry?.group || "Tape", requiredQty: tapeQty, unit: tapePriceEntry?.unit || "Nos" }]
       : [];
 
-    return [...sheetRows, ...areaRows, ...edgeRows, ...carpRows, ...hwRows, ...fevicolRows, ...tapeRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
+    // Loading & unloading = one per Ply (Wood-group) sheet used, a part sheet counting as a whole one.
+    const plySheets = sheetRows.filter((r) => r.group === "Wood").reduce((s, r) => s + Math.ceil((Number(r.requiredQty) || 0) - 1e-9), 0);
+    const loadingEntry = (prices || []).find((p) => p.materialName === LOADING_ITEM);
+    const loadingRows = plySheets > 0
+      ? [{ material: LOADING_ITEM, group: loadingEntry?.group || "Transportation", requiredQty: plySheets, unit: loadingEntry?.unit || "Nos" }]
+      : [];
+
+    return [...sheetRows, ...areaRows, ...edgeRows, ...carpRows, ...hwRows, ...fevicolRows, ...tapeRows, ...loadingRows].sort((a, b) => a.group.localeCompare(b.group) || a.material.localeCompare(b.material));
   };
 
   // ── Cut Sheet Generator ───────────────────────────────────────────────────────
@@ -2646,7 +2654,7 @@ function TemplateMaster() {
 
               {/* ══ SECTION 2: HARDWARE & CONSUMABLES — ALL BOXES ══ */}
               {draft && boxes.length > 0 && (() => {
-                const groupOf = (mat) => (prices || []).find((p) => p.materialName === mat)?.group || "Other";
+                const groupOf = (mat) => (prices || []).find((p) => p.materialName === mat)?.group || (mat === LOADING_ITEM ? "Transportation" : "Other");
                 // Every group present in Items Pricing shows up here automatically —
                 // including custom groups not in the fixed GROUP_OPTIONS list. Wood/
                 // Laminate get a single project-wide AUTO row per material below
@@ -2680,6 +2688,17 @@ function TemplateMaster() {
                     boxId: "all", boxName: "All Boxes",
                   });
                 });
+                // Loading & unloading: one per Ply sheet used - auto, room-wide, no Extra.
+                {
+                  const plyN = computeSheetRows().filter((r) => r.group === "Wood").reduce((s, r) => s + Math.ceil((Number(r.requiredQty) || 0) - 1e-9), 0);
+                  if (plyN > 0) {
+                    allRows.push({
+                      id: "loading_auto", materialName: LOADING_ITEM, base: plyN, extra: 0,
+                      unit: (prices || []).find((p) => p.materialName === LOADING_ITEM)?.unit || "Nos", auto: true, autoType: "loading",
+                      boxId: "all", boxName: "All Boxes",
+                    });
+                  }
+                }
                 boxes.forEach((box) => {
                   computeBoxEdgeBandingRows(box).forEach((r) => {
                     allRows.push({
@@ -2697,7 +2716,7 @@ function TemplateMaster() {
                     });
                   });
                   (box.hardwareItems || []).forEach((hw) => {
-                    if (hw.materialName === "Fevicol Merino" || (Number(tapeDivisor) > 0 && hw.materialName === TAPE_ITEM)) return; // now auto-calculated in Material Summary instead
+                    if (hw.materialName === "Fevicol Merino" || hw.materialName === LOADING_ITEM || (Number(tapeDivisor) > 0 && hw.materialName === TAPE_ITEM)) return; // now auto-calculated in Material Summary instead
                     allRows.push({
                       ...hw,
                       boxId: box.id,
@@ -2799,14 +2818,14 @@ function TemplateMaster() {
                                             )}
                                           </td>
                                           <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
-                                            <StepInput width={100} min={0} step={hw.auto ? 0.5 : 1} value={hw.extra || 0}
+                                            {hw.autoType === "loading" ? <span style={{ color: "#9ca3af" }}>—</span> : <StepInput width={100} min={0} step={hw.auto ? 0.5 : 1} value={hw.extra || 0}
                                                     onChange={(v) => {
                                                       if (hw.autoType === "edge") setEdgeExtraMtr(v);
                                                       else if (hw.autoType === "carpenter") setCarpenterExtraSft(v);
                                                       else if (hw.autoType === "sheet") setMaterialStockSettings((prev) => ({ ...prev, [hw.materialName]: { ...(prev?.[hw.materialName] || {}), extraQty: v } }));
                                                       else updateHardwareItem(hw.boxId, hw.id, "extra", v);
                                                     }}
-                                                    style={{ fontSize: 12, padding: "2px 4px" }} />
+                                                    style={{ fontSize: 12, padding: "2px 4px" }} />}
                                           </td>
                                           <td style={{ padding: "3px 10px", borderBottom: "1px solid #ede9fe", textAlign: "center" }}>
                                             <span style={{ fontSize: 12, fontWeight: 700, color: "#059669" }}>{total}</span>
@@ -3187,6 +3206,7 @@ function TemplateMaster() {
         <MaterialModelPicker
           label="Material Details"
           prices={prices}
+          hidden={[LOADING_ITEM, SHIFT_LIFT_ITEM, SHIFT_NOLIFT_ITEM]}
           initialGroup={hardwarePicker.group}
           onSelect={({ materialName: name, id }) => {
             const boxId = hardwarePicker.boxId ?? activeBox?.id;

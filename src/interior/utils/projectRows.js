@@ -208,6 +208,32 @@ export function buildRoomEdgeBanding(room, prices) {
 export const FEVICOL_ITEM = "Fevicol Merino";
 
 /**
+ * Loading & unloading is not typed in either: one charge per Ply (Wood-group)
+ * sheet used - e.g. 12 sheets x its Items Pricing rate (10) = 120. A part sheet
+ * counts as a whole one, since the whole sheet still has to be carried.
+ */
+export const LOADING_ITEM = "Loading and unloading";
+/**
+ * Shifting the material up to the flat: floors x ply sheets x a per-floor rate
+ * that depends on whether the building has a service lift (both rates are Items
+ * Pricing items, so they can be edited there). The project says which floor it
+ * is and whether there is a service lift; with either unknown nothing is charged.
+ */
+export const SHIFT_LIFT_ITEM = "Shifting (service lift)";
+export const SHIFT_NOLIFT_ITEM = "Shifting (no service lift)";
+export const isShiftItem = (name) => name === SHIFT_LIFT_ITEM || name === SHIFT_NOLIFT_ITEM;
+export function shiftingFor(project, plySheets) {
+  const floors = Math.max(0, Number(project?.floorNo) || 0);
+  const lift = project?.serviceLift;
+  if (!floors || !(plySheets > 0) || (lift !== "yes" && lift !== "no")) return null;
+  return { material: lift === "yes" ? SHIFT_LIFT_ITEM : SHIFT_NOLIFT_ITEM, qty: plySheets * floors };
+}
+export function loadingQty(prices, sheetCounts) {
+  return Object.entries(sheetCounts || {}).reduce((s, [mat, n]) =>
+    (prices || []).find((p) => p.materialName === mat)?.group === "Wood" ? s + Math.ceil((Number(n) || 0) - 1e-9) : s, 0);
+}
+
+/**
  * Fevicol Merino is not typed in: multiplier (App Settings) × the room's total
  * Laminate sheets. `sheetCounts` is { [material]: sheets } for the room.
  */
@@ -235,7 +261,7 @@ export function expandSetItem(name, qty, prices, seen = []) {
     c.materialName ? expandSetItem(c.materialName, qty * (Number(c.qty) || 0), prices, [...seen, name]) : []);
 }
 
-export function buildRoomHardware(room, prices, sheetCounts) {
+export function buildRoomHardware(room, prices, sheetCounts, project) {
   const totals = {};
   const tapeDivisor = tapeDivisorOf(room);
   const tapeOn = tapeDivisor > 0 && prices;
@@ -243,6 +269,7 @@ export function buildRoomHardware(room, prices, sheetCounts) {
     (box.hardwareItems || []).forEach((item) => {
       if (!item.materialName) return;
       if (item.materialName === FEVICOL_ITEM) return; // worked out from laminate sheets below
+      if (item.materialName === LOADING_ITEM || isShiftItem(item.materialName)) return; // one per Ply sheet (x floors), below
       if (tapeOn && item.materialName === TAPE_ITEM) return; // counted from edge band below
       const qty = (Number(item.qty) || 0) + (Number(item.extra) || 0);
       if (!qty) return;
@@ -261,6 +288,10 @@ export function buildRoomHardware(room, prices, sheetCounts) {
   if (sheetCounts) {
     const glue = fevicolQty(room, prices, sheetCounts);
     if (glue > 0) totals[FEVICOL_ITEM] = (totals[FEVICOL_ITEM] || 0) + glue;
+    const loading = loadingQty(prices, sheetCounts);
+    if (loading > 0) totals[LOADING_ITEM] = (totals[LOADING_ITEM] || 0) + loading;
+    const shift = shiftingFor(project, loading);
+    if (shift) totals[shift.material] = (totals[shift.material] || 0) + shift.qty;
   }
   return totals;
 }

@@ -26,13 +26,14 @@ const LABEL_TO_GROUP = {
 // onSelect receives one Items Pricing row of the chosen material (the first,
 // exactly what typing the name into the field resolves to), so callers keep
 // storing { name, id } as before — everything downstream is keyed by name.
-function MaterialModelPicker({ label, prices, onSelect, onClose, initialGroup }) {
+function MaterialModelPicker({ label, prices, onSelect, onClose, initialGroup, hidden = [] }) {
   const [filterGroup, setFilterGroup] = useState(initialGroup || LABEL_TO_GROUP[label] || "All");
   const [search, setSearch] = useState("");
 
   const seen = new Set();
   const materials = (prices || []).filter((p) => {
     if (!p.materialName || seen.has(p.materialName)) return false;
+    if (hidden.includes(p.materialName)) return false; // e.g. items the app quantifies by itself
     seen.add(p.materialName);
     return true;
   });

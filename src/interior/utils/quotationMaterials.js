@@ -11,7 +11,7 @@ import { computeSheetCounts } from "./binPack";
 //   • hardware, transportation and carpenter — each room's own lines
 // `rooms` are the quotation's rooms: only boxes included in the quotation, and
 // no service boxes (those are listed by serviceAnalysisRows).
-export function quotationMaterialRows(rooms, prices, materialStockSettings, kerf = 0) {
+export function quotationMaterialRows(rooms, prices, materialStockSettings, kerf = 0, project = null) {
   const getStock = (mat) => {
     const s = materialStockSettings?.[mat];
     return { sheetW: s?.sheetW || 2440, sheetH: s?.sheetH || 1220, sheetTexture: s?.sheetTexture ?? 1 };
@@ -38,7 +38,7 @@ export function quotationMaterialRows(rooms, prices, materialStockSettings, kerf
       add(mat, Math.round((lengthMm / 1000) * 100) / 100, "Mtr"));
 
     const unitOf = (mat) => (prices || []).find((p) => p.materialName === mat)?.unit || "Nos";
-    Object.entries(buildRoomHardware(room, prices, sheets)).forEach(([mat, qty]) => add(mat, qty, unitOf(mat)));
+    Object.entries(buildRoomHardware(room, prices, sheets, project)).forEach(([mat, qty]) => add(mat, qty, unitOf(mat)));
     Object.entries(buildRoomCarpenter(room)).forEach(([mat, qty]) => add(mat, qty, unitOf(mat)));
   });
 

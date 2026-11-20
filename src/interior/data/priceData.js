@@ -59,6 +59,11 @@ export const priceList = [
 
   // ── Transportation ────────────────────────────────────────────────────────
   { id: 41, group: "Transportation",    materialName: "Box Transport",        materialSpec: "",                 unit: "Nos",   brand: "", modelNumber: "", rate: 0, gst: 18 },
+  // Charged once per Ply sheet used - the quantity is worked out automatically (see projectRows.js).
+  { id: 45, group: "Transportation",    materialName: "Loading and unloading", materialSpec: "per sheet",       unit: "Nos",   brand: "", modelNumber: "", rate: 10, gst: 18 },
+  // Shifting up to the flat: Ply sheets x floors x this rate (the project says which floor and whether there is a service lift).
+  { id: 46, group: "Transportation",    materialName: "Shifting (service lift)",    materialSpec: "per sheet per floor", unit: "Nos", brand: "", modelNumber: "", rate: 15, gst: 18 },
+  { id: 47, group: "Transportation",    materialName: "Shifting (no service lift)", materialSpec: "per sheet per floor", unit: "Nos", brand: "", modelNumber: "", rate: 20, gst: 18 },
 
   // ── Carpenter ─────────────────────────────────────────────────────────────
   { id: 42, group: "Carpenter",         materialName: "Frame",                materialSpec: "",                 unit: "Nos",   brand: "", modelNumber: "", rate: 0, gst: 18 },

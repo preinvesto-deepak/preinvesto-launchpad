@@ -155,7 +155,7 @@ function computeRoomCost(room, model, projectObj, prices, materialStockSettings)
   // Manually-added Hardware & Consumables — Transportation and Carpenter split
   // out into their own totals so nothing double-counts against the Carpenter
   // auto-row below.
-  const hwTotals = buildRoomHardware(room, prices, sheetCounts);
+  const hwTotals = buildRoomHardware(room, prices, sheetCounts, projectObj);
   const priceGroupOf = (mat) => prices.find((p) => p.materialName === mat)?.group;
   Object.entries(hwTotals).forEach(([mat, qty]) => {
     const g = priceGroupOf(mat);
@@ -241,7 +241,7 @@ function computeRoomMrpSavings(room, prices, materialStockSettings, projectObj) 
   );
   const materials = [...new Set(rows.map((r) => r.material))];
   const edgeTotals = buildRoomEdgeBanding(room, prices);
-  const hwTotals = buildRoomHardware(room, prices, sheetCounts);
+  const hwTotals = buildRoomHardware(room, prices, sheetCounts, projectObj);
   const carpTotals = buildRoomCarpenter(room);
 
   let mrpTotal = 0;
@@ -304,7 +304,7 @@ function computeHardwareMrpSavingsItems(projectRooms, prices, model, projectObj,
       const meters = Math.round((lengthMm / 1000) * 100) / 100;
       byMaterial[mat] = (byMaterial[mat] || 0) + meters;
     });
-    const hwTotals = buildRoomHardware(room, prices, sheetCounts);
+    const hwTotals = buildRoomHardware(room, prices, sheetCounts, projectObj);
     Object.entries(hwTotals).forEach(([mat, qty]) => {
       byMaterial[mat] = (byMaterial[mat] || 0) + qty;
     });
@@ -427,6 +427,9 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
   // savings/Cut List is shown below the comparison, and which one Print
   // Preview/Download PDF act on.
   const [selectedModel, setSelectedModel] = useState("standard");
+  // While the Profit (₹) box is being typed in, show exactly what was typed
+  // (the Markup % it implies is stored, and Profit is derived from it again).
+  const [profitDraft, setProfitDraft] = useState(null);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   const [breakdownRoomId, setBreakdownRoomId] = useState("");
   // Which of the Rooms-table columns appear in the Quotation (preview, print,
@@ -1329,6 +1332,26 @@ function ProjectQuotation({ initialProjectName, lockProject = false, customerVie
             <div style={inputRow}><span style={labelStyle}>Quotation No</span><input type="text" value={quotationNo} onChange={(e) => { setQuotationNo(e.target.value); persistField("quotationNo", e.target.value); }} /></div>
             <div style={inputRow}><span style={labelStyle}>Date</span><input type="date" value={quotationDate} onChange={(e) => setQuotationDate(e.target.value)} /></div>
             {!hideInCustomerView(companyProfile, "markup") && <div style={inputRow}><span style={labelStyle}>Markup %</span><input type="number" value={markupPercent} onChange={(e) => { setMarkupPercent(e.target.value); persistField("markupPercent", e.target.value); }} /></div>}
+            {!hideInCustomerView(companyProfile, "profit") && (
+              <div style={inputRow}>
+                <span style={labelStyle}>Profit (₹)</span>
+                <input
+                  type="number"
+                  disabled={costTotal <= 0}
+                  title={costTotal > 0 ? `Markup on the ${QUOT_MODEL_LABELS[selectedModel]} cost — change it and the Markup % follows` : "No cost yet to calculate a profit on"}
+                  value={profitDraft ?? (Math.round(markupAmount * 100) / 100)}
+                  onFocus={() => setProfitDraft(String(Math.round(markupAmount * 100) / 100))}
+                  onBlur={() => setProfitDraft(null)}
+                  onChange={(e) => {
+                    setProfitDraft(e.target.value);
+                    const p = Number(e.target.value) || 0;
+                    const pct = costTotal > 0 ? Math.round((p / costTotal) * 100 * 10000) / 10000 : 0;
+                    setMarkupPercent(pct);
+                    persistField("markupPercent", pct);
+                  }}
+                />
+              </div>
+            )}
             <div style={inputRow}><span style={labelStyle}>Discount (₹)</span><input type="number" value={discountAmount} onChange={(e) => { setDiscountAmount(e.target.value); persistField("discountAmount", e.target.value); }} /></div>
             <div style={inputRow}><span style={labelStyle}>GST %</span><input type="number" value={gstPercent} onChange={(e) => { setGstPercent(e.target.value); persistField("gstPercent", e.target.value); }} /></div>
           </div>

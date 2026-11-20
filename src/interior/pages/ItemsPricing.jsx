@@ -328,13 +328,22 @@ function ItemFormModal({ initial, onSave, onClose, allPrices }) {
       alert("Rate with GST can't be more than MRP.");
       return;
     }
+    // Rate without GST is shown to 2 decimals, but saving that rounded figure made
+    // Rate with GST drift (MRP 10 -> 8.47 -> reopens as 9.99). When the box is just
+    // the 2-decimal view of Rate with GST ÷ (1 + GST), keep the exact figure (4 dp).
+    const gstPct = Number(form.gst) || 0;
+    let exactRate = Number(form.rate) || 0;
+    if (Number(form.rateWithGst) > 0) {
+      const precise = Number(form.rateWithGst) / (1 + gstPct / 100);
+      if (precise.toFixed(2) === exactRate.toFixed(2)) exactRate = Number(precise.toFixed(4));
+    }
     onSave({
       partNumber: (form.partNumber || "").trim(),
       components: parts,
       isSet: form.isSet && parts.length > 0,
       group: form.group, materialName: form.materialName, materialSpec: form.materialSpec,
       unit: form.unit, brand: form.brand, modelNumber: form.modelNumber,
-      rate: Number(form.rate) || 0, gst: Number(form.gst) || 0,
+      rate: exactRate, gst: Number(form.gst) || 0,
       images: form.images || [],
       plyThickness: form.group === "Wood" ? (Number(form.plyThickness) || null) : null,
       suitableThickness: form.group === "Edge Beading" ? (form.suitableThickness || []) : [],
@@ -797,6 +806,8 @@ function ItemsPricing() {
   const openEdit = (item) => setModalItem({
     ...item,
     images: item.images || [],
+    // Shown to 2 decimals (the saved figure can carry 4); saving re-derives it.
+    rate: item.rate > 0 ? Number(item.rate).toFixed(2) : item.rate,
     rateWithGst: item.rate > 0 ? (item.rate * (1 + (item.gst || 0) / 100)).toFixed(2) : "",
   });
   const closeModal = () => setModalItem(null);
